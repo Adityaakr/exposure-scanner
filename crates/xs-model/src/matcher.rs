@@ -36,7 +36,9 @@ pub enum MatcherKind {
     MachoToken,
     /// Tracking domains declared in a `PrivacyInfo.xcprivacy` file.
     PrivacyManifest,
-    /// The host of the update feed an app's own property list names.
+    /// The host of the update feed an app's own property list names. The
+    /// collector reports that host as itself; a rule has no tokens of this
+    /// kind.
     UpdateFeed,
 }
 
@@ -86,7 +88,8 @@ impl MatcherKind {
     }
 
     /// The boundaries a token of this kind may use. The first is the default
-    /// for kinds whose tokens may be written as bare strings.
+    /// for kinds whose tokens may be written as bare strings. A kind with
+    /// none takes no tokens: it is a kind of proof only.
     #[must_use]
     pub const fn boundaries(self) -> &'static [Boundary] {
         match self {
@@ -95,7 +98,8 @@ impl MatcherKind {
                 &[Boundary::Exact]
             }
             Self::ManifestComponent | Self::MachoObjcClass => &[Boundary::Exact, Boundary::Prefix],
-            Self::PrivacyManifest | Self::UpdateFeed => &[Boundary::Exact, Boundary::Host],
+            Self::PrivacyManifest => &[Boundary::Exact, Boundary::Host],
+            Self::UpdateFeed => &[],
             Self::DexString => &[Boundary::Host, Boundary::Word, Boundary::Exact, Boundary::None],
             Self::ContentLiteral | Self::MachoToken => {
                 &[Boundary::Host, Boundary::Word, Boundary::None]
@@ -104,7 +108,8 @@ impl MatcherKind {
     }
 
     /// The boundary a bare-string token gets, or `None` for content matchers,
-    /// whose tokens must state their boundary.
+    /// whose tokens must state their boundary, and for a kind that takes no
+    /// tokens.
     #[must_use]
     pub const fn default_boundary(self) -> Option<Boundary> {
         if self.is_content() {
@@ -202,6 +207,9 @@ mod tests {
     #[test]
     fn content_matchers_have_no_default_boundary() {
         for kind in MatcherKind::ALL {
+            if kind == MatcherKind::UpdateFeed {
+                continue;
+            }
             assert!(!kind.boundaries().is_empty(), "{kind}");
             match kind.default_boundary() {
                 Some(boundary) => {
@@ -212,6 +220,14 @@ mod tests {
             }
         }
         assert_eq!(MatcherKind::ContentLiteral.to_string(), "content_literal");
+    }
+
+    /// The update feed is reported as its host and mapped to nothing by a
+    /// rule, so the kind offers a token no boundary at all.
+    #[test]
+    fn the_update_feed_takes_no_tokens() {
+        assert_eq!(MatcherKind::UpdateFeed.boundaries(), []);
+        assert_eq!(MatcherKind::UpdateFeed.default_boundary(), None);
     }
 
     #[test]

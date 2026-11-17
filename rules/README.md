@@ -73,12 +73,17 @@ the token as that value is stored:
 | `macho_token` | Searched for in the bytes of a Mach-O file outside its sections of instructions and outside an encrypted part. Not searched for in a runtime, such as a browser engine | `{ lit = "…", at = "host" }` |
 | `content_literal` | Besides script files: searched for in a section that holds script text, such as `__BUN,__bun` | `{ lit = "sentry.javascript.", at = "word" }` |
 | `privacy_manifest` | A host listed under `NSPrivacyTrackingDomains` in a `PrivacyInfo.xcprivacy` file, in lowercase, without scheme, port or trailing dot | `{ lit = "i.posthog.com", at = "host" }` |
-| `update_feed` | The host of the address under `SUFeedURL` in `Contents/Info.plist`, in the same form. For a hosted update service; an app's own feed host needs no rule | `{ lit = "updates.vendor.example", at = "host" }` |
 
-The last two are declarations: a hit is graded `declares`, not `contains`.
-Every declared host is also reported as itself, with or without a rule, under
-the category `tracking_domain` or `update_feed`. Those two categories are for
-declared hosts; a rule does not use them.
+A `privacy_manifest` hit is a declaration: it is graded `declares`, not
+`contains`. An entry written as an address rather than a bare domain is not
+matched; it is reported as not understood.
+
+Every declared host is also reported as itself, with or without a rule: a
+tracking domain under the category `tracking_domain`, and the host of the
+update feed (`SUFeedURL` in `Contents/Info.plist`) under `update_feed`. Those
+two categories are for declared hosts; a rule does not use them. The update
+feed is reported only that way: `update_feed` is the kind of that proof, not a
+matcher a rule may list, and the compiler refuses a rule that does.
 
 ## What the compiler refuses
 

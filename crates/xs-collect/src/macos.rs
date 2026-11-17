@@ -96,9 +96,6 @@ const FRAMEWORKS: &str = "Contents/Frameworks";
 const MAIN_FOLDER: &str = "Contents/MacOS";
 /// The file name Apple fixes for a privacy manifest, wherever it sits.
 const PRIVACY_MANIFEST: &str = "PrivacyInfo.xcprivacy";
-/// The privacy manifest of the app itself. Any other one belongs to
-/// something the app ships: a framework or a resource bundle of a library.
-const APP_PRIVACY_MANIFEST: &str = "Contents/Resources/PrivacyInfo.xcprivacy";
 
 /// Frameworks that are an embedded browser engine. Their binaries hold the
 /// names of ad and analytics hosts as data, so they are `runtime` files and
@@ -111,7 +108,8 @@ pub const RUNTIME_FRAMEWORKS: [&str; 3] = [
     "QtWebEngineCore.framework",
 ];
 
-/// What kind of code a Mach-O file is, from where it sits in the bundle.
+/// What kind of code a Mach-O file is, and whose declaration a privacy
+/// manifest is, from where the file sits in the bundle.
 ///
 /// A file inside a browser-engine framework is `runtime`. Any other file
 /// below a folder named `Frameworks` is a `dependency`: that is where a
@@ -712,31 +710,11 @@ struct Declaration<'a> {
 }
 
 impl Declaration<'_> {
-    /// The records for `hosts`: an edge to each host as itself, and an edge
-    /// to every SDK whose rule names one of them.
+    /// The records for `hosts`: an edge to each host as itself.
     ///
     /// A host is shown whether or not a rule knows it. Who owns it is not
     /// decided here.
-    fn records(
-        &self,
-        hosts: &BTreeSet<String>,
-        subject: &Subject,
-        matchers: &Matchers<'_>,
-        records: &mut Vec<Record>,
-    ) {
-        let mut hits = HitAcc::new();
-        for host in hosts {
-            matchers.match_value(self.matcher, self.scope, host.as_bytes(), &mut hits);
-        }
-        for finding in matchers.judge(&hits).edges {
-            records.push(sdk_edge(
-                subject,
-                finding,
-                self.location,
-                Region::PropertyList,
-                self.scope,
-            ));
-        }
+    fn records(&self, hosts: &BTreeSet<String>, subject: &Subject, records: &mut Vec<Record>) {
         for host in hosts {
             records.push(Record::Edge(EdgeRecord {
                 v: V1,
@@ -938,7 +916,7 @@ fn finish(
         let mut hosts = BTreeSet::new();
         let mut not_hosts: u32 = 0;
         for entry in listed {
-            match declared_host(&entry, host::of_declaration) {
+            match declared_host(&entry, host::of_name) {
                 Some(host) => {
                     hosts.insert(host);
                 }
@@ -953,8 +931,16 @@ fn finish(
             None,
             not_hosts,
         );
-        let scope =
-            if path.as_str() == APP_PRIVACY_MANIFEST { Scope::AppCode } else { Scope::Dependency };
+        let scope = binary_scope(&path);
+        // The listed hosts are one table: every one is matched, then the
+        // hits are judged together.
+        let mut hits = HitAcc::new();
+        for host in &hosts {
+            matchers.match_value(MatcherKind::PrivacyManifest, scope, host.as_bytes(), &mut hits);
+        }
+        for finding in matchers.judge(&hits).edges {
+            records.push(sdk_edge(&subject, finding, &path, Region::PropertyList, scope));
+        }
         Declaration {
             matcher: MatcherKind::PrivacyManifest,
             rule: declared::TRACKING_DOMAIN,
@@ -962,7 +948,7 @@ fn finish(
             location: &path,
             scope,
         }
-        .records(&hosts, &subject, matchers, &mut records);
+        .records(&hosts, &subject, &mut records);
     }
 
     // An address that is left empty declares nothing. One that is there and
@@ -977,7 +963,7 @@ fn finish(
                 location: &location,
                 scope: Scope::AppCode,
             }
-            .records(&BTreeSet::from([host]), &subject, matchers, &mut records),
+            .records(&BTreeSet::from([host]), &subject, &mut records),
             None => plan.gaps.unrecognized(CoverageReason::ParseError, Some(location)),
         }
     }

@@ -64,14 +64,6 @@ pub fn of_url(text: &str) -> Option<String> {
     of_name(host)
 }
 
-/// The host a declaration names, whether it is written as an address or as a
-/// bare name.
-#[must_use]
-pub fn of_declaration(text: &str) -> Option<String> {
-    let text = text.trim_matches(|c: char| c.is_ascii_whitespace());
-    if text.contains("://") { of_url(text) } else { of_name(text) }
-}
-
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
@@ -121,15 +113,18 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_domain_may_be_a_name_or_an_address() {
-        assert_eq!(of_declaration("Tracker.Example.net").as_deref(), Some("tracker.example.net"));
-        assert_eq!(of_declaration("tracker.example.net.").as_deref(), Some("tracker.example.net"));
-        assert_eq!(
-            of_declaration("https://tracker.example.net/collect").as_deref(),
-            Some("tracker.example.net")
-        );
-        for not in ["", ".", "tracker.example.net/collect", "*.example.net", "a b"] {
-            assert_eq!(of_declaration(not), None, "{not}");
+    fn a_bare_name_is_normalized_and_nothing_else_is_a_name() {
+        assert_eq!(of_name("Tracker.Example.net").as_deref(), Some("tracker.example.net"));
+        assert_eq!(of_name("tracker.example.net.").as_deref(), Some("tracker.example.net"));
+        for not in [
+            "",
+            ".",
+            "tracker.example.net/collect",
+            "https://tracker.example.net/collect",
+            "*.example.net",
+            "a b",
+        ] {
+            assert_eq!(of_name(not), None, "{not}");
         }
     }
 
@@ -138,7 +133,7 @@ mod tests {
         /// through again changes nothing.
         #[test]
         fn output_is_a_normalized_host(text in "\\PC{0,60}") {
-            for host in [of_url(&text), of_name(&text), of_declaration(&text)].into_iter().flatten() {
+            for host in [of_url(&text), of_name(&text)].into_iter().flatten() {
                 prop_assert!(is_host(&host));
                 prop_assert_eq!(of_name(&host), Some(host.clone()));
             }

@@ -88,7 +88,6 @@ fn pack() -> Pack {
     use Boundary::{Exact, Host, Prefix, Word};
     use MatcherKind::{
         AppleFramework, ContentLiteral, MachoDylib, MachoObjcClass, MachoToken, PrivacyManifest,
-        UpdateFeed,
     };
     let layer = Layer {
         format: V1,
@@ -119,7 +118,6 @@ fn pack() -> Pack {
                 ],
             ),
             rule("sdk/posthog", &[(PrivacyManifest, "i.posthog.com", Host)]),
-            rule("sdk/hosted-updates", &[(UpdateFeed, "updates.example.com", Exact)]),
         ],
     };
     Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"") }]).unwrap()
@@ -472,13 +470,8 @@ fn the_update_feed_is_reported_as_its_host_at_the_declares_grade() {
     assert_eq!(feed.proof.region, Region::PropertyList);
     assert_eq!(feed.proof.scope, Scope::AppCode);
 
-    // A rule that names the host of a hosted update service fires too.
-    let service = edge(&evidence, "sdk/hosted-updates", MatcherKind::UpdateFeed);
-    assert_eq!(service.object.kind, ObjectKind::Sdk);
-    assert_eq!(service.grade, Grade::Declares);
-    assert_eq!(service.proof.token, "updates.example.com");
-    assert_eq!(service.proof.example.as_deref(), Some("updates.example.com"));
-    assert_eq!(found(&evidence).len(), 2);
+    // The host is reported as itself and as nothing else.
+    assert_eq!(found(&evidence), [("updates.example.com".to_string(), MatcherKind::UpdateFeed)]);
     assert!(coverage(&evidence).is_empty());
 
     // Evidence format rule 5: hosts only. Nothing else of the address is
@@ -525,12 +518,19 @@ fn tracking_domains_in_privacy_manifests_are_declared_hosts() {
     let own = "Contents/Resources/PrivacyInfo.xcprivacy";
     let shipped = "Contents/Frameworks/Kit.framework/Resources/PrivacyInfo.xcprivacy";
     // The app's own manifest: two spellings of one host, one that a rule
-    // names the parent of, and one entry that is not a host.
+    // names the parent of, and two entries that are not host names. Apple
+    // defines the key as a list of domains, so an address is not one.
     write(
         &root.join(own),
-        privacy_manifest(&["Tracker.Example.net", "tracker.example.net.", "eu.i.posthog.com", "*"]),
+        privacy_manifest(&[
+            "Tracker.Example.net",
+            "tracker.example.net.",
+            "eu.i.posthog.com",
+            "*",
+            "https://address.example/v1",
+        ]),
     );
-    write(&root.join(shipped), privacy_manifest(&["https://collect.kit.example/v1"]));
+    write(&root.join(shipped), privacy_manifest(&["collect.kit.example"]));
     let evidence = evidence(&root);
 
     assert_eq!(
@@ -563,13 +563,68 @@ fn tracking_domains_in_privacy_manifests_are_declared_hosts() {
     assert_eq!(theirs.proof.location.as_str(), shipped);
     assert_eq!(theirs.proof.scope, Scope::Dependency);
 
-    // The entry that is not a host was read and not understood.
+    // The entries that are not host names were read and not understood.
     assert_eq!(
         gaps(&evidence),
-        [(own.to_string(), CoverageStatus::Unrecognized, CoverageReason::ParseError, 1)]
+        [(own.to_string(), CoverageStatus::Unrecognized, CoverageReason::ParseError, 2)]
     );
     // Both manifests were read, besides the property list and the binary.
     assert_eq!(facts(&evidence).files_scanned, 4);
+}
+
+/// A privacy manifest is the declaration of whatever holds it, by the folder
+/// rule that says whose code a binary is: an extension or a helper is the
+/// app's own, anything below a `Frameworks` folder is something it ships.
+#[test]
+fn a_privacy_manifest_has_the_scope_of_the_code_beside_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = bundle(dir.path(), &Binary::new().build(), "");
+    let placed = [
+        ("Contents/Resources/PrivacyInfo.xcprivacy", "app.example", Scope::AppCode),
+        (
+            "Contents/PlugIns/Share.appex/Contents/Resources/PrivacyInfo.xcprivacy",
+            "extension.example",
+            Scope::AppCode,
+        ),
+        (
+            "Contents/Library/LoginItems/Helper.app/Contents/Resources/PrivacyInfo.xcprivacy",
+            "helper.example",
+            Scope::AppCode,
+        ),
+        (
+            "Contents/Frameworks/Kit.framework/Resources/PrivacyInfo.xcprivacy",
+            "kit.example",
+            Scope::Dependency,
+        ),
+        (
+            "Contents/Frameworks/Kit.framework/Resources/Kit.bundle/PrivacyInfo.xcprivacy",
+            "bundle.kit.example",
+            Scope::Dependency,
+        ),
+        (
+            "Contents/PlugIns/Share.appex/Contents/Frameworks/Dep.framework/PrivacyInfo.xcprivacy",
+            "dep.example",
+            Scope::Dependency,
+        ),
+    ];
+    for (path, domain, _) in placed {
+        write(&root.join(path), privacy_manifest(&[domain, "eu.i.posthog.com"]));
+    }
+    let evidence = evidence(&root);
+    assert!(coverage(&evidence).is_empty());
+
+    let sdk_edges: Vec<(&str, Scope)> = edges(&evidence)
+        .into_iter()
+        .filter(|edge| edge.object.id == "sdk/posthog")
+        .map(|edge| (edge.proof.location.as_str(), edge.proof.scope))
+        .collect();
+    for (path, domain, scope) in placed {
+        let host = edge(&evidence, domain, MatcherKind::PrivacyManifest);
+        assert_eq!(host.proof.location.as_str(), path);
+        assert_eq!(host.proof.scope, scope, "{path}");
+        // The edge a rule adds for a host carries the same scope.
+        assert!(sdk_edges.contains(&(path, scope)), "{path}: {sdk_edges:#?}");
+    }
 }
 
 #[test]
@@ -657,9 +712,8 @@ fn thread_count_and_path_order_do_not_reach_the_evidence() {
         })
         .collect();
     let reference = evidence_with(&paths, 1);
-    // Per bundle: class name, library, literal, feed host, feed service,
-    // tracking domain.
-    assert_eq!(edges(&reference).len(), 5 * 6);
+    // Per bundle: class name, library, literal, feed host, tracking domain.
+    assert_eq!(edges(&reference).len(), 5 * 5);
     paths.reverse();
     assert_eq!(evidence_with(&paths, 1), reference);
     paths.rotate_left(2);
