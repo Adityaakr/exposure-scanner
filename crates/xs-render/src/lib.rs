@@ -16,13 +16,20 @@
 //! carries, so the numbers a reader sees first cannot disagree with the
 //! findings below them.
 //!
-//! The JSON document is the only renderer so far. The HTML report is task 11
-//! of the build plan.
+//! There are two renderers. [`json`] writes the document a program reads
+//! and a later render starts from. [`html`] writes the one a person reads:
+//! the same findings, grouped by company, with the records behind them, what
+//! the scan covered and what no scan can see.
 #![no_std]
 
 extern crate alloc;
 #[cfg(test)]
 extern crate std;
+
+mod html;
+mod markup;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -35,6 +42,8 @@ use xs_model::record::{Record, RecordId};
 use xs_model::report::{ReportSchema, Scanner};
 use xs_model::{Claim, EvidenceSet, Headline};
 
+pub use crate::html::{CONTENT_SECURITY_POLICY, html};
+
 /// What a report says about how it was made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportMeta {
@@ -42,6 +51,14 @@ pub struct ReportMeta {
     pub scanner: Scanner,
     /// The rule-pack layers the claims were derived with.
     pub packs: Vec<PackRef>,
+    /// Where the scan looked for apps and where it deliberately did not, in
+    /// the scanner's own fixed words, which name no path the user gave.
+    ///
+    /// It is known when the scan itself renders the report. The JSON
+    /// document does not carry it, so a report rendered again from saved
+    /// evidence has `None`, and the HTML report then says that the scope
+    /// is not on record instead of leaving it out.
+    pub scope: Option<String>,
 }
 
 /// Why a report was refused.
@@ -75,6 +92,18 @@ pub enum RenderError {
         /// The record id it cites.
         record: String,
     },
+    /// The rule pack handed to the renderer is not the one the report names,
+    /// so its names would be put on claims derived with other rules.
+    PackMismatch,
+    /// A claim names a company or a category the rule pack does not hold.
+    NotInPack {
+        /// The claim.
+        claim: String,
+        /// What kind of thing is named: `company` or `category`.
+        kind: &'static str,
+        /// The id that does not resolve.
+        id: String,
+    },
     /// The document has no canonical form.
     Canon(CanonError),
 }
@@ -94,6 +123,15 @@ impl fmt::Display for RenderError {
                 "claim {claim} cites record {record} for the app's vendor, which is not an \
                  artifact record of that build"
             ),
+            Self::PackMismatch => {
+                f.write_str("the rule pack is not the one the report says it was derived with")
+            }
+            Self::NotInPack { claim, kind, id } => {
+                write!(
+                    f,
+                    "claim {claim} names the {kind} `{id}`, which the rule pack does not hold"
+                )
+            }
             Self::Canon(error) => write!(f, "report has no canonical form: {error}"),
         }
     }
@@ -292,6 +330,7 @@ mod tests {
                 version: 1,
                 sha256: Sha256Digest::of(b"pack").to_hex(),
             }],
+            scope: None,
         }
     }
 

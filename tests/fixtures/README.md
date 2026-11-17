@@ -61,6 +61,14 @@ strings and no code. The file is written by `fixture()` in
 `EXPOSURE_BLESS=1 cargo test -p exposure` regenerates it and the committed
 reports.
 
+## `report/Fixtures.report.html`
+
+The HTML report of one scan of the three fixtures above (build plan, task
+11), which that scan must reproduce byte for byte on Linux and macOS. It is
+also a sample of the report that can be opened from the repository.
+`EXPOSURE_BLESS=1 cargo test -p exposure` regenerates it, which a change to
+the report's wording or stylesheet, or to the rule pack, calls for.
+
 ## `browser/`
 
 Synthetic browser extensions, the fixture of the extension collector. Each

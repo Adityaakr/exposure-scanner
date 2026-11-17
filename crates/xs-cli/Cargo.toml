@@ -24,6 +24,7 @@ lexopt.workspace = true
 
 [dev-dependencies]
 xs-formats = { workspace = true, features = ["testkit"] }
+xs-render = { workspace = true, features = ["testkit"] }
 tempfile.workspace = true
 
 [lints]

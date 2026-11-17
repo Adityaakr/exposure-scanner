@@ -12,7 +12,16 @@ publish.workspace = true
 xs-model.workspace = true
 serde.workspace = true
 
+[features]
+# Test support for this crate's and other crates' tests: a strict reader of
+# the HTML report and the check that a report is inert. Only
+# dev-dependencies enable it, so it is never part of the shipped scanner.
+testkit = []
+
 [dev-dependencies]
+# Tests render the claims derivation really produces.
+xs-derive.workspace = true
+proptest.workspace = true
 serde_json.workspace = true
 
 [lints]
