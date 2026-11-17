@@ -135,6 +135,9 @@ pub(crate) const fn matcher_words(matcher: MatcherKind) -> &'static str {
         MatcherKind::MachoToken => "Text in a binary's data",
         MatcherKind::PrivacyManifest => "A tracking domain the privacy manifest declares",
         MatcherKind::UpdateFeed => "The update feed the app's property list declares",
+        MatcherKind::UsageDescription => "A usage description in the app's property list",
+        MatcherKind::Entitlement => "An entitlement in the app's code signature",
+        MatcherKind::AndroidPermission => "A permission the app's manifest asks for",
     }
 }
 
@@ -153,6 +156,8 @@ pub(crate) const fn region_words(region: Region) -> &'static str {
         Region::Components => "the components the manifest declares",
         Region::StringIds => "the table of text constants",
         Region::ZipEntries => "the names of the archive's entries",
+        Region::Entitlements => "the entitlements in the code signature",
+        Region::Permissions => "the permissions the manifest asks for",
     }
 }
 

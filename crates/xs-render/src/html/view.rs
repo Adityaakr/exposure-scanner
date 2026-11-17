@@ -11,7 +11,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Reverse;
 
-use xs_model::pack::{Category, Entity, Pack};
+use xs_model::access;
+use xs_model::pack::{Entity, Pack};
 use xs_model::record::{CoverageRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject};
 use xs_model::{Claim, EvidenceSet, Headline, SubjectDigest};
 
@@ -98,10 +99,19 @@ impl<'a> App<'a> {
     }
 }
 
+/// The category of a claim: one of the rule pack's for a channel, one of the
+/// fixed list in [`access`] for an access claim.
+#[derive(Clone, Copy)]
+pub(crate) struct Category<'a> {
+    pub(crate) name: &'a str,
+    /// Whether claims in it count in the headline. No access category does.
+    pub(crate) headline: bool,
+}
+
 /// One claim, with the names the rule pack gives what it mentions.
 pub(crate) struct Finding<'a> {
     pub(crate) claim: &'a Claim,
-    pub(crate) category: &'a Category,
+    pub(crate) category: Category<'a>,
     /// The company the claim names.
     pub(crate) company: Option<&'a Entity>,
     /// The entity that operates the SDK or the host, when it is not the
@@ -150,7 +160,7 @@ pub(crate) struct Found<'a> {
     pub(crate) name: &'a str,
     pub(crate) kind: ObjectKind,
     pub(crate) edge: EdgeType,
-    pub(crate) category: &'a Category,
+    pub(crate) category: Category<'a>,
     /// The company its findings name.
     pub(crate) company: Option<&'a Entity>,
     /// Whether any of its findings counts in the headline.
@@ -325,8 +335,14 @@ fn finding<'a>(claim: &'a Claim, pack: &'a Pack) -> Result<Finding<'a>, RenderEr
     };
     let entity = |id: &'a str| pack.entity(id).ok_or_else(|| unknown("company", id));
 
-    let category =
-        pack.category(&claim.category).ok_or_else(|| unknown("category", &claim.category))?;
+    let category = match claim.edge {
+        EdgeType::Channel => pack
+            .category(&claim.category)
+            .map(|category| Category { name: &category.name, headline: category.headline }),
+        EdgeType::Access => access::category(&claim.category)
+            .map(|category| Category { name: category.name, headline: false }),
+    }
+    .ok_or_else(|| unknown("category", &claim.category))?;
     let company = claim.company.as_deref().map(entity).transpose()?;
     let publisher = claim
         .vendor
@@ -340,6 +356,7 @@ fn finding<'a>(claim: &'a Claim, pack: &'a Pack) -> Result<Finding<'a>, RenderEr
             .and_then(|rule| rule.entity.as_deref())
             .and_then(|id| pack.entity(id)),
         ObjectKind::Host => pack.entity_by_host(&claim.object.id),
+        ObjectKind::Permission => None,
     }
     .filter(|operator| company.is_some_and(|company| company.id != operator.id));
     Ok(Finding { claim, category, company, operator, publisher })

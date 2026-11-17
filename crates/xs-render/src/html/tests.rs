@@ -118,6 +118,7 @@ fn artifact(subject: &Subject, name: &str, team_id: Option<&str>) -> Record {
             team_id: team_id.map(Into::into),
             files_scanned: 41,
             bytes_scanned: 68_219_904,
+            sandbox: None,
         },
     })
 }
@@ -140,6 +141,7 @@ fn sdk(subject: &Subject, rule: &str, matcher: MatcherKind, example: Option<&str
             location: RelPath::new("Contents/Frameworks").unwrap(),
             region: Region::DirEntries,
             scope: Scope::Dependency,
+            max_sdk: None,
         },
     })
 }
@@ -1343,18 +1345,35 @@ fn findings_about_access_have_their_own_part_and_their_own_words() {
     // No heading with nothing under it.
     assert!(!parts(&root).iter().any(|part| part == "What the apps may access"));
 
-    // One that named a company, and one that named none.
-    let on_access = |claims: &mut [Claim], app: &str, object: &str, grade: Grade| {
-        let claim =
-            claims.iter_mut().find(|c| c.subject.id == app && c.object.id == object).unwrap();
-        claim.edge = EdgeType::Access;
-        claim.headline = false;
-        claim.grade = grade;
-        claim.rungs = vec![grade];
-        *claim.id.digest()
-    };
-    let asked = on_access(&mut claims, "org.example.droid", "sdk/acme-analytics", Grade::Requested);
-    let allowed = on_access(&mut claims, "org.example.notes", "sdk/sparkle", Grade::Granted);
+    // Two of the findings become access claims: one that named a company,
+    // and one that named none. An access claim points at a permission of
+    // the fixed list in `xs_model::access`, in a category of that list, and
+    // names no company.
+    let on_access =
+        |claims: &mut [Claim], app: &str, object: &str, permission: &str, grade: Grade| {
+            let claim =
+                claims.iter_mut().find(|c| c.subject.id == app && c.object.id == object).unwrap();
+            let permission = xs_model::access::permission(permission).unwrap();
+            claim.edge = EdgeType::Access;
+            claim.object.kind = ObjectKind::Permission;
+            claim.object.id = permission.id.into();
+            claim.object.name = permission.name.into();
+            claim.category = permission.category.into();
+            claim.company = None;
+            claim.headline = false;
+            claim.grade = grade;
+            claim.rungs = vec![grade];
+            *claim.id.digest()
+        };
+    let asked = on_access(
+        &mut claims,
+        "org.example.droid",
+        "sdk/acme-analytics",
+        "camera",
+        Grade::Requested,
+    );
+    let allowed =
+        on_access(&mut claims, "org.example.notes", "sdk/sparkle", "contacts", Grade::Granted);
     let root = render(&claims, &evidence, &meta(&pack), &pack);
     assert_eq!(rows(&root), 7);
     assert_eq!(
@@ -1401,7 +1420,7 @@ fn findings_about_access_have_their_own_part_and_their_own_words() {
     let entries = found(&root);
     let entry = |name: &str| entries.iter().find(|entry| entry[0] == name).unwrap()[1..].to_vec();
     assert_eq!(
-        entry("Sparkle Component"),
+        entry("Contacts Personal data"),
         [
             "No company named: this is about what the apps may access.",
             "granted 1 of 4 apps may access it, and it was allowed on this device",
@@ -1409,19 +1428,20 @@ fn findings_about_access_have_their_own_part_and_their_own_words() {
             "not counted",
         ]
     );
-    // What Droid may access and what Notes ships are two things, though
-    // they share an object.
-    let acme: Vec<&Vec<String>> =
-        entries.iter().filter(|entry| entry[0] == "AcmeAnalytics Analytics").collect();
-    let facts: Vec<(&str, &str)> =
-        acme.iter().map(|entry| (entry[2].as_str(), entry[3].as_str())).collect();
     assert_eq!(
-        facts,
+        entry("Camera Camera, microphone and screen"),
         [
-            ("contains ships in 1 of 4 apps", "In Notes"),
-            ("requested 1 of 4 apps may access it", "In Droid"),
+            "No company named: this is about what the apps may access.",
+            "requested 1 of 4 apps may access it",
+            "In Droid",
+            "not counted",
         ]
     );
+    // What Notes ships stays a channel of its own.
+    let acme: Vec<&Vec<String>> =
+        entries.iter().filter(|entry| entry[0] == "AcmeAnalytics Analytics").collect();
+    assert_eq!(acme.len(), 1);
+    assert_eq!(acme[0][2..4], ["contains ships in 1 of 4 apps", "In Notes"]);
 }
 
 #[test]

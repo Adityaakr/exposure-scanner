@@ -294,7 +294,7 @@ fn found_item(page: &mut Markup, view: &View<'_>, thing: &Found<'_>, scanned: u6
     page.open_class("p", "thing");
     page.element("strong", &[], thing.name);
     page.raw(" ");
-    page.classed("span", "tag", &thing.category.name);
+    page.classed("span", "tag", thing.category.name);
     page.close();
     page.raw("\n");
 
@@ -307,7 +307,7 @@ fn found_item(page: &mut Markup, view: &View<'_>, thing: &Found<'_>, scanned: u6
         (None, EdgeType::Channel, ObjectKind::Host) => {
             page.raw("No company named: a host the rule pack lists under no company.");
         }
-        (None, EdgeType::Access, _) => {
+        (None, EdgeType::Access, _) | (None, _, ObjectKind::Permission) => {
             page.raw("No company named: this is about what the apps may access.");
         }
     }
@@ -667,7 +667,7 @@ fn finding_block(page: &mut Markup, finding: &Finding<'_>, evidence: &EvidenceSe
     page.open("h5", &[]);
     page.text(&claim.object.name);
     page.raw(" ");
-    page.classed("span", "tag", &finding.category.name);
+    page.classed("span", "tag", finding.category.name);
     page.close();
     page.raw("\n");
 
@@ -679,7 +679,7 @@ fn finding_block(page: &mut Markup, finding: &Finding<'_>, evidence: &EvidenceSe
     page.raw("\n<dl class=\"facts\">\n");
 
     match (claim.edge, claim.object.kind, finding.company) {
-        (EdgeType::Access, _, _) => {}
+        (EdgeType::Access, _, _) | (_, ObjectKind::Permission, _) => {}
         (EdgeType::Channel, ObjectKind::Sdk, Some(_)) => {
             fact(page, "Rule", |page| code(page, &claim.object.id));
         }
@@ -799,7 +799,7 @@ fn counted(page: &mut Markup, finding: &Finding<'_>) {
         page.raw("Not counted: the finding names no company.");
     } else if !finding.category.headline {
         page.raw("Not counted: ");
-        page.text(&finding.category.name);
+        page.text(finding.category.name);
         page.raw(" is not one of the counted categories.");
     } else {
         page.raw("Not counted.");

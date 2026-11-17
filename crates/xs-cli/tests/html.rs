@@ -153,6 +153,39 @@ fn the_page_for_the_fixtures_matches_the_committed_bytes() {
     read(&golden);
 }
 
+/// An app that asks for the camera gets an access claim, whose category is
+/// one of the fixed access list's, not the rule pack's. The page shows it
+/// under what the apps may access, with the names that list gives
+/// (`xs_model::access`: permission `camera`, category `capture`).
+#[test]
+fn what_an_app_may_access_is_on_the_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("Calls.app");
+    fs::create_dir_all(app.join("Contents")).unwrap();
+    fs::write(
+        app.join("Contents/Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>org.example.calls</string>
+<key>CFBundleShortVersionString</key><string>3.1</string>
+<key>CFBundleName</key><string>Calls</string>
+<key>NSCameraUsageDescription</key><string>Calls shows you to the people you call.</string>
+</dict></plist>"#,
+    )
+    .unwrap();
+
+    let page = read(&scan(&[&app], 1).html);
+    let access: Vec<String> = page
+        .descendants()
+        .into_iter()
+        .filter(|element| element.has_class("access"))
+        .map(Element::text)
+        .collect();
+    assert_eq!(access.len(), 1, "one section for what the apps may access");
+    assert!(access[0].contains("Camera"), "{}", access[0]);
+    assert!(access[0].contains("Camera, microphone and screen"), "{}", access[0]);
+}
+
 /// Property 3: one page across input order and thread count, from a scan
 /// and from its saved evidence.
 #[test]
