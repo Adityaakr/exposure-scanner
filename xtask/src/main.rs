@@ -38,8 +38,10 @@ guarantees
   netprobe                control program: exits 0 if it can open a socket, 3 if blocked
 
 speed
-  bench [--strict] [PATH...]  time a scan at 1, 2, 4 and 8 threads and measure its peak
-                          memory; gates: 3x at 8 threads, under 200 MB, one report.
+  bench [--strict] [PATH...]  time a scan at 1, 2, 4 and 8 threads, and with nothing
+                          changed since the last one, and measure its peak memory;
+                          gates: 3x at 8 threads, under 200 MB, under 5 s when
+                          nothing changed, one report.
                           Without a PATH: the apps installed on this machine.
                           --strict: no gate may be skipped
 ";

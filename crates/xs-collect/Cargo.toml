@@ -12,7 +12,12 @@ publish.workspace = true
 xs-model.workspace = true
 xs-formats.workspace = true
 xs-match.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 rayon.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
 
 [dev-dependencies]
 xs-formats = { workspace = true, features = ["testkit"] }

@@ -1,12 +1,13 @@
-//! The scan benchmark: how the scan scales with threads, and how much
-//! memory it takes.
+//! The scan benchmark: how the scan scales with threads, how much memory it
+//! takes, and how long it takes when nothing has changed.
 //!
-//! Design report, section 6.5, three of its gates:
+//! Design report, section 6.5, four of its gates:
 //!
 //! | Benchmark | Method | Gate |
 //! |---|---|---|
 //! | Scaling | 1, 2, 4, 8 threads on a size-sorted list | At least 3x at 8 threads |
 //! | Memory | Peak resident size during the scan | Under 200 MB |
+//! | Warm scan | Populated cache, no changes | Under 5 s |
 //! | Determinism | The report of every run | One report |
 //!
 //! The scaling gate is the one that catches the splitting trap (section 6.2
@@ -19,6 +20,14 @@
 //! it, read with `/usr/bin/time`. One run that is not measured goes first,
 //! so that every measured run reads from the page cache: this benchmark is
 //! about the schedule, not about the disk.
+//!
+//! The scaling runs keep no results cache, or all but the first would read
+//! nothing. The warm scan is measured after them: one run fills a cache in
+//! a folder of the benchmark's own, never the user's, and the runs after it
+//! find every app unchanged. The scan keeps its cache in the user's cache
+//! folder and takes no option for another, so those runs are given a home
+//! folder of the benchmark's own. Its `Applications` leads to the user's,
+//! so that a scan of the installed apps covers the same apps.
 //!
 //! The scanner has no clock and takes no measurements of itself; all of that
 //! is here, in tooling that never ships.
@@ -43,6 +52,8 @@ const RUNS: usize = 3;
 const MIN_SPEEDUP_HUNDREDTHS: u128 = 300;
 /// The memory gate: peak resident size, in bytes.
 const MAX_PEAK_BYTES: u64 = 200_000_000;
+/// The warm-scan gate: a scan that finds nothing changed takes less.
+const MAX_WARM: Duration = Duration::from_secs(5);
 /// The least a scan has to read for its scaling to mean anything. Below
 /// this, starting the process and the threads is most of the time.
 const MIN_SCALING_BYTES: u64 = 1 << 30;
@@ -54,6 +65,18 @@ struct Run {
     elapsed: Duration,
     peak_bytes: u64,
     report: Vec<u8>,
+    /// What the scan told the terminal.
+    summary: String,
+}
+
+/// How many apps a scan did not read, since its cache held them unchanged,
+/// and how many it read: from the line of its summary that says so. `None`
+/// if the scan did not use a cache.
+fn cache_use(summary: &str) -> Option<(u64, u64)> {
+    let said = summary.lines().find_map(|line| line.strip_prefix("exposure: cache: "))?;
+    let (unchanged, read) = said.split_once(", ")?;
+    let count = |text: &str| text.split(' ').next()?.parse::<u64>().ok();
+    Some((count(unchanged)?, count(read)?))
 }
 
 /// What a scan covered, from its report.
@@ -77,9 +100,16 @@ fn peak_bytes(usage: &str) -> Option<u64> {
     }
 }
 
-/// Runs one scan of `paths` at `threads` threads and measures it. Files it
-/// needs are written into `dir`.
-fn run(exposure: &Path, paths: &[String], threads: usize, dir: &Path) -> Result<Run> {
+/// Runs one scan of `paths` at `threads` threads and measures it, with the
+/// results cache of the user whose home folder is `home`, or without one.
+/// Files it needs are written into `dir`.
+fn run(
+    exposure: &Path,
+    paths: &[String],
+    threads: usize,
+    home: Option<&Path>,
+    dir: &Path,
+) -> Result<Run> {
     let usage = dir.join("usage.txt");
     let report = dir.join("report.json");
     let mut command = Command::new(TIME);
@@ -90,6 +120,10 @@ fn run(exposure: &Path, paths: &[String], threads: usize, dir: &Path) -> Result<
     }
     command.arg("-o").arg(&usage).arg(exposure).arg("scan");
     command.arg("--threads").arg(threads.to_string()).arg("--json").arg(&report);
+    match home {
+        Some(home) => command.env("HOME", home).env_remove("XDG_CACHE_HOME"),
+        None => command.arg("--no-cache"),
+    };
     command.arg("--").args(paths);
 
     let started = Instant::now();
@@ -102,7 +136,8 @@ fn run(exposure: &Path, paths: &[String], threads: usize, dir: &Path) -> Result<
     }
     let peak_bytes = peak_bytes(&crate::read_text(&usage)?)
         .ok_or_else(|| format!("cannot find the peak memory in what {TIME} wrote"))?;
-    Ok(Run { elapsed, peak_bytes, report: crate::read(&report)? })
+    let summary = String::from_utf8_lossy(&output.stderr).into_owned();
+    Ok(Run { elapsed, peak_bytes, report: crate::read(&report)?, summary })
 }
 
 /// What the scan behind `report` covered.
@@ -169,7 +204,8 @@ pub(crate) fn run_all(args: &[&str]) -> Result<()> {
 
 fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Result<()> {
     // Not measured: it fills the page cache, and says what the load is.
-    let first = run(exposure, paths, THREADS[THREADS.len() - 1], dir)?;
+    let most = THREADS[THREADS.len() - 1];
+    let first = run(exposure, paths, most, None, dir)?;
     let load = load(&first.report)?;
     let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     let megabytes = |bytes: u64| bytes / 1_000_000;
@@ -188,7 +224,7 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
     for threads in THREADS {
         let mut best: Option<Run> = None;
         for _ in 0..RUNS {
-            let this = run(exposure, paths, threads, dir)?;
+            let this = run(exposure, paths, threads, None, dir)?;
             same_report &= this.report == first.report;
             peak = peak.max(this.peak_bytes);
             if best.as_ref().is_none_or(|best| this.elapsed < best.elapsed) {
@@ -205,6 +241,29 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
             megabytes(best.peak_bytes),
         );
         fastest.push(best.elapsed);
+    }
+
+    // The warm scan: one run fills the cache, the next ones find it full.
+    let home = dir.join("home");
+    fs::create_dir(&home).map_err(|error| format!("cannot create {}: {error}", home.display()))?;
+    #[cfg(unix)]
+    if let Some(apps) = std::env::home_dir().map(|home| home.join("Applications"))
+        && apps.is_dir()
+    {
+        std::os::unix::fs::symlink(&apps, home.join("Applications"))
+            .map_err(|error| format!("cannot link {}: {error}", apps.display()))?;
+    }
+    let filled = run(exposure, paths, most, Some(&home), dir)?;
+    same_report &= filled.report == first.report;
+    peak = peak.max(filled.peak_bytes);
+    let mut warm: Option<Run> = None;
+    for _ in 0..RUNS {
+        let this = run(exposure, paths, most, Some(&home), dir)?;
+        same_report &= this.report == first.report;
+        peak = peak.max(this.peak_bytes);
+        if warm.as_ref().is_none_or(|warm| this.elapsed < warm.elapsed) {
+            warm = Some(this);
+        }
     }
 
     let mut failed = Vec::new();
@@ -227,7 +286,6 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
         (Some(base), Some(most)) => speedup(*base, *most),
         _ => 0,
     };
-    let most = THREADS[THREADS.len() - 1];
     let gate = hundredths(MIN_SPEEDUP_HUNDREDTHS);
     if cores < most {
         let detail = format!("needs {most} cores to mean anything, and this machine has {cores}");
@@ -249,12 +307,36 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
             megabytes(MAX_PEAK_BYTES)
         ),
     );
+    let seconds = |elapsed: Duration| hundredths(elapsed.as_millis() / 10);
+    match warm.as_ref().map(|warm| (warm.elapsed, cache_use(&warm.summary))) {
+        // A scan that read every app again is not a warm scan, however long
+        // it took: there is nothing here to hold against the gate.
+        None | Some((_, None | Some((0, _)))) => {
+            let said = warm.as_ref().and_then(|warm| warm.summary.lines().last());
+            let detail = format!(
+                "the cache spared the scan nothing, so there is no warm scan to time: {}",
+                said.unwrap_or("the scan said nothing")
+            );
+            check("warm scan", None, detail);
+        }
+        Some((elapsed, Some((unchanged, read)))) => {
+            let detail = format!(
+                "{} s with {unchanged} of {} apps unchanged and not read, against {} s to read \
+                 them all and fill the cache (gate: under {} s)",
+                seconds(elapsed),
+                unchanged + read,
+                seconds(filled.elapsed),
+                MAX_WARM.as_secs()
+            );
+            check("warm scan", Some(elapsed < MAX_WARM), detail);
+        }
+    }
     check(
         "determinism",
         Some(same_report),
         format!(
-            "{} runs at {} thread counts, {}",
-            1 + RUNS * THREADS.len(),
+            "{} runs at {} thread counts, with the cache off, empty and full, {}",
+            2 + RUNS * (THREADS.len() + 1),
             THREADS.len(),
             if same_report { "one report, byte for byte" } else { "and their reports differ" }
         ),
@@ -286,6 +368,24 @@ mod tests {
         assert_eq!(peak_bytes(usage), Some(43_565_056));
         assert_eq!(peak_bytes(""), None);
         assert_eq!(peak_bytes("no numbers here\n"), None);
+    }
+
+    #[test]
+    fn what_the_cache_spared_a_scan_is_read_from_its_summary() {
+        let summary = |cache: &str| {
+            format!(
+                "exposure: scanned 16 apps (11658 files, 6813162633 bytes): 19 claims, 2 coverage \
+                 notes\nexposure: scope: the paths given and nothing else\n{cache}"
+            )
+        };
+        let used = "exposure: cache: 15 apps unchanged since an earlier scan and not read again, \
+                    1 app read\n";
+        assert_eq!(cache_use(&summary(used)), Some((15, 1)));
+        let cold = "exposure: cache: 0 apps unchanged since an earlier scan and not read again, \
+                    16 apps read\n";
+        assert_eq!(cache_use(&summary(cold)), Some((0, 16)));
+        assert_eq!(cache_use(&summary("")), None);
+        assert_eq!(cache_use(&summary("exposure: cache: not used: cannot use /x: denied\n")), None);
     }
 
     #[test]

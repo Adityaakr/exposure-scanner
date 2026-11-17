@@ -875,6 +875,8 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "rayon",
+ "rustix",
+ "serde",
  "serde_json",
  "tempfile",
  "xs-formats",

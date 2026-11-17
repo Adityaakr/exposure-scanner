@@ -100,7 +100,11 @@ fn plural(count: u64, noun: &str) -> String {
 pub(crate) fn scan(args: &args::Scan) -> Result<()> {
     let pack = built_in_pack()?;
     let matchers = Matchers::build(&pack).map_err(|error| error.to_string())?;
-    let options = xs_collect::ScanOptions { threads: args.threads };
+    let cache_dir = match &args.cache {
+        args::Cache::Default => xs_collect::cache::default_dir(),
+        args::Cache::Off => None,
+    };
+    let options = xs_collect::ScanOptions { threads: args.threads, cache: cache_dir.as_deref() };
     let outcome =
         xs_collect::scan(&args.paths, &matchers, options).map_err(|error| error.to_string())?;
     let report = render(&outcome.evidence, &pack, this_scanner())?;
@@ -127,6 +131,23 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
         plural(headline.apps_third_party.into(), "app"),
         outcome.scope,
     );
+    // What the cache did. It names no folder unless the folder is at fault.
+    let cache = match (&args.cache, &cache_dir, &outcome.cache_failure) {
+        (args::Cache::Off, ..) => None,
+        (_, None, _) => Some(String::from("not used: there is no home folder to keep it in")),
+        (_, Some(_), Some(xs_collect::CacheError::Root)) => {
+            Some(String::from("not used when run as root"))
+        }
+        (_, Some(_), Some(error)) => Some(format!("not used: {error}")),
+        (_, Some(_), None) => Some(format!(
+            "{} unchanged since an earlier scan and not read again, {} read",
+            plural(stats.reused, "app"),
+            plural(stats.artifacts.saturating_sub(stats.reused), "app"),
+        )),
+    };
+    if let Some(cache) = cache {
+        let _ = writeln!(std::io::stderr(), "exposure: cache: {cache}");
+    }
     Ok(())
 }
 

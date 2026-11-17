@@ -98,8 +98,9 @@ jobs:
       # The committed fixtures are far too small for the scaling gate, which
       # is skipped here and is checked on the reference laptop with
       # `cargo xtask bench --strict`. What this run does check: the benchmark
-      # itself works, memory stays under its gate, and 13 runs at 1 to 8
-      # threads give one report.
+      # itself works, memory stays under its gate, a scan that finds its
+      # cache full reads nothing, and 17 runs at 1 to 8 threads, with the
+      # cache off, empty and full, give one report.
       - name: Benchmark runs, within its memory gate, with one report
         run: cargo xtask bench tests/fixtures/macos tests/fixtures/android/Skeleton.apk
 
