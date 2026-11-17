@@ -41,9 +41,9 @@
 //! it is read, has no hash, so nothing can be said about what it holds. It
 //! does not fail the scan, which may cover many other apps: it becomes one
 //! `coverage` record that says the package was skipped as `unreadable`,
-//! whichever of the two happened. With no
-//! hash, the subject of that record has the digest `unread` and is told from
-//! other packages by the name of its file, the one thing known about it.
+//! whichever of the two happened. With no hash, the subject of that record
+//! has the digest `unread` and is told from other packages by the name of
+//! its file, the one thing known about it.
 //!
 //! # Budgets
 //!
