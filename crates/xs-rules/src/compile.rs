@@ -380,9 +380,7 @@ fn lower_match_table(
 }
 
 fn matcher_kind(name: &str) -> Option<MatcherKind> {
-    MatcherKind::ALL
-        .into_iter()
-        .find(|kind| kind.as_str() == name && !kind.boundaries().is_empty())
+    MatcherKind::ALL.into_iter().find(|kind| kind.as_str() == name && !kind.boundaries().is_empty())
 }
 
 fn boundary(name: &str) -> Option<Boundary> {

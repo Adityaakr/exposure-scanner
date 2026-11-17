@@ -302,7 +302,8 @@ privacy_manifest = ["eu.i.posthog.com", { lit = "i.posthog.com", at = "host" }]
     assert_eq!(tokens, [("eu.i.posthog.com", Boundary::Exact), ("i.posthog.com", Boundary::Host)]);
 
     for refused in ["word", "prefix", "none"] {
-        let table = format!(r#"privacy_manifest = [{{ lit = "i.posthog.com", at = "{refused}" }}]"#);
+        let table =
+            format!(r#"privacy_manifest = [{{ lit = "i.posthog.com", at = "{refused}" }}]"#);
         assert_one(
             &problems_for(&with_match(&table)),
             &format!("cannot use the `{refused}` boundary"),
