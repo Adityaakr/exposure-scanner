@@ -1,28 +1,76 @@
-# The companies rules may name. Every entry needs a `source`: the page on the
-# company's own site that states the legal entity. Do not copy entries from
-# Tracker Radar, TrackerDB, Disconnect, the IAB vendor list or suss.json;
-# their licences do not allow it (see ../README.md).
+# The companies rules may name, and how each company's own apps and hosts
+# are recognised.
+#
+# Every entry needs `sources`: the page on the company's own site that states
+# the legal entity, and a page for each fact below that the first does not
+# show, such as a Team ID or an owner.
+#
+# The identifiers decide who is first party (see ../README.md):
+#
+#   team_ids  Apple Team IDs the company signs its apps with. Asked first.
+#   app_ids   App ids of the company's apps, in lowercase. An entry covers
+#             the app ids below it: `com.example` covers `com.example.Mail`.
+#             Asked second, and not believed against a signature.
+#   domains   Domains the company operates. An entry covers the hosts below
+#             it. A host under no listed domain is shown as unmapped.
+#
+# An identifier names one entity, so list it once. An app id entry is the
+# company's own domain read backwards, or an app id the company documents.
+#
+# Do not copy entries from Tracker Radar, TrackerDB, Disconnect, the IAB
+# vendor list or suss.json; their licences do not allow it (see ../README.md).
+
+# github.io and githubusercontent.com hold what GitHub's users publish. The
+# entity is the company that operates the hosts, not the author of a page.
+# No app id is listed: `com.github.<user>` is a name many unrelated
+# developers give their apps.
+[[entity]]
+id = "github"
+name = "GitHub, Inc."
+parent = "microsoft"
+website = "https://github.com/"
+domains = ["github.com", "github.io", "githubusercontent.com"]
+sources = [
+    "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
+    "https://blogs.microsoft.com/blog/2018/10/26/microsoft-completes-github-acquisition/",
+    "https://bounty.github.com/targets/githubusercontent-com.html",
+    "https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages",
+]
 
 [[entity]]
 id = "google"
 name = "Google LLC"
 website = "https://about.google/"
-source = "https://policies.google.com/terms"
+team_ids = ["EQHXZ8M8AV"]
+app_ids = ["com.google"]
+domains = ["google.com"]
+sources = [
+    "https://policies.google.com/terms",
+    "https://developers.google.com/admob/ios/rel-notes",
+]
 
 [[entity]]
 id = "microsoft"
 name = "Microsoft Corporation"
 website = "https://www.microsoft.com/"
-source = "https://www.microsoft.com/en-us/servicesagreement"
+team_ids = ["UBF8T346G9"]
+app_ids = ["com.microsoft"]
+domains = ["microsoft.com"]
+sources = [
+    "https://www.microsoft.com/en-us/servicesagreement",
+    "https://learn.microsoft.com/en-us/defender-endpoint/mac-install-with-intune",
+]
 
 [[entity]]
 id = "posthog"
 name = "PostHog Inc."
 website = "https://posthog.com/"
-source = "https://posthog.com/terms"
+domains = ["posthog.com"]
+sources = ["https://posthog.com/terms"]
 
 [[entity]]
 id = "sentry"
 name = "Functional Software, Inc. (Sentry)"
 website = "https://sentry.io/"
-source = "https://sentry.io/terms/"
+domains = ["sentry.io"]
+sources = ["https://sentry.io/terms/"]

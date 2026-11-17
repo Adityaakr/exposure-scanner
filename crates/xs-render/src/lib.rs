@@ -7,8 +7,14 @@
 //!
 //! Every renderer first checks the **honesty** property: each claim must cite
 //! at least one record, and every cited record must be in the evidence set
-//! that travels with the report. A report that cannot show the record behind
-//! a finding is refused rather than written.
+//! that travels with the report. The same holds for what a claim says about
+//! the app's vendor: a vendor known by its signature must cite the record
+//! that holds the Team ID. A report that cannot show the record behind a
+//! finding is refused rather than written.
+//!
+//! The headline counts are tallied here, from the very claims the document
+//! carries, so the numbers a reader sees first cannot disagree with the
+//! findings below them.
 //!
 //! The JSON document is the only renderer so far. The HTML report is task 11
 //! of the build plan.
@@ -25,9 +31,9 @@ use core::fmt;
 use serde::Serialize;
 use xs_model::canon::{self, CanonError};
 use xs_model::pack::PackRef;
-use xs_model::record::Record;
+use xs_model::record::{Record, RecordId};
 use xs_model::report::{ReportSchema, Scanner};
-use xs_model::{Claim, EvidenceSet};
+use xs_model::{Claim, EvidenceSet, Headline};
 
 /// What a report says about how it was made.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +66,15 @@ pub enum RenderError {
         /// The record id it cites.
         record: String,
     },
+    /// A claim says who publishes the app and cites, for that, a record that
+    /// is not an artifact record of the same build, and so holds no
+    /// signature of it.
+    NotTheArtifact {
+        /// The claim.
+        claim: String,
+        /// The record id it cites.
+        record: String,
+    },
     /// The document has no canonical form.
     Canon(CanonError),
 }
@@ -74,6 +89,11 @@ impl fmt::Display for RenderError {
             Self::NotAnEdge { claim, record } => {
                 write!(f, "claim {claim} cites record {record}, which is not an edge")
             }
+            Self::NotTheArtifact { claim, record } => write!(
+                f,
+                "claim {claim} cites record {record} for the app's vendor, which is not an \
+                 artifact record of that build"
+            ),
             Self::Canon(error) => write!(f, "report has no canonical form: {error}"),
         }
     }
@@ -92,23 +112,33 @@ impl From<CanonError> for RenderError {
 /// # Errors
 ///
 /// Returns the first claim that cites nothing, cites a record missing from
-/// `evidence`, or cites a record that is not an edge.
+/// `evidence`, cites a record that is not an edge, or cites for the app's
+/// vendor a record that is not an artifact record of the same build.
 pub fn check_honest(claims: &[Claim], evidence: &EvidenceSet) -> Result<(), RenderError> {
     for claim in claims {
         if claim.evidence.is_empty() {
             return Err(RenderError::NoEvidence { claim: claim.id.to_string() });
         }
+        let missing = |id: &RecordId| RenderError::MissingEvidence {
+            claim: claim.id.to_string(),
+            record: id.to_string(),
+        };
         for id in &claim.evidence {
-            match evidence.get(id) {
-                Some(Record::Edge(_)) => {}
-                Some(_) => {
+            match evidence.get(id).ok_or_else(|| missing(id))? {
+                Record::Edge(_) => {}
+                _ => {
                     return Err(RenderError::NotAnEdge {
                         claim: claim.id.to_string(),
                         record: id.to_string(),
                     });
                 }
-                None => {
-                    return Err(RenderError::MissingEvidence {
+            }
+        }
+        for id in claim.vendor.iter().flat_map(|vendor| &vendor.evidence) {
+            match evidence.get(id).ok_or_else(|| missing(id))? {
+                Record::Artifact(artifact) if artifact.subject.digest == claim.subject.digest => {}
+                _ => {
+                    return Err(RenderError::NotTheArtifact {
                         claim: claim.id.to_string(),
                         record: id.to_string(),
                     });
@@ -126,6 +156,7 @@ struct ReportRef<'a> {
     schema: ReportSchema,
     scanner: &'a Scanner,
     packs: &'a [PackRef],
+    headline: Headline,
     claims: &'a [Claim],
     evidence: &'a EvidenceSet,
 }
@@ -134,7 +165,7 @@ struct ReportRef<'a> {
 ///
 /// The document carries the claims and the complete evidence set, so every
 /// finding can be traced to its raw record and the report can be rendered
-/// again from the file alone.
+/// again from the file alone. Its headline is [`Headline::of`] the claims.
 ///
 /// # Errors
 ///
@@ -149,6 +180,7 @@ pub fn json(
         schema: ReportSchema,
         scanner: &meta.scanner,
         packs: &meta.packs,
+        headline: Headline::of(claims),
         claims,
         evidence,
     };
@@ -161,7 +193,7 @@ pub fn json(
 mod tests {
     use alloc::vec;
 
-    use xs_model::claim::{ClaimId, ClaimKey, ClaimObject, Confidence, Party};
+    use xs_model::claim::{ClaimId, ClaimKey, ClaimObject, Confidence, Party, Vendor, VendorBasis};
     use xs_model::record::{
         ArtifactRecord, Collector, EdgeRecord, EdgeType, Facts, Grade, ObjectKind, ObjectRef,
         Platform, Proof, Region, Scope, Subject, SubjectKind, V1,
@@ -232,7 +264,14 @@ mod tests {
             },
             company: Some("sentry".into()),
             category: "crash_reporting".into(),
-            party: Party::Unknown,
+            headline: false,
+            party: Party::Third,
+            vendor: Some(Vendor {
+                company: None,
+                by: None,
+                domain: Some("example.com".into()),
+                evidence: vec![],
+            }),
             grade: Grade::Contains,
             rungs: vec![Grade::Contains],
             confidence: Confidence::High,
@@ -329,11 +368,83 @@ mod tests {
         ));
     }
 
+    /// A claim whose vendor is known by its signature, citing `cited` for it.
+    fn signed_claim(edge_id: RecordId, cited: Vec<RecordId>) -> Claim {
+        let mut claim = claim(vec![edge_id]);
+        claim.party = Party::First;
+        claim.vendor = Some(Vendor {
+            company: Some("sentry".into()),
+            by: Some(VendorBasis::TeamId),
+            domain: Some("example.com".into()),
+            evidence: cited,
+        });
+        claim
+    }
+
+    /// The party of a finding rests on who signed the app, so the record
+    /// that holds the signature's Team ID is part of what the report must
+    /// be able to show.
+    #[test]
+    fn a_vendor_known_by_its_signature_must_cite_the_artifact_record() {
+        let (_, mut evidence, edge_id, artifact_id) = fixture();
+        let claims = [signed_claim(edge_id, vec![artifact_id])];
+        assert!(json(&claims, &evidence, &meta()).is_ok());
+
+        // An edge holds no signature.
+        let not_an_artifact = [signed_claim(edge_id, vec![edge_id])];
+        assert_eq!(
+            json(&not_an_artifact, &evidence, &meta()).unwrap_err(),
+            RenderError::NotTheArtifact {
+                claim: claims[0].id.to_string(),
+                record: edge_id.to_string()
+            }
+        );
+
+        // Nor does the artifact record of another build.
+        let Record::Artifact(mut other) = artifact() else { unreachable!() };
+        other.subject.digest = SubjectDigest::Bundle(Sha256Digest::of(b"another bundle"));
+        let other_id = evidence.insert(Record::Artifact(other)).unwrap();
+        let another_build = [signed_claim(edge_id, vec![other_id])];
+        assert!(matches!(
+            json(&another_build, &evidence, &meta()),
+            Err(RenderError::NotTheArtifact { .. })
+        ));
+
+        // Delete the record and the render fails, as for any cited record.
+        evidence.remove(&artifact_id).unwrap();
+        assert_eq!(
+            json(&claims, &evidence, &meta()).unwrap_err(),
+            RenderError::MissingEvidence {
+                claim: claims[0].id.to_string(),
+                record: artifact_id.to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn the_headline_is_a_tally_of_the_claims_in_the_document() {
+        let (mut claims, evidence, _, _) = fixture();
+        let headline = |claims: &[Claim]| {
+            let text = json(claims, &evidence, &meta()).unwrap();
+            let report: Report = serde_json::from_str(&text).unwrap();
+            assert_eq!(report.headline, Headline::of(&report.claims));
+            report.headline
+        };
+        // Crash reporting is outside the headline.
+        assert_eq!(headline(&claims), Headline::default());
+        claims[0].headline = true;
+        assert_eq!(
+            headline(&claims),
+            Headline { companies_contacts: 0, companies_contains: 1, apps_third_party: 1 }
+        );
+    }
+
     #[test]
     fn an_empty_scan_is_a_valid_report() {
         let text = json(&[], &EvidenceSet::new(), &meta()).unwrap();
         let report: Report = serde_json::from_str(&text).unwrap();
         assert!(report.claims.is_empty());
         assert!(report.evidence.is_empty());
+        assert_eq!(report.headline, Headline::default());
     }
 }

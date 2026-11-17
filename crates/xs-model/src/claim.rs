@@ -121,14 +121,26 @@ pub struct Claim {
     pub subject: Subject,
     /// What the link points at.
     pub object: ClaimObject,
-    /// The company that owns the object, or `None` for a component: a library
-    /// with no network side of its own, which never becomes a company edge
-    /// and is left out of every count.
+    /// The company behind the object: the one at the top of the ownership
+    /// chain of the entity that operates the SDK or the host. `None` in two
+    /// cases, neither of which counts anywhere. A component is a library
+    /// with no network side of its own. A host the rule pack lists under no
+    /// company is unmapped: it is shown as itself and nobody is named as its
+    /// owner.
     pub company: Option<String>,
     /// The category of the object, from the rule pack's fixed list.
     pub category: String,
+    /// Whether the claim counts in the report's headline: it is a channel,
+    /// it names a company, and its category is one of those the rule pack
+    /// counts there. Hosting is not receiving, so an update feed or a crash
+    /// reporter does not.
+    pub headline: bool,
     /// Whether the company is the app's own vendor.
     pub party: Party,
+    /// Who publishes the app, as far as its files tell, and what `party`
+    /// rests on. `None` when nothing identifies the vendor, or when what
+    /// does contradicts itself.
+    pub vendor: Option<Vendor>,
     /// The highest rung the evidence reaches.
     pub grade: Grade,
     /// Every rung that has evidence, in ascending order. `declares` and
@@ -156,15 +168,61 @@ pub struct ClaimObject {
     pub name: String,
 }
 
+/// Who publishes an app, and how that is known.
+///
+/// Reversing an app id proves nothing about ownership, so the signature
+/// comes first (design report, section 3, M5): the Apple Team ID that the
+/// code signature names, then the app id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Vendor {
+    /// The company the rule pack lists the app under. `None` when the pack
+    /// lists neither its Team ID nor its app id: the vendor is then nobody
+    /// the pack knows, and so none of the companies it names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub company: Option<String>,
+    /// Which identifier the pack lists under `company`. Present exactly when
+    /// `company` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<VendorBasis>,
+    /// The registrable domain the app id spells when read backwards, such as
+    /// `ranchero.com` for `com.ranchero.NetNewsWire-Evergreen`. It is what
+    /// the app says of itself, not a verified fact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    /// The artifact records that hold the Team ID, in id order, when `by` is
+    /// `team_id`. Empty otherwise: the app id is in the claim's subject.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<RecordId>,
+}
+
+/// The identifier a vendor was recognised by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VendorBasis {
+    /// The Apple Team ID the code signature names. The signature is read,
+    /// not verified.
+    TeamId,
+    /// The app id the artifact declares.
+    AppId,
+}
+
 /// Whether the company behind an object is the app's own vendor.
+///
+/// Only a claim that names a company, or is about a host under the app's
+/// own domain, can be first or third party.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Party {
-    /// The company is the app's vendor.
+    /// The company is the app's vendor, or the host is under the domain the
+    /// app's own id spells.
     First,
-    /// The company is someone else.
+    /// The company is someone else: the app belongs to another company the
+    /// rule pack lists, or to nobody it lists.
     Third,
-    /// The app's vendor could not be established, so neither is asserted.
+    /// Neither is asserted. The object names no company (a component, an
+    /// unmapped host), or the app's vendor could not be established, or the
+    /// app id points at the company while nothing confirms it.
     Unknown,
 }
 

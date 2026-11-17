@@ -7,7 +7,7 @@ use std::path::Path;
 use xs_match::Matchers;
 use xs_model::record::Record;
 use xs_model::report::Scanner;
-use xs_model::{EvidenceSet, Pack, Report};
+use xs_model::{EvidenceSet, Headline, Pack, Report};
 use xs_render::ReportMeta;
 use xs_rules::{SignedLayer, TRUSTED_KEYS};
 
@@ -70,16 +70,30 @@ fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
     file.write_all(report.as_bytes()).map_err(fail)
 }
 
+/// A rendered report, and what the terminal summary says about it.
+struct Rendered {
+    /// The JSON document.
+    text: String,
+    /// How many claims it holds.
+    claims: usize,
+    /// Its headline counts.
+    headline: Headline,
+}
+
 /// Derives claims from `evidence` and renders the JSON report.
-fn render(evidence: &EvidenceSet, pack: &Pack, scanner: Scanner) -> Result<(String, usize)> {
+fn render(evidence: &EvidenceSet, pack: &Pack, scanner: Scanner) -> Result<Rendered> {
     let claims = xs_derive::derive(evidence, pack).map_err(|error| error.to_string())?;
     let meta = ReportMeta { scanner, packs: pack.refs() };
     let text = xs_render::json(&claims, evidence, &meta).map_err(|error| error.to_string())?;
-    Ok((text, claims.len()))
+    Ok(Rendered { text, claims: claims.len(), headline: Headline::of(&claims) })
 }
 
 fn plural(count: u64, noun: &str) -> String {
-    if count == 1 { format!("1 {noun}") } else { format!("{count} {noun}s") }
+    match (count, noun.strip_suffix('y')) {
+        (1, _) => format!("1 {noun}"),
+        (_, Some(stem)) => format!("{count} {stem}ies"),
+        (_, None) => format!("{count} {noun}s"),
+    }
 }
 
 /// `exposure scan`
@@ -89,21 +103,26 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
     let options = xs_collect::ScanOptions { threads: args.threads };
     let outcome =
         xs_collect::scan(&args.paths, &matchers, options).map_err(|error| error.to_string())?;
-    let (report, claims) = render(&outcome.evidence, &pack, this_scanner())?;
-    deliver(&report, args.json.as_deref())?;
+    let report = render(&outcome.evidence, &pack, this_scanner())?;
+    deliver(&report.text, args.json.as_deref())?;
 
     let gaps =
         outcome.evidence.iter().filter(|(_, record)| matches!(record, Record::Coverage(_))).count();
     let stats = outcome.stats;
-    // A summary for the terminal. It names no app and no path.
+    // A summary for the terminal. It names no app, no company and no path.
+    let headline = report.headline;
     let _ = writeln!(
         std::io::stderr(),
-        "exposure: scanned {} ({}, {}): {}, {}",
+        "exposure: scanned {} ({}, {}): {}, {}\n\
+         exposure: headline: {} at contacts or above, {} at contains, {} with a third-party channel",
         plural(stats.artifacts, "app"),
         plural(stats.files, "file"),
         plural(stats.bytes, "byte"),
-        plural(claims as u64, "claim"),
+        plural(report.claims as u64, "claim"),
         plural(gaps as u64, "coverage note"),
+        plural(headline.companies_contacts.into(), "company"),
+        plural(headline.companies_contains.into(), "company"),
+        plural(headline.apps_third_party.into(), "app"),
     );
     Ok(())
 }
@@ -122,8 +141,8 @@ pub(crate) fn report(args: &args::Report) -> Result<()> {
     let saved: Report = serde_json::from_slice(&bytes).map_err(|error| fail(&error))?;
     let pack = built_in_pack()?;
     // The evidence was gathered by the scanner the file names; keep that.
-    let (text, _) = render(&saved.evidence, &pack, saved.scanner)?;
-    deliver(&text, args.json.as_deref())
+    let report = render(&saved.evidence, &pack, saved.scanner)?;
+    deliver(&report.text, args.json.as_deref())
 }
 
 /// `exposure rules show`
@@ -142,6 +161,24 @@ pub(crate) fn rules_show() -> Result<()> {
         let owner = rule.entity.as_deref().and_then(|entity| pack.company_of(entity));
         let owner = owner.map_or("component, no company", |company| company.name.as_str());
         out.push_str(&format!("{:<28} {:<32} {:<16} {owner}\n", rule.id, rule.name, rule.category));
+    }
+
+    // The companies, and what tells that an app or a host is their own. A
+    // reader checks a first-party finding against these lines.
+    out.push_str(&format!("\n{}\n\n", plural(pack.entities().count() as u64, "company")));
+    for entity in pack.entities() {
+        let owner = pack.company_of(&entity.id).filter(|owner| owner.id != entity.id);
+        let owner = owner.map(|owner| format!(", owned by {}", owner.name)).unwrap_or_default();
+        out.push_str(&format!("{:<28} {}{owner}\n", entity.id, entity.name));
+        for (label, identifiers) in [
+            ("team ids", &entity.team_ids),
+            ("app ids", &entity.app_ids),
+            ("domains", &entity.domains),
+        ] {
+            if !identifiers.is_empty() {
+                out.push_str(&format!("{:<28} {label}: {}\n", "", identifiers.join(", ")));
+            }
+        }
     }
     print(&out)
 }

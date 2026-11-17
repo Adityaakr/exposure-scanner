@@ -39,7 +39,10 @@ pub(crate) fn entity(id: &str, parent: Option<&str>) -> Entity {
         name: id.into(),
         parent: parent.map(Into::into),
         website: format!("https://{id}.example/"),
-        source: format!("https://{id}.example/terms"),
+        team_ids: Vec::new(),
+        app_ids: Vec::new(),
+        domains: Vec::new(),
+        sources: vec![format!("https://{id}.example/terms")],
     }
 }
 

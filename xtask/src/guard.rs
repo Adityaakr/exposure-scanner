@@ -153,11 +153,16 @@ pub(crate) fn run() -> Result<()> {
     Ok(())
 }
 
-/// Crates that belong to tooling and tests only. The rule-pack compiler
-/// (`toml`, `psl`) matters most: the shipped scanner must only ever read a
+/// Crates that belong to tooling and tests only. The parser of rule sources
+/// (`toml`) matters most: the shipped scanner must only ever read a
 /// compiled, signed pack.
+///
+/// `psl` is not on this list. The resolver ships it (design report, section
+/// 4.2): it is the Public Suffix List as a table compiled into the build,
+/// which cuts a host down to its registrable domain. It parses nothing and
+/// reads nothing at run time.
 const TOOLING_ONLY: &[&str] =
-    &["toml", "psl", "minisign", "object", "proptest", "tempfile", "serde_json_canonicalizer"];
+    &["toml", "minisign", "object", "proptest", "tempfile", "serde_json_canonicalizer"];
 
 /// The tooling-only crates among the normal dependencies of `exposure`, which
 /// must be none.

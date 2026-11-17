@@ -30,13 +30,17 @@ const ENTITIES: &str = r#"
 id = "sentry"
 name = "Functional Software, Inc. (Sentry)"
 website = "https://sentry.io/"
-source = "https://sentry.io/terms/"
+domains = ["sentry.io", "sentry-cdn.com"]
+sources = ["https://sentry.io/terms/", "https://sentry.io/about/"]
 
 [[entity]]
 id = "posthog"
 name = "PostHog Inc."
 website = "https://posthog.com/"
-source = "https://posthog.com/terms"
+team_ids = ["PH0000TEAM", "ABCDE12345"]
+app_ids = ["com.posthog", "com.posthog.android"]
+domains = ["posthog.com"]
+sources = ["https://posthog.com/terms"]
 "#;
 
 const SENTRY: &str = r#"
@@ -419,23 +423,113 @@ fn two_rules_cannot_claim_one_token() {
     );
 }
 
-#[test]
-fn entities_need_https_sources() {
-    let entities = ENTITIES.replace("https://sentry.io/terms/", "see wikipedia");
+/// The entities file with one line replaced.
+fn entities_with(from: &str, to: &str) -> Vec<String> {
+    assert!(ENTITIES.contains(from), "{from}");
+    let entities = ENTITIES.replace(from, to);
     let files = [
         SourceFile { path: "pack.toml", text: PACK },
         SourceFile { path: "entities.toml", text: &entities },
         SourceFile { path: "sdk/sparkle.toml", text: SPARKLE },
     ];
-    assert_one(&problems(&files), "source `see wikipedia` must be an https:// URL");
+    problems(&files)
+}
 
-    let sourceless = ENTITIES.replace("source = \"https://sentry.io/terms/\"\n", "");
-    let files = [
+#[test]
+fn entities_need_https_sources() {
+    assert_one(
+        &entities_with("\"https://sentry.io/terms/\"", "\"see wikipedia\""),
+        "source `see wikipedia` must be an https:// URL",
+    );
+    assert_one(
+        &entities_with("sources = [\"https://posthog.com/terms\"]", "sources = []"),
+        "entity `posthog` must cite at least one source",
+    );
+    assert_one(&entities_with("sources = [\"https://posthog.com/terms\"]\n", ""), "sources");
+}
+
+#[test]
+fn the_identifiers_of_an_entity_compile_in_a_fixed_order() {
+    let layer = compiled(&good()).layer;
+    let posthog = layer.entities.iter().find(|entity| entity.id == "posthog").unwrap();
+    assert_eq!(posthog.team_ids, ["ABCDE12345", "PH0000TEAM"]);
+    assert_eq!(posthog.app_ids, ["com.posthog", "com.posthog.android"]);
+    assert_eq!(posthog.domains, ["posthog.com"]);
+    let sentry = layer.entities.iter().find(|entity| entity.id == "sentry").unwrap();
+    assert_eq!(sentry.domains, ["sentry-cdn.com", "sentry.io"]);
+    assert_eq!(sentry.sources, ["https://sentry.io/about/", "https://sentry.io/terms/"]);
+    assert!(sentry.team_ids.is_empty() && sentry.app_ids.is_empty());
+}
+
+#[test]
+fn a_listed_domain_must_be_somebody_s_own() {
+    let with_domain = |domain: &str| {
+        entities_with("domains = [\"posthog.com\"]", &format!("domains = [\"{domain}\"]"))
+    };
+    // A suffix registries operate belongs to no company.
+    assert_one(&with_domain("co.uk"), "domain `co.uk` is a public suffix");
+    assert_one(
+        &with_domain("posthog.notatld"),
+        "domain `posthog.notatld` is under no public suffix",
+    );
+    // A suffix a company operates for its users is that company's.
+    assert_eq!(compile(&files_with_domain("githubusercontent.com")).err(), None);
+    assert_eq!(compile(&files_with_domain("eu.posthog.com")).err(), None);
+    // The shape of a host is a structural check, which every loader repeats.
+    assert_one(&with_domain("PostHog.com"), "malformed domain `PostHog.com`");
+    assert_one(&with_domain("https://posthog.com"), "malformed domain `https://posthog.com`");
+    // One domain, one entity.
+    assert_one(&with_domain("sentry.io"), "domain `sentry.io` is listed more than once");
+}
+
+/// The good sources with PostHog's domain replaced. The text is leaked so
+/// that the files can borrow it; a test process is short-lived.
+fn files_with_domain(domain: &str) -> Vec<SourceFile<'static>> {
+    let entities: &'static str = Box::leak(
+        ENTITIES
+            .replace("domains = [\"posthog.com\"]", &format!("domains = [\"{domain}\"]"))
+            .into_boxed_str(),
+    );
+    vec![
         SourceFile { path: "pack.toml", text: PACK },
-        SourceFile { path: "entities.toml", text: &sourceless },
+        SourceFile { path: "entities.toml", text: entities },
         SourceFile { path: "sdk/sparkle.toml", text: SPARKLE },
-    ];
-    assert_one(&problems(&files), "source");
+    ]
+}
+
+#[test]
+fn a_listed_app_id_must_be_as_long_as_a_registrable_domain() {
+    let with_app_ids = |list: &str| {
+        entities_with(
+            "app_ids = [\"com.posthog\", \"com.posthog.android\"]",
+            &format!("app_ids = [{list}]"),
+        )
+    };
+    // `uk.co` would cover every app id of every company under `co.uk`.
+    assert_one(&with_app_ids("\"uk.co\""), "app id `uk.co` read backwards (`co.uk`) is no domain");
+    assert_one(&with_app_ids("\"notatld.posthog\""), "app id `notatld.posthog` read backwards");
+    assert_one(&with_app_ids("\"com\""), "app id `com` read backwards (`com`) is no domain");
+    assert_one(&with_app_ids("\"com.PostHog\""), "malformed app id `com.PostHog`");
+    assert_one(
+        &with_app_ids("\"com.posthog\", \"com.posthog\""),
+        "app id `com.posthog` is listed more than once",
+    );
+}
+
+#[test]
+fn a_listed_team_id_must_have_the_shape_of_one() {
+    let with_team_ids = |list: &str| {
+        entities_with(
+            "team_ids = [\"PH0000TEAM\", \"ABCDE12345\"]",
+            &format!("team_ids = [{list}]"),
+        )
+    };
+    assert_one(&with_team_ids("\"ph0000team\""), "malformed team id `ph0000team`");
+    assert_one(&with_team_ids("\"PH0000\""), "malformed team id `PH0000`");
+    assert_one(
+        &with_team_ids("\"PH0000TEAM\", \"PH0000TEAM\""),
+        "team id `PH0000TEAM` is listed more than once",
+    );
 }
 
 #[test]

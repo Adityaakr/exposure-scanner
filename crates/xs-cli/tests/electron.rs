@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use xs_model::record::{Collector, Grade, Record, Region, Scope};
-use xs_model::{Claim, Confidence, MatcherKind, Report};
+use xs_model::{Claim, Confidence, Headline, MatcherKind, Party, Report};
 
 const FIXTURE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/macos/ElectronSkeleton.app");
@@ -126,6 +126,13 @@ fn the_fixture_app_reports_sentry_and_posthog_with_their_proofs() {
     let posthog = claim(&report, "sdk/posthog");
     assert_eq!(posthog.company.as_deref(), Some("posthog"));
     assert_eq!(posthog.category, "analytics");
+    // Analytics counts in the headline, crash reporting does not.
+    assert!(posthog.headline && !sentry.headline);
+    assert_eq!(posthog.party, Party::Third);
+    assert_eq!(
+        report.headline,
+        Headline { companies_contacts: 0, companies_contains: 1, apps_third_party: 1 }
+    );
     // A literal in the app's own script: medium, and one kind of witness.
     assert_eq!(posthog.confidence, Confidence::Medium);
     assert_eq!(posthog.witnesses, 1);

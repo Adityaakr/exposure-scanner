@@ -34,11 +34,11 @@ pub mod text;
 
 mod serde_str;
 
-pub use claim::{Claim, ClaimId, ClaimKey, Confidence, Party};
+pub use claim::{Claim, ClaimId, ClaimKey, Confidence, Party, Vendor, VendorBasis};
 pub use digest::{Sha256Digest, Sha256Stream, SubjectDigest};
 pub use evidence::EvidenceSet;
 pub use matcher::{Boundary, MatcherKind};
 pub use pack::Pack;
 pub use path::RelPath;
 pub use record::{Record, RecordId};
-pub use report::Report;
+pub use report::{Headline, Report};
