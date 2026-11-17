@@ -31,8 +31,8 @@ user's machine. No merged table is distributed. The licence texts are in
 3. `cargo xtask pack sign --key ~/.exposure/keys/exposure-pack-1.key` writes
    the signature. Only the holder of the secret key can do this step.
 4. `EXPOSURE_BLESS=1 cargo test -p exposure` refreshes the committed fixture
-   report, which names the pack's hash.
-5. Commit the sources, both files in `dist/` and the fixture report together.
+   reports, which name the pack's hash.
+5. Commit the sources, both files in `dist/` and the fixture reports together.
    CI runs `cargo xtask pack check`, which fails if the three disagree.
 
 Raise `version` in `core/pack.toml` whenever the compiled bytes change.
