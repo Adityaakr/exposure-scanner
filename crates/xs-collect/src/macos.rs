@@ -10,10 +10,11 @@
 //!   builds which share an app id and version are still two subjects.
 //!
 //! Every limit is a fixed budget, so a hostile bundle costs a bounded amount
-//! of work and gives the same result on every run: [`MAX_DEPTH`] folders
-//! deep, [`MAX_FILES`] files, [`MAX_FILE_BYTES`] per file read, and the property
-//! list parser's own budgets. What a budget cuts off becomes an
-//! `over_budget` coverage record.
+//! of work and memory and gives the same result on every run: [`MAX_DEPTH`]
+//! folders deep, [`MAX_ENTRIES`] directory entries of any kind,
+//! [`MAX_FILE_BYTES`] per file read, [`MAX_LOCATED_GAPS`] coverage records
+//! that name a place, and the property list parser's own budgets. What a
+//! budget cuts off becomes an `over_budget` coverage record.
 //!
 //! Mach-O sections, Objective-C class names, load commands, the code
 //! signature and privacy manifests are task 6.
@@ -47,10 +48,18 @@ use crate::schedule::Pool;
 
 /// Deepest folder nesting the collector follows inside a bundle.
 pub const MAX_DEPTH: u32 = 64;
-/// Most files the collector considers in one bundle. A folder that holds
-/// more entries than are left of this budget is not listed at all, so no
-/// listing is ever held in memory beyond it.
-pub const MAX_FILES: usize = 1_000_000;
+/// Most directory entries the collector lists in one bundle. Files, folders,
+/// links and everything else count alike, each once, in the folder that
+/// holds it. A folder that holds more entries than are left of this budget
+/// is not listed at all and is reported as over budget; nothing is drawn
+/// from it. So every list the collector keeps per entry (a folder's listing,
+/// the folders still to visit, the files to read, the framework names) holds
+/// at most this many items.
+pub const MAX_ENTRIES: usize = 1_000_000;
+/// Most coverage records of one bundle that name a place inside it. Past
+/// this, the records with the greatest paths are folded into one record per
+/// status and reason that names no place and counts them.
+pub const MAX_LOCATED_GAPS: usize = 1000;
 /// Largest file the collector reads: 2 GiB. The budget applies to the files
 /// it would read, those whose first bytes say Mach-O. A larger one is not
 /// read past those first bytes; it is reported with its size, and the bundle
@@ -63,25 +72,49 @@ const CONTENTS: &str = "Contents";
 const INFO_PLIST: &str = "Contents/Info.plist";
 const FRAMEWORKS: &str = "Contents/Frameworks";
 
-/// Something the collector could not cover, keyed so that equal gaps add up.
-/// The last part is the size of a file over the byte budget.
-type GapKey = (CoverageStatus, CoverageReason, Option<RelPath>, Option<u64>);
+/// A gap at a known place, keyed so that equal gaps add up and ordered by
+/// path. The last part is the size of a file over the byte budget.
+type LocatedGap = (RelPath, CoverageStatus, CoverageReason, Option<u64>);
 
+/// What the collector could not cover.
+///
+/// At most [`MAX_LOCATED_GAPS`] gaps keep their place: the ones with the
+/// least keys, whatever order they were found in. The rest are counted
+/// under their status and reason alone.
 #[derive(Default)]
-struct Gaps(BTreeMap<GapKey, u32>);
+struct Gaps {
+    located: BTreeMap<LocatedGap, u32>,
+    unlocated: BTreeMap<(CoverageStatus, CoverageReason), u32>,
+}
 
 impl Gaps {
-    fn add(&mut self, key: GapKey) {
-        let count = self.0.entry(key).or_insert(0);
+    fn add(
+        &mut self,
+        status: CoverageStatus,
+        reason: CoverageReason,
+        location: Option<RelPath>,
+        bytes: Option<u64>,
+    ) {
+        let mut fold = |status, reason, count: u32| {
+            let total = self.unlocated.entry((status, reason)).or_insert(0);
+            *total = total.saturating_add(count);
+        };
+        let Some(path) = location else { return fold(status, reason, 1) };
+        let count = self.located.entry((path, status, reason, bytes)).or_insert(0);
         *count = count.saturating_add(1);
+        if self.located.len() > MAX_LOCATED_GAPS
+            && let Some(((_, status, reason, _), count)) = self.located.pop_last()
+        {
+            fold(status, reason, count);
+        }
     }
 
     fn skipped(&mut self, reason: CoverageReason, location: Option<RelPath>) {
-        self.add((CoverageStatus::Skipped, reason, location, None));
+        self.add(CoverageStatus::Skipped, reason, location, None);
     }
 
     fn unrecognized(&mut self, reason: CoverageReason, location: Option<RelPath>) {
-        self.add((CoverageStatus::Unrecognized, reason, location, None));
+        self.add(CoverageStatus::Unrecognized, reason, location, None);
     }
 }
 
@@ -110,12 +143,12 @@ impl Plan {
     /// size the file system allows still yields a record.
     fn over_budget(&mut self, path: RelPath, bytes: u64) {
         self.manifest.over_budget(path.clone(), bytes);
-        self.gaps.add((
+        self.gaps.add(
             CoverageStatus::Skipped,
             CoverageReason::OverBudget,
             Some(path),
             Some(bytes.min(canon::MAX_SAFE_INTEGER)),
-        ));
+        );
     }
 }
 
@@ -148,7 +181,7 @@ pub fn collect(
     pool: &Pool,
 ) -> (Vec<Record>, ScanStats) {
     // Listing is stat-bound and independent per bundle.
-    let plans: Vec<Plan> = pool.map(bundles, |root| plan(root));
+    let plans: Vec<Plan> = pool.map(bundles, |root| plan(root, MAX_ENTRIES));
 
     // One task per file across all bundles, largest first, so the few files
     // that hold most of the bytes start at once on separate threads.
@@ -203,8 +236,9 @@ fn rel(path: &str) -> Option<RelPath> {
     RelPath::new(path).ok()
 }
 
-/// Lists a bundle and reads its property list.
-fn plan(root: &Path) -> Plan {
+/// Lists a bundle, at most `max_entries` directory entries of it, and reads
+/// its property list.
+fn plan(root: &Path, max_entries: usize) -> Plan {
     let folder_name =
         root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let mut plan = Plan {
@@ -218,16 +252,15 @@ fn plan(root: &Path) -> Plan {
         files_read: 0,
         bytes_read: 0,
     };
-    // `walk` never follows a link. The two reads below go by fixed paths, so
-    // every folder on those paths must be a real one, or a link named
+    // `walk` never follows a link. The property list is read by a fixed
+    // path, so the folder on that path must be a real one, or a link named
     // `Contents` would stand another bundle in for this one.
     if replaced(&plan.root.join(CONTENTS)) {
         plan.gaps.unrecognized(CoverageReason::ParseError, rel(CONTENTS));
     } else {
         read_info_plist(&mut plan);
-        list_frameworks(&mut plan);
     }
-    walk(&mut plan, MAX_FILES);
+    walk(&mut plan, max_entries);
     plan
 }
 
@@ -279,50 +312,23 @@ fn read_info_plist(plan: &mut Plan) {
     }
 }
 
-/// Records the names of the real folders under `Contents/Frameworks`.
+/// Lists the bundle without following symbolic links: the regular files to
+/// read, and the names of the real folders under `Contents/Frameworks`.
 ///
-/// Only folders count: a file or a symbolic link with a framework's name is
-/// not a framework, and `Contents/Frameworks` itself must be a real folder.
-/// The listing enters the bundle digest, because evidence is
+/// Only folders count as frameworks: a file or a symbolic link with a
+/// framework's name is not one, and `Contents/Frameworks` itself must be a
+/// real folder. That listing enters the bundle digest, because evidence is
 /// drawn from it.
-fn list_frameworks(plan: &mut Plan) {
-    let Some(location) = rel(FRAMEWORKS) else { return };
-    let path = plan.root.join(FRAMEWORKS);
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.is_dir() => {}
-        Ok(_) => return plan.gaps.unrecognized(CoverageReason::ParseError, Some(location)),
-        Err(_) => return,
-    }
-    let Ok(entries) = fs::read_dir(&path) else {
-        return plan.gaps.skipped(CoverageReason::Unreadable, Some(location));
-    };
-    for entry in entries {
-        let Ok(entry) = entry else {
-            plan.gaps.skipped(CoverageReason::Unreadable, Some(location.clone()));
-            continue;
-        };
-        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-            continue;
-        }
-        // A name that cannot be stored cannot be reported; `walk` counts it.
-        if let Some(name) = entry.file_name().to_str().filter(|name| location.join(name).is_ok()) {
-            plan.frameworks.push(name.to_string());
-        }
-    }
-    plan.frameworks.sort_unstable();
-    plan.manifest.listing(location, plan.frameworks.iter().map(String::as_str));
-}
-
-/// Lists the regular files in the bundle, at most `max_files` of them,
-/// without following symbolic links.
 ///
-/// The order of the visit is fixed: a folder's own files in name order, then
-/// its sub-folders in name order, each to its full depth. A folder with more
-/// entries than are left of the file budget is skipped whole and reported as
-/// over budget. Both rules look only at names and counts, so the budget cuts
-/// at the same place whatever order the file system returns entries in, and
-/// no more than `max_files` entries are ever held at once.
-fn walk(plan: &mut Plan, max_files: usize) {
+/// Every entry of every folder listed counts against `max_entries`. A folder
+/// with more entries than are left of that budget is skipped whole and
+/// reported as over budget, and nothing is drawn from it. The order of the
+/// visit is fixed: a folder's own entries in name order, then its sub-folders
+/// in name order, each to its full depth. Both rules look only at names and
+/// counts, so the budget cuts at the same place whatever order the file
+/// system returns entries in.
+fn walk(plan: &mut Plan, max_entries: usize) {
+    let mut left = max_entries;
     // Depth-first with an explicit stack: nesting is bounded by the budget,
     // not by the call stack.
     let mut pending: Vec<(PathBuf, Option<RelPath>, u32)> = vec![(plan.root.clone(), None, 0)];
@@ -331,12 +337,11 @@ fn walk(plan: &mut Plan, max_files: usize) {
             plan.gaps.skipped(CoverageReason::Unreadable, dir_rel);
             continue;
         };
-        let remaining = max_files.saturating_sub(plan.files.len());
         let mut listed = Vec::new();
         let mut over_budget = false;
         for entry in entries {
             match entry {
-                Ok(_) if listed.len() >= remaining => {
+                Ok(_) if listed.len() >= left => {
                     over_budget = true;
                     break;
                 }
@@ -348,14 +353,16 @@ fn walk(plan: &mut Plan, max_files: usize) {
             plan.gaps.skipped(CoverageReason::OverBudget, dir_rel);
             continue;
         }
+        left -= listed.len();
         listed.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        let frameworks = dir_rel.as_ref().is_some_and(|dir| dir.as_str() == FRAMEWORKS);
         let mut folders = Vec::new();
         for (name, kind) in listed {
             let path = name.to_str().and_then(|name| match &dir_rel {
-                Some(parent) => parent.join(name).ok(),
-                None => rel(name),
+                Some(parent) => parent.join(name).ok().map(|path| (name, path)),
+                None => rel(name).map(|path| (name, path)),
             });
-            let Some(path) = path else {
+            let Some((name, path)) = path else {
                 // The name is not UTF-8, holds a control character or makes
                 // the path too long. It cannot be stored, so only counted.
                 plan.gaps.skipped(CoverageReason::Unreadable, None);
@@ -365,20 +372,29 @@ fn walk(plan: &mut Plan, max_files: usize) {
                 plan.gaps.skipped(CoverageReason::Unreadable, Some(path));
                 continue;
             };
-            if kind.is_symlink() {
-                // Never followed. Its target, if inside the bundle, is
-                // reached by its real path.
-            } else if kind.is_dir() {
+            if kind.is_dir() {
+                if frameworks {
+                    plan.frameworks.push(name.to_string());
+                }
                 if depth + 1 >= MAX_DEPTH {
                     plan.gaps.skipped(CoverageReason::OverBudget, Some(path));
                 } else {
-                    folders.push((dir.join(&name), Some(path), depth + 1));
+                    folders.push((dir.join(name), Some(path), depth + 1));
                 }
+                continue;
+            }
+            if path.as_str() == FRAMEWORKS {
+                // A link or a file where the frameworks folder belongs.
+                plan.gaps.unrecognized(CoverageReason::ParseError, Some(path.clone()));
+            }
+            if kind.is_symlink() {
+                // Never followed. Its target, if inside the bundle, is
+                // reached by its real path.
             } else if kind.is_file() {
                 if path.as_str() == INFO_PLIST {
                     continue; // Already read.
                 }
-                match fs::symlink_metadata(dir.join(&name)) {
+                match fs::symlink_metadata(dir.join(name)) {
                     Ok(metadata) if metadata.is_file() => plan.files.push((path, metadata.len())),
                     _ => plan.gaps.skipped(CoverageReason::Unreadable, Some(path)),
                 }
@@ -386,6 +402,9 @@ fn walk(plan: &mut Plan, max_files: usize) {
                 // A socket, pipe or device node. Not app content.
                 plan.gaps.skipped(CoverageReason::UnsupportedFormat, Some(path));
             }
+        }
+        if let Some(location) = dir_rel.filter(|_| frameworks) {
+            plan.manifest.listing(location, plan.frameworks.iter().map(String::as_str));
         }
         // The stack gives back the last folder first.
         pending.extend(folders.into_iter().rev());
@@ -528,7 +547,16 @@ fn finish(
         }
     }
 
-    for ((status, reason, location, bytes), count) in plan.gaps.0 {
+    let located =
+        plan.gaps.located.into_iter().map(|((path, status, reason, bytes), count)| {
+            (status, reason, Some(path), bytes, count)
+        });
+    let unlocated = plan
+        .gaps
+        .unlocated
+        .into_iter()
+        .map(|((status, reason), count)| (status, reason, None, None, count));
+    for (status, reason, location, bytes, count) in located.chain(unlocated) {
         records.push(Record::Coverage(CoverageRecord {
             v: V1,
             collector: Collector::MacosBundle,
@@ -548,7 +576,8 @@ mod tests {
     use std::io::Write as _;
 
     use xs_model::Pack;
-    use xs_model::pack::{Category, Layer, LoadedLayer};
+    use xs_model::matcher::Boundary;
+    use xs_model::pack::{Category, Layer, LoadedLayer, Rule, Token};
 
     use super::*;
 
@@ -578,69 +607,7 @@ mod tests {
         assert!(matches!(read_file(other.path(), &NoContent, 50), FileResult::NotCandidate));
     }
 
-    /// Every limit is a deterministic budget (design report, C3): the same
-    /// bundle must lose the same files to the file budget on every file
-    /// system, and a listing must never be held beyond the budget. The
-    /// expected lists follow from the documented rules alone: a folder's
-    /// files by name, then its sub-folders by name, and a folder with more
-    /// entries than are left of the budget skipped whole.
-    #[test]
-    fn the_file_budget_cuts_at_the_same_place_whatever_order_files_were_made_in() {
-        let names = ["a/1", "a/2", "a/sub/1", "b/1", "b/2", "c/1", "c/2", "top"];
-        let listed = |order: &[usize], max_files: usize| {
-            let dir = tempfile::tempdir().unwrap();
-            for &index in order {
-                let path = dir.path().join(names[index]);
-                fs::create_dir_all(path.parent().unwrap()).unwrap();
-                fs::write(path, b"x").unwrap();
-            }
-            let mut plan = plan(dir.path());
-            plan.files.clear();
-            plan.gaps = Gaps::default();
-            walk(&mut plan, max_files);
-            let files: Vec<String> =
-                plan.files.iter().map(|(path, _)| path.as_str().to_string()).collect();
-            let skipped: Vec<String> = plan
-                .gaps
-                .0
-                .keys()
-                .map(|(status, reason, location, _)| {
-                    assert_eq!(
-                        (*status, *reason),
-                        (CoverageStatus::Skipped, CoverageReason::OverBudget)
-                    );
-                    location.as_ref().map_or("<root>", RelPath::as_str).to_string()
-                })
-                .collect();
-            (files, skipped)
-        };
-        let expect = |files: &[&str], skipped: &[&str]| {
-            let owned = |list: &[&str]| list.iter().map(|item| (*item).to_string()).collect();
-            (owned(files), owned(skipped))
-        };
-        let forward: Vec<usize> = (0..names.len()).collect();
-        let backward: Vec<usize> = forward.iter().rev().copied().collect();
-        let shuffled = [5, 2, 7, 0, 4, 1, 6, 3];
-        for order in [&forward[..], &backward, &shuffled] {
-            // Everything fits.
-            assert_eq!(listed(order, 8), expect(&names, &[]), "{order:?}");
-            // `top`, then `a` (3 entries, 4 left) and `a/sub` (1 entry, 2
-            // left). One file is left of the budget; `b` and `c` hold two.
-            assert_eq!(
-                listed(order, 5),
-                expect(&["a/1", "a/2", "a/sub/1", "top"], &["b", "c"]),
-                "{order:?}"
-            );
-            // The bundle's own folder holds four entries.
-            assert_eq!(listed(order, 3), expect(&[], &["<root>"]), "{order:?}");
-        }
-    }
-
-    /// A problem inside a bundle never fails the scan, so every record the
-    /// collector emits must have an id. Canonical JSON holds integers up to
-    /// 2^53 - 1 (RFC 7493, section 2.2); a file system can report more.
-    #[test]
-    fn an_over_budget_file_of_any_size_yields_a_record_with_an_id() {
+    fn pack(rules: Vec<Rule>) -> Pack {
         let layer = Layer {
             format: V1,
             layer: "core".into(),
@@ -652,13 +619,213 @@ mod tests {
                 headline: false,
             }],
             entities: vec![],
-            rules: vec![],
+            rules,
         };
-        let pack = Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"") }]).unwrap();
+        Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"") }]).unwrap()
+    }
+
+    /// Makes `names` under a fresh folder in the given order. A name ending
+    /// in `/` is an empty folder; any other is a one-byte file.
+    fn tree(names: &[&str], order: impl Iterator<Item = usize>) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for index in order {
+            let path = dir.path().join(names[index]);
+            if names[index].ends_with('/') {
+                fs::create_dir_all(path).unwrap();
+            } else {
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, b"x").unwrap();
+            }
+        }
+        dir
+    }
+
+    /// The files a plan lists and the folders it skipped as over budget.
+    fn listed(plan: &Plan) -> (Vec<String>, Vec<String>) {
+        let files = plan.files.iter().map(|(path, _)| path.as_str().to_string()).collect();
+        let mut skipped: Vec<String> = plan
+            .gaps
+            .located
+            .keys()
+            .filter(|(_, status, reason, _)| {
+                (*status, *reason) == (CoverageStatus::Skipped, CoverageReason::OverBudget)
+            })
+            .map(|(path, ..)| path.as_str().to_string())
+            .collect();
+        let whole = (CoverageStatus::Skipped, CoverageReason::OverBudget);
+        if plan.gaps.unlocated.contains_key(&whole) {
+            skipped.push("<root>".to_string());
+        }
+        (files, skipped)
+    }
+
+    fn expect(files: &[&str], skipped: &[&str]) -> (Vec<String>, Vec<String>) {
+        let owned = |list: &[&str]| list.iter().map(|item| (*item).to_string()).collect();
+        (owned(files), owned(skipped))
+    }
+
+    /// Every limit is a deterministic budget (design report, C3): the same
+    /// bundle must lose the same files to the entry budget on every file
+    /// system, and a listing must never be held beyond the budget. The
+    /// expected lists follow from the documented rules alone: every entry
+    /// counts once, a folder's entries come by name and then its sub-folders
+    /// by name, and a folder with more entries than are left of the budget
+    /// is skipped whole.
+    #[test]
+    fn the_entry_budget_cuts_at_the_same_place_whatever_order_files_were_made_in() {
+        // Entries: 4 at the top, 3 in `a`, 1 in `a/sub`, 2 in `b`, 2 in `c`.
+        let names = ["a/1", "a/2", "a/sub/1", "b/1", "b/2", "c/1", "c/2", "top"];
+        let forward: Vec<usize> = (0..names.len()).collect();
+        let backward: Vec<usize> = forward.iter().rev().copied().collect();
+        let shuffled = vec![5, 2, 7, 0, 4, 1, 6, 3];
+        for order in [forward, backward, shuffled] {
+            let dir = tree(&names, order.iter().copied());
+            let under = |max_entries| listed(&plan(dir.path(), max_entries));
+            // Everything fits.
+            assert_eq!(under(12), expect(&names, &[]), "{order:?}");
+            // One entry is left when `c` is reached, and it holds two.
+            assert_eq!(
+                under(11),
+                expect(&["a/1", "a/2", "a/sub/1", "b/1", "b/2", "top"], &["c"]),
+                "{order:?}"
+            );
+            // The top, `a` and `a/sub` use up all eight.
+            assert_eq!(
+                under(8),
+                expect(&["a/1", "a/2", "a/sub/1", "top"], &["b", "c"]),
+                "{order:?}"
+            );
+            // The bundle's own folder holds four entries.
+            assert_eq!(under(3), expect(&[], &["<root>"]), "{order:?}");
+        }
+    }
+
+    /// Folders cost memory like files do, so they count against the same
+    /// budget: a tree of nothing but folders stops at the limit.
+    #[test]
+    fn folders_count_against_the_entry_budget() {
+        let names: Vec<String> = (0..10)
+            .flat_map(|outer| (0..10).map(move |inner| format!("f{outer}/d{inner}/")))
+            .collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        for reversed in [false, true] {
+            let order: Vec<usize> = (0..names.len()).collect();
+            let dir = if reversed {
+                tree(&names, order.into_iter().rev())
+            } else {
+                tree(&names, order.into_iter())
+            };
+            // 10 entries at the top, 10 in `f0` and 10 in `f1` leave 5.
+            assert_eq!(
+                listed(&plan(dir.path(), 35)),
+                expect(&[], &["f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9"]),
+                "reversed: {reversed}"
+            );
+            assert_eq!(listed(&plan(dir.path(), 110)), expect(&[], &[]));
+        }
+    }
+
+    /// Evidence is drawn from the `Contents/Frameworks` listing, so that
+    /// listing obeys the budget like any other: over it, the folder is
+    /// reported and yields no edge and no digest entry.
+    #[test]
+    fn a_frameworks_folder_over_the_entry_budget_yields_no_evidence() {
+        let sentry = Rule {
+            id: "sdk/sentry".into(),
+            name: "Sentry".into(),
+            entity: None,
+            category: "component".into(),
+            sources: vec![],
+            notes: vec![],
+            matchers: BTreeMap::from([(
+                MatcherKind::AppleFramework,
+                vec![Token { lit: "Sentry.framework".into(), at: Boundary::Exact }],
+            )]),
+            min_distinct: BTreeMap::new(),
+        };
+        let pack = pack(vec![sentry]);
+        let matchers = Matchers::build(&pack);
+        let frameworks = [
+            "Contents/Frameworks/A.framework/",
+            "Contents/Frameworks/B.framework/",
+            "Contents/Frameworks/Sentry.framework/",
+        ];
+        let dir = tree(&frameworks, 0..frameworks.len());
+        let without = tree(&["Contents/"], 0..1);
+        let records =
+            |root: &Path, max_entries| finish(plan(root, max_entries), Vec::new(), &matchers).0;
+        let edges = |records: &[Record]| {
+            records.iter().filter(|record| matches!(record, Record::Edge(_))).count()
+        };
+        let digest = |records: &[Record]| records.first().map(|record| record.subject().digest);
+
+        // One entry at the top, one in `Contents`, three frameworks.
+        let within = records(dir.path(), 5);
+        assert_eq!(edges(&within), 1);
+        assert_ne!(digest(&within), digest(&records(without.path(), 5)));
+
+        let over = records(dir.path(), 4);
+        assert_eq!(edges(&over), 0);
+        assert_eq!(digest(&over), digest(&records(without.path(), 4)));
+        let reported: Vec<&str> = over
+            .iter()
+            .filter_map(|record| match record {
+                Record::Coverage(gap) if gap.reason == CoverageReason::OverBudget => {
+                    gap.location.as_ref().map(RelPath::as_str)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reported, ["Contents/Frameworks"]);
+    }
+
+    /// A hostile tree must not produce an unbounded report. The gaps that
+    /// keep their place are the least by path, whatever order they were
+    /// found in; the rest are counted, not dropped.
+    #[test]
+    fn gaps_past_the_cap_are_folded_into_one_count_whatever_order_they_came_in() {
+        let total = MAX_LOCATED_GAPS + 500;
+        let path = |index: usize| RelPath::new(&format!("d/{index:05}")).unwrap();
+        let collect = |order: &mut dyn Iterator<Item = usize>| {
+            let mut gaps = Gaps::default();
+            for index in order {
+                gaps.skipped(CoverageReason::OverBudget, Some(path(index)));
+            }
+            // The same place twice is one gap that counts two.
+            gaps.skipped(CoverageReason::OverBudget, Some(path(0)));
+            gaps.unrecognized(CoverageReason::ParseError, Some(path(total)));
+            (gaps.located, gaps.unlocated)
+        };
+        let (located, unlocated) = collect(&mut (0..total));
+        assert_eq!(collect(&mut (0..total).rev()), (located.clone(), unlocated.clone()));
+        assert_eq!(
+            collect(&mut (0..total).map(|i| i * 7 % total)),
+            (located.clone(), unlocated.clone())
+        );
+
+        let kept: Vec<&str> = located.keys().map(|(path, ..)| path.as_str()).collect();
+        let least: Vec<String> = (0..MAX_LOCATED_GAPS).map(|i| format!("d/{i:05}")).collect();
+        assert_eq!(kept, least);
+        assert_eq!(located.values().sum::<u32>(), 1001);
+        assert_eq!(
+            unlocated,
+            BTreeMap::from([
+                ((CoverageStatus::Skipped, CoverageReason::OverBudget), 500),
+                ((CoverageStatus::Unrecognized, CoverageReason::ParseError), 1),
+            ])
+        );
+    }
+
+    /// A problem inside a bundle never fails the scan, so every record the
+    /// collector emits must have an id. Canonical JSON holds integers up to
+    /// 2^53 - 1 (RFC 7493, section 2.2); a file system can report more.
+    #[test]
+    fn an_over_budget_file_of_any_size_yields_a_record_with_an_id() {
+        let pack = pack(Vec::new());
         let matchers = Matchers::build(&pack);
         let dir = tempfile::tempdir().unwrap();
         let records_for = |bytes: u64| {
-            let mut plan = plan(dir.path());
+            let mut plan = plan(dir.path(), MAX_ENTRIES);
             plan.over_budget(RelPath::new("Contents/MacOS/Huge").unwrap(), bytes);
             finish(plan, Vec::new(), &matchers).0
         };
