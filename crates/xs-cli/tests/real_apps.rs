@@ -11,6 +11,13 @@
 //!   headline.
 //! * App Center in AltTab is a third party to it.
 //!
+//! and what each may access, as its property list and its signature ask:
+//!
+//! * NetNewsWire and Maccy are sandboxed and ask for little.
+//! * AltTab is not sandboxed and asks for nothing in its files. It works
+//!   through Accessibility and Screen Recording, which macOS grants in its
+//!   settings and no app file declares: what a scan of files cannot see.
+//!
 //! Real artifacts are never stored in the repository. These tests run only
 //! when the environment variable `EXPOSURE_FIXTURE_CACHE` names a folder
 //! that holds them, laid out as `tests/fixtures/README.md` describes, and
@@ -23,7 +30,9 @@
 //! project's own source and from standard tools run on the same files:
 //! AltTab vendors App Center Crashes; neither NetNewsWire nor Maccy ships an
 //! analytics or crash-upload SDK; `plutil` shows the `SUFeedURL` of the two;
-//! `codesign -dv` shows each Team ID.
+//! `codesign -dv` shows each Team ID, `codesign -d --entitlements -` the
+//! entitlements of each main executable, and `plutil -p` the usage
+//! descriptions of each property list.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, reason = "test code")]
 #![allow(
     clippy::disallowed_types,
@@ -37,7 +46,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use xs_model::claim::Vendor;
-use xs_model::record::{CoverageRecord, EdgeRecord, Facts, Grade, ObjectKind, Record, Region};
+use xs_model::record::{
+    CoverageRecord, EdgeRecord, EdgeType, Facts, Grade, ObjectKind, Record, Region,
+};
 use xs_model::{Claim, Confidence, Headline, MatcherKind, Party, Report, Sha256Digest};
 
 /// One real app, pinned.
@@ -157,6 +168,41 @@ fn evidence<'a>(report: &'a Report, claim: &Claim) -> Vec<&'a EdgeRecord> {
         .collect()
 }
 
+/// What the app may access: each permission with the keys that ask for it,
+/// usage descriptions first, without the `com.apple.security.` that
+/// entitlements start with.
+fn may_access(report: &Report) -> Vec<(&str, Vec<&str>)> {
+    report
+        .claims
+        .iter()
+        .filter(|claim| claim.edge == EdgeType::Access)
+        .map(|claim| {
+            assert_eq!(claim.object.kind, ObjectKind::Permission);
+            assert_eq!(claim.grade, Grade::Requested);
+            assert_eq!((claim.company.as_deref(), claim.party), (None, Party::Unknown));
+            assert!(!claim.headline);
+            let mut keys: Vec<(MatcherKind, &str)> = evidence(report, claim)
+                .into_iter()
+                .map(|edge| {
+                    let (place, region) = match edge.proof.matcher {
+                        MatcherKind::UsageDescription => {
+                            ("Contents/Info.plist", Region::PropertyList)
+                        }
+                        MatcherKind::Entitlement => ("Contents/MacOS/", Region::Entitlements),
+                        other => panic!("{other} is no declaration of access in a bundle"),
+                    };
+                    assert!(edge.proof.location.as_str().starts_with(place));
+                    assert_eq!(edge.proof.region, region);
+                    let key = edge.proof.token.as_str();
+                    (edge.proof.matcher, key.strip_prefix("com.apple.security.").unwrap_or(key))
+                })
+                .collect();
+            keys.sort_unstable();
+            (claim.object.id.as_str(), keys.into_iter().map(|(_, key)| key).collect())
+        })
+        .collect()
+}
+
 fn facts(report: &Report) -> &Facts {
     report
         .evidence
@@ -249,6 +295,10 @@ fn alttab_reports_app_center() {
 
     // AltTab sets its feed address in code, so its property list names none.
     assert!(report.claims.iter().all(|claim| claim.object.kind == ObjectKind::Sdk));
+    // Its one entitlement turns library validation off, which reaches
+    // nothing of the user's, and its property list asks for nothing.
+    assert_eq!(may_access(&report), []);
+    assert_eq!(facts(&report).sandbox, Some(false));
     assert_eq!(report.headline, Headline::default());
     assert_eq!(facts(&report).name.as_deref(), Some("AltTab"));
     assert_eq!(facts(&report).team_id.as_deref(), Some("QXD7GW8FHY"));
@@ -269,6 +319,24 @@ fn netnewswire_reports_no_sdk_and_a_graded_update_feed() {
     assert_eq!(components(&report), ["sdk/plcrashreporter", "sdk/sparkle"]);
     assert_feed(&report, "ranchero.com", None, Party::First);
     assert_eq!(claim(&report, "ranchero.com").vendor, unlisted("ranchero.com"));
+    // A sandboxed app: its entitlements are the whole of what it may reach.
+    assert_eq!(
+        may_access(&report),
+        [
+            (
+                "automation",
+                vec![
+                    "NSAppleEventsUsageDescription",
+                    "automation.apple-events",
+                    "temporary-exception.apple-events"
+                ]
+            ),
+            ("network-client", vec!["network.client"]),
+            ("user-selected-files", vec!["files.user-selected.read-write"]),
+        ]
+    );
+    assert_eq!(claim(&report, "automation").witnesses, 2);
+    assert_eq!(facts(&report).sandbox, Some(true));
     assert_eq!(report.headline, Headline::default());
     assert_eq!(facts(&report).team_id.as_deref(), Some("M8L2WTLA8W"));
     assert!(coverage(&report).is_empty(), "{:#?}", coverage(&report));
@@ -285,6 +353,12 @@ fn maccy_reports_no_sdk_and_a_graded_update_feed() {
     assert_eq!(components(&report), ["sdk/sparkle"]);
     assert_feed(&report, "raw.githubusercontent.com", Some("microsoft"), Party::Third);
     assert_eq!(claim(&report, "raw.githubusercontent.com").vendor, unlisted("p0deje.org"));
+    // Sandboxed, with no entitlement to open a connection.
+    assert_eq!(
+        may_access(&report),
+        [("user-selected-files", vec!["files.user-selected.read-only"])]
+    );
+    assert_eq!(facts(&report).sandbox, Some(true));
     assert_eq!(report.headline, Headline::default());
     assert_eq!(facts(&report).team_id.as_deref(), Some("MN3X4648SC"));
     assert!(coverage(&report).is_empty(), "{:#?}", coverage(&report));

@@ -11,9 +11,10 @@
 //!    Those ranges always lie ahead of the commands that name them, so each
 //!    is known before the pass reaches it.
 //! 2. **Tables.** The bytes of an `__objc_classname` section are split into
-//!    names, and each name is matched as a value. The first bytes of the
-//!    code signature are kept until the signature has gone by, then read
-//!    for the Team ID.
+//!    names, and each name is matched as a value. The code signature goes
+//!    to a [`codesign::Reader`], which keeps two small parts of it and, once
+//!    it has gone by, says which Team ID it names and which entitlements it
+//!    grants.
 //! 3. **Free-form bytes.** Two searches run over parts of the file, each
 //!    part being a stream of its own to the content engine:
 //!
@@ -31,13 +32,13 @@
 //! under the same contract the reader gives a whole file, with the carry and
 //! the last window worked out for the part.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use xs_formats::macho::{Image, Names, Span, Walker};
-use xs_formats::{FormatError, codesign};
+use xs_formats::{FormatError, ReadError, codesign};
 use xs_match::{ContentEngine, ContentMatcher as _, HitAcc, Matchers};
-use xs_model::MatcherKind;
 use xs_model::record::Scope;
+use xs_model::{MatcherKind, access};
 
 use crate::read::Sink;
 
@@ -49,6 +50,19 @@ pub(super) struct BinaryFindings {
     /// The Team IDs the signatures of the file's images name. One for a
     /// file whose images agree.
     pub(super) team_ids: BTreeSet<String>,
+    /// The entitlements that ask for a permission, in the signature of any
+    /// of the file's images, each with the most entries it holds in one.
+    pub(super) entitlements: BTreeMap<String, u32>,
+    /// How many images the file holds.
+    pub(super) images: u32,
+    /// How many of them have a signature that asks for the App Sandbox.
+    pub(super) sandboxed: u32,
+    /// How many of them have a signature that could not be read to the
+    /// end, entitlements included. What such an image asks for is not
+    /// known.
+    pub(super) signatures_unread: u32,
+    /// Signatures whose entitlements are in a form this build cannot read.
+    pub(super) unsupported: u32,
     /// Whether the file holds an embedded-script section, which makes the
     /// rest of it a language runtime.
     pub(super) has_script: bool,
@@ -58,6 +72,23 @@ pub(super) struct BinaryFindings {
     pub(super) malformed: u32,
     /// Images, name-table entries and signatures over a budget.
     pub(super) over_budget: u32,
+}
+
+impl BinaryFindings {
+    /// Whether the file's signature asks for the App Sandbox: `Some` when
+    /// every image says the same and each signature could be read. An image
+    /// with no signature at all asks for nothing.
+    pub(super) fn sandbox(&self) -> Option<bool> {
+        if self.images == 0 || self.signatures_unread > 0 {
+            None
+        } else if self.sandboxed == self.images {
+            Some(true)
+        } else if self.sandboxed == 0 {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 /// The state of one pass over a Mach-O file.
@@ -82,12 +113,10 @@ pub(super) struct Binary<'m, 'p> {
     names: Names,
     /// Script sections not gone by yet, ascending.
     scripts: VecDeque<Span>,
-    /// Signatures not gone by yet, ascending, and the start of the one
-    /// being read.
+    /// Signatures not gone by yet, ascending, and the reader of the one
+    /// going by.
     signatures: VecDeque<Span>,
-    signature: Vec<u8>,
-    /// How many bytes of that signature have gone by.
-    signature_len: u64,
+    signature: codesign::Reader,
 
     /// Hits of the table matchers, which run on every file.
     table_hits: HitAcc,
@@ -116,8 +145,7 @@ impl<'m, 'p> Binary<'m, 'p> {
             names: Names::new(),
             scripts: VecDeque::new(),
             signatures: VecDeque::new(),
-            signature: Vec::new(),
-            signature_len: 0,
+            signature: codesign::Reader::new(),
             table_hits: HitAcc::new(),
             token_hits: HitAcc::new(),
             script_hits: HitAcc::new(),
@@ -130,6 +158,7 @@ impl<'m, 'p> Binary<'m, 'p> {
         for library in &image.libraries {
             match_library(self.matchers, self.scope, library, &mut self.table_hits);
         }
+        self.found.images = self.found.images.saturating_add(1);
         self.found.has_script |= !image.scripts.is_empty();
         self.found.encrypted = self.found.encrypted.saturating_add(u32::from(image.encrypted));
         self.found.malformed = self.found.malformed.saturating_add(image.damaged);
@@ -161,32 +190,49 @@ impl<'m, 'p> Binary<'m, 'p> {
         });
     }
 
-    /// Keeps the start of a signature and, once it has gone by, reads the
-    /// Team ID from it.
+    /// Hands a signature to its reader and, once it has gone by, takes in
+    /// the Team ID it names and the entitlements it grants.
     fn read_signature(&mut self, fresh: &[u8], fresh_start: u64, last: bool) {
-        let (buffer, length, found) =
-            (&mut self.signature, &mut self.signature_len, &mut self.found);
+        let (reader, found) = (&mut self.signature, &mut self.found);
         each_part(&mut self.signatures, fresh, fresh_start, last, |part, ends| {
-            *length = length.saturating_add(part.len() as u64);
-            let room = codesign::PREFIX_BYTES.saturating_sub(buffer.len());
-            buffer.extend_from_slice(part.get(..room).unwrap_or(part));
+            reader.push(part);
             if !ends {
                 return;
             }
-            // Whole unless the signature was longer than what was kept.
-            let whole = *length == buffer.len() as u64;
-            *length = 0;
-            match codesign::team_id(buffer, whole) {
+            let signature = reader.finish();
+            let mut unread = false;
+            let mut problem = |error: ReadError| {
+                unread = true;
+                let count = match error {
+                    ReadError::Format(FormatError::Malformed) => &mut found.malformed,
+                    ReadError::Format(FormatError::OverBudget(_)) => &mut found.over_budget,
+                    ReadError::Unsupported => &mut found.unsupported,
+                };
+                *count = count.saturating_add(1);
+            };
+            match signature.team_id {
                 Ok(Some(team)) => {
                     found.team_ids.insert(team);
                 }
                 Ok(None) => {}
-                Err(FormatError::Malformed) => found.malformed = found.malformed.saturating_add(1),
-                Err(FormatError::OverBudget(_)) => {
-                    found.over_budget = found.over_budget.saturating_add(1);
+                Err(error) => problem(error.into()),
+            }
+            let granted = match signature.entitlements {
+                Ok(granted) => granted.unwrap_or_default(),
+                Err(error) => {
+                    problem(error);
+                    Vec::new()
+                }
+            };
+            found.signatures_unread = found.signatures_unread.saturating_add(u32::from(unread));
+            for entitlement in granted {
+                if entitlement.key == access::SANDBOX_ENTITLEMENT {
+                    found.sandboxed = found.sandboxed.saturating_add(1);
+                } else if access::declared(MatcherKind::Entitlement, &entitlement.key).is_some() {
+                    let most = found.entitlements.entry(entitlement.key).or_insert(0);
+                    *most = entitlement.count.max(*most);
                 }
             }
-            buffer.clear();
         });
     }
 
@@ -234,9 +280,11 @@ impl<'m, 'p> Binary<'m, 'p> {
         found.malformed = found.malformed.saturating_add(problems.malformed);
         found.over_budget = found.over_budget.saturating_add(problems.over_budget);
         // What the commands name and the file ended before reaching.
+        let count = |items: usize| u32::try_from(items).unwrap_or(u32::MAX);
         let unreached = self.name_tables.len() + self.scripts.len() + self.signatures.len();
-        found.malformed =
-            found.malformed.saturating_add(u32::try_from(unreached).unwrap_or(u32::MAX));
+        found.malformed = found.malformed.saturating_add(count(unreached));
+        found.signatures_unread =
+            found.signatures_unread.saturating_add(count(self.signatures.len()));
 
         found.hits = self.table_hits;
         // A file that carries a script is the runtime of that script, and

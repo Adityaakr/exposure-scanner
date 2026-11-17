@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use xs_model::record::{Collector, Grade, Record, Region, Scope};
+use xs_model::record::{Collector, EdgeType, Grade, Record, Region, Scope};
 use xs_model::{Claim, Confidence, Headline, MatcherKind, Party, Report};
 
 const FIXTURE: &str =
@@ -205,6 +205,39 @@ fn scan_real(cache: &Path, app: &str) -> Report {
     serde_json::from_str(&scan(&[&path], 4)).unwrap()
 }
 
+/// The claims about channels: what the app ships.
+fn channels(report: &Report) -> Vec<&Claim> {
+    report.claims.iter().filter(|claim| claim.edge == EdgeType::Channel).collect()
+}
+
+/// The permissions the app may access, by id. They come from the bundle's
+/// property list and signature, not from the Electron collector: `plutil`
+/// and `codesign -d --entitlements -` show the same on the same files.
+fn may_access(report: &Report) -> Vec<&str> {
+    report
+        .claims
+        .iter()
+        .filter(|claim| claim.edge == EdgeType::Access)
+        .map(|claim| claim.object.id.as_str())
+        .collect()
+}
+
+/// What the Electron template's property list asks for, in every app built
+/// from it, whether or not the app ever uses it.
+const TEMPLATE_ASKS_FOR: [&str; 4] = ["bluetooth", "camera", "microphone", "system-audio"];
+
+/// The records that are not about access: the ones the tests on real apps
+/// counted before access edges existed.
+fn other_records(report: &Report) -> usize {
+    report
+        .evidence
+        .iter()
+        .filter(
+            |(_, record)| !matches!(record, Record::Edge(edge) if edge.edge == EdgeType::Access),
+        )
+        .count()
+}
+
 /// Bytes the collector read, to tell "nothing found" from "not looked at".
 fn bytes_scanned(report: &Report) -> u64 {
     report
@@ -231,7 +264,8 @@ fn logseq_reports_sentry_and_posthog_from_app_code() {
     let Some(cache) = fixture_cache("logseq") else { return };
     let app = "logseq-2.0.2/Logseq.app";
     let report = scan_real(&cache, app);
-    assert_eq!(report.claims.len(), 2, "{:#?}", report.claims);
+    assert_eq!(channels(&report).len(), 2, "{:#?}", report.claims);
+    assert_eq!(may_access(&report), TEMPLATE_ASKS_FOR);
     for (sdk, company, token) in [
         ("sdk/sentry", "sentry", "sentry.javascript."),
         ("sdk/posthog", "posthog", "app.posthog.com"),
@@ -265,8 +299,9 @@ fn bitwarden_desktop_reports_nothing() {
     let Some(cache) = fixture_cache("bitwarden desktop") else { return };
     let app = "bitwarden-desktop-2026.10.4/Bitwarden.app";
     let report = scan_real(&cache, app);
-    assert!(report.claims.is_empty(), "{:#?}", report.claims);
-    assert_eq!(report.evidence.len(), 1, "the artifact record alone: {:#?}", report.evidence);
+    assert!(channels(&report).is_empty(), "{:#?}", report.claims);
+    assert_eq!(may_access(&report), TEMPLATE_ASKS_FOR);
+    assert_eq!(other_records(&report), 1, "the artifact record alone: {:#?}", report.evidence);
     assert!(bytes_scanned(&report) >= archive_len(&cache, app, "app.asar"));
 }
 
@@ -275,8 +310,21 @@ fn obsidian_reports_nothing() {
     let Some(cache) = fixture_cache("obsidian") else { return };
     let app = "obsidian-1.15.1/Obsidian.app";
     let report = scan_real(&cache, app);
-    assert!(report.claims.is_empty(), "{:#?}", report.claims);
-    assert_eq!(report.evidence.len(), 1, "the artifact record alone: {:#?}", report.evidence);
+    assert!(channels(&report).is_empty(), "{:#?}", report.claims);
+    assert_eq!(
+        may_access(&report),
+        [
+            "automation",
+            "bluetooth",
+            "calendars",
+            "camera",
+            "contacts",
+            "microphone",
+            "reminders",
+            "system-audio"
+        ]
+    );
+    assert_eq!(other_records(&report), 1, "the artifact record alone: {:#?}", report.evidence);
     // Both of its archives were read.
     let archives = archive_len(&cache, app, "app.asar") + archive_len(&cache, app, "obsidian.asar");
     assert!(bytes_scanned(&report) >= archives);

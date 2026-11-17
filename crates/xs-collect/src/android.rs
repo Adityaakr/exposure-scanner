@@ -83,6 +83,7 @@ use xs_model::record::{
 };
 use xs_model::{MatcherKind, RelPath, Sha256Digest, Sha256Stream, SubjectDigest, text};
 
+use crate::access::Asked;
 use crate::read::WINDOW;
 
 /// Most DEX files read from one package. Android loads `classes.dex`,
@@ -727,6 +728,7 @@ fn records(
         facts: Facts {
             name: declared(parsed.and_then(|m| m.label.as_ref()), text::MAX_NAME_BYTES),
             team_id: None,
+            sandbox: None,
             files_scanned: 1,
             bytes_scanned: bytes,
         },
@@ -751,6 +753,7 @@ fn records(
                 location: location.clone(),
                 region,
                 scope: SCOPE,
+                max_sdk: None,
             },
         }));
     };
@@ -799,6 +802,34 @@ fn records(
             };
             edge(Collector::AndroidDex, finding, location, region);
         }
+    }
+
+    // What the app asks for: the permissions of its manifest that reach the
+    // user's data or devices, each name once. The others are no finding and
+    // no gap: most of what a manifest asks for is plumbing. A name asked for
+    // twice is limited only if both ask up to an API level, and then up to
+    // the higher one.
+    if let Some((location, parsed)) = &manifest {
+        let mut asked: BTreeMap<&str, Option<u32>> = BTreeMap::new();
+        for permission in &parsed.permissions {
+            asked
+                .entry(permission.name.as_str())
+                .and_modify(|limit| *limit = limit.zip(permission.max_sdk).map(|(a, b)| a.max(b)))
+                .or_insert(permission.max_sdk);
+        }
+        records.extend(asked.into_iter().filter_map(|(key, max_sdk)| {
+            Asked {
+                collector: Collector::AndroidManifest,
+                matcher: MatcherKind::AndroidPermission,
+                key,
+                count: 1,
+                purpose: None,
+                location,
+                region: Region::Permissions,
+                max_sdk,
+            }
+            .edge(&subject)
+        }));
     }
 
     let coverage = |status, reason, location, bytes, count| {

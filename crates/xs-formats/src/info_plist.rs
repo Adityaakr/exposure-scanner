@@ -1,6 +1,10 @@
-//! Reading the identity of a macOS bundle from its `Info.plist`.
+//! Reading the identity of a macOS bundle from its `Info.plist`, and the
+//! permissions it asks for.
 //!
-//! Only a handful of top-level string values are wanted, so the property list
+//! Only a handful of top-level string values are wanted: the identity keys,
+//! and every usage description, which is the sentence macOS shows the user
+//! when the app asks for a protected resource such as the camera. Only top
+//! level string values are wanted, so the property list
 //! is consumed as a stream of events and never built into a tree. That keeps
 //! memory flat and lets the reader enforce its own depth and item budgets
 //! instead of trusting a recursive builder with a hostile file. XML, binary
@@ -18,6 +22,11 @@ pub const MAX_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_DEPTH: u32 = 64;
 /// Most values the reader looks at before giving up.
 pub const MAX_ITEMS: u32 = 1_000_000;
+/// Most usage descriptions the reader keeps. Apple defines some sixty keys.
+pub const MAX_USAGE_DESCRIPTIONS: usize = 256;
+/// What the key of a usage description ends in, such as
+/// `NSCameraUsageDescription`.
+pub const USAGE_DESCRIPTION_SUFFIX: &str = "UsageDescription";
 
 /// What a bundle says about itself.
 ///
@@ -40,6 +49,14 @@ pub struct BundleInfo {
     /// `SUFeedURL`, the address of the update feed the Sparkle updater
     /// reads. The caller keeps only its host.
     pub feed_url: Option<String>,
+    /// The usage descriptions: every top-level key that ends in
+    /// [`USAGE_DESCRIPTION_SUFFIX`] and holds a string, with that string,
+    /// which may be empty. In document order, each key once, at most
+    /// [`MAX_USAGE_DESCRIPTIONS`] of them.
+    pub usage_descriptions: Vec<(String, String)>,
+    /// How many further usage descriptions were left out because the list
+    /// was full.
+    pub usage_descriptions_dropped: u32,
 }
 
 /// The key of the update feed address in an `Info.plist`.
@@ -68,7 +85,8 @@ enum Position {
     Value(String),
 }
 
-/// Extracts the identity fields from the bytes of an `Info.plist`.
+/// Extracts the identity fields and the usage descriptions from the bytes of
+/// an `Info.plist`.
 ///
 /// A key that appears more than once keeps its first string value. A wanted
 /// key whose value is not a string is treated as absent.
@@ -130,10 +148,19 @@ pub fn parse(bytes: &[u8]) -> Result<BundleInfo, FormatError> {
             Event::String(text) if depth == 1 => match pending {
                 None => position = Position::Value(text.into_owned()),
                 Some(key) => {
-                    if let Some(slot) = info.slot(&key)
-                        && slot.is_none()
+                    if let Some(slot) = info.slot(&key) {
+                        if slot.is_none() {
+                            *slot = Some(text.into_owned());
+                        }
+                    } else if key.ends_with(USAGE_DESCRIPTION_SUFFIX)
+                        && !info.usage_descriptions.iter().any(|(known, _)| *known == key)
                     {
-                        *slot = Some(text.into_owned());
+                        if info.usage_descriptions.len() < MAX_USAGE_DESCRIPTIONS {
+                            info.usage_descriptions.push((key, text.into_owned()));
+                        } else {
+                            info.usage_descriptions_dropped =
+                                info.usage_descriptions_dropped.saturating_add(1);
+                        }
                     }
                 }
             },
@@ -181,6 +208,15 @@ mod tests {
 	</array>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Example uses the camera for video calls.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string></string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>NSContactsUsageDescription</key>
+		<string>nested decoy</string>
+	</dict>
 </dict>
 </plist>
 "#;
@@ -194,6 +230,14 @@ mod tests {
             name: Some("Example".into()),
             executable: Some("Example".into()),
             feed_url: Some("https://updates.example.com/appcast.xml".into()),
+            usage_descriptions: vec![
+                (
+                    "NSCameraUsageDescription".into(),
+                    "Example uses the camera for video calls.".into(),
+                ),
+                ("NSMicrophoneUsageDescription".into(), String::new()),
+            ],
+            usage_descriptions_dropped: 0,
         }
     }
 
@@ -234,6 +278,50 @@ mod tests {
         assert_eq!(info.identifier.as_deref(), Some("first"));
         assert_eq!(info.build_version, None);
         assert_eq!(info.name, None);
+    }
+
+    /// A usage description is a top-level string under a key with the fixed
+    /// ending. Its first value counts, an empty one included.
+    #[test]
+    fn usage_descriptions_are_top_level_strings_and_each_key_counts_once() {
+        let doc = r#"<plist version="1.0"><dict>
+            <key>NSCameraUsageDescription</key><string>first</string>
+            <key>NSCameraUsageDescription</key><string>second</string>
+            <key>NSContactsUsageDescription</key><true/>
+            <key>NSContactsUsageDescription</key><string>after a value that is no string</string>
+            <key>UsageDescription</key><string>the ending alone</string>
+            <key>NSCameraUsageDescriptionX</key><string>not the ending</string>
+            <key>CFBundleName</key><string>NSMicrophoneUsageDescription</string>
+        </dict></plist>"#;
+        let info = parse(doc.as_bytes()).unwrap();
+        let found: Vec<(&str, &str)> = info
+            .usage_descriptions
+            .iter()
+            .map(|(key, purpose)| (key.as_str(), purpose.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("NSCameraUsageDescription", "first"),
+                ("NSContactsUsageDescription", "after a value that is no string"),
+                ("UsageDescription", "the ending alone"),
+            ]
+        );
+    }
+
+    #[test]
+    fn usage_descriptions_past_the_budget_are_counted_not_kept() {
+        let mut doc = String::from(r#"<plist version="1.0"><dict>"#);
+        for index in 0..MAX_USAGE_DESCRIPTIONS + 3 {
+            doc.push_str(&format!("<key>K{index}UsageDescription</key><string>why</string>"));
+        }
+        // One that is already in the list is not a further one.
+        doc.push_str("<key>K0UsageDescription</key><string>again</string>");
+        doc.push_str("</dict></plist>");
+        let info = parse(doc.as_bytes()).unwrap();
+        assert_eq!(info.usage_descriptions.len(), MAX_USAGE_DESCRIPTIONS);
+        assert_eq!(info.usage_descriptions_dropped, 3);
+        assert_eq!(info.usage_descriptions[0].0, "K0UsageDescription");
     }
 
     #[test]

@@ -16,9 +16,11 @@
 //!    hardware ids.
 //! 6. Derivation is pure.
 //!
-//! An edge points at an SDK, which a rule of the pack names, or at a host the
-//! app's own files declare, such as its update feed. Only the host is kept
-//! of a declared address, never the address itself.
+//! A channel edge points at an SDK, which a rule of the pack names, or at a
+//! host the app's own files declare, such as its update feed. Only the host
+//! is kept of a declared address, never the address itself. An access edge
+//! points at a permission the app asks for, one of the fixed list in
+//! [`access`](crate::access).
 //!
 //! Besides edges there are two more kinds. An `artifact` record carries facts
 //! about the subject itself. A `coverage` record says what was skipped or not
@@ -30,6 +32,7 @@ use core::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use crate::access;
 use crate::canon::{self, CanonError};
 use crate::digest::{DigestParseError, Sha256Digest, SubjectDigest};
 use crate::matcher::MatcherKind;
@@ -161,10 +164,19 @@ pub enum RecordError {
     /// The grade does not belong to the ladder of the edge type.
     GradeOffLadder,
     /// An edge to an SDK must be produced by the rule of that SDK, and an
-    /// edge to a host by one of the built-in [`declared`] rules.
+    /// edge to a host by one of the built-in [`declared`] rules. An edge to
+    /// a permission must be produced by the built-in rule of the place the
+    /// app asks in, on a key that asks for that very permission.
     ObjectRuleMismatch,
+    /// An access edge points at a permission and rests on a declaration of
+    /// access. A channel edge points at an SDK or a host and rests on any
+    /// other kind of witness. Nothing else is a link of either type.
+    ObjectOffEdge,
     /// A count of zero says nothing was seen, which is not evidence.
     ZeroCount,
+    /// A highest API level is only part of an Android permission, and is at
+    /// least 1.
+    BadMaxSdk,
     /// The record draws on the content of an artifact that was not read.
     /// About such a subject there can only be a `coverage` record that says
     /// it was skipped.
@@ -179,10 +191,18 @@ impl fmt::Display for RecordError {
             }
             Self::GradeOffLadder => f.write_str("grade does not belong to the edge type's ladder"),
             Self::ObjectRuleMismatch => f.write_str(
-                "an edge to an SDK must name that SDK's rule as its rule, and an edge to a host \
-                 one of the built-in declaration rules",
+                "an edge to an SDK must name that SDK's rule as its rule, an edge to a host one \
+                 of the built-in declaration rules, and an edge to a permission the built-in \
+                 rule and a key that ask for that permission",
+            ),
+            Self::ObjectOffEdge => f.write_str(
+                "an access edge points at a permission and rests on a declaration of access, and \
+                 a channel edge points at an SDK or a host and rests on any other witness",
             ),
             Self::ZeroCount => f.write_str("count must be at least 1"),
+            Self::BadMaxSdk => f.write_str(
+                "a highest API level belongs to an Android permission only and is at least 1",
+            ),
             Self::UnreadSubject => f.write_str(
                 "the subject was not read, so the only record about it is a coverage record \
                  that says it was skipped",
@@ -361,6 +381,12 @@ impl EdgeRecord {
         }
         check_text("object.id", &self.object.id, text::MAX_ID_BYTES)?;
         check_text("rule", &self.rule, text::MAX_ID_BYTES)?;
+        let to_permission = self.object.kind == ObjectKind::Permission;
+        if to_permission != (self.edge == EdgeType::Access)
+            || to_permission != self.proof.matcher.is_access()
+        {
+            return Err(RecordError::ObjectOffEdge);
+        }
         match self.object.kind {
             ObjectKind::Sdk if self.object.id != self.rule => {
                 return Err(RecordError::ObjectRuleMismatch);
@@ -373,6 +399,16 @@ impl EdgeRecord {
                 return Err(RecordError::ObjectRuleMismatch);
             }
             ObjectKind::Host => {}
+            // The key is what the claim rests on, so it must be one that
+            // asks for this permission, read from the place the rule names.
+            ObjectKind::Permission => {
+                let asked = access::declared(self.proof.matcher, &self.proof.token);
+                if access::rule_of(self.proof.matcher) != Some(self.rule.as_str())
+                    || asked.map(|permission| permission.id) != Some(self.object.id.as_str())
+                {
+                    return Err(RecordError::ObjectRuleMismatch);
+                }
+            }
         }
         check_text("proof.token", &self.proof.token, text::MAX_TOKEN_BYTES)?;
         if let Some(example) = &self.proof.example {
@@ -380,6 +416,11 @@ impl EdgeRecord {
         }
         if self.proof.count == 0 {
             return Err(RecordError::ZeroCount);
+        }
+        if let Some(level) = self.proof.max_sdk
+            && (level == 0 || self.proof.matcher != MatcherKind::AndroidPermission)
+        {
+            return Err(RecordError::BadMaxSdk);
         }
         Ok(())
     }
@@ -392,7 +433,8 @@ pub struct ObjectRef {
     /// What sort of thing the object is.
     pub kind: ObjectKind,
     /// Its id: a rule id such as `sdk/firebase-crashlytics` for an SDK, the
-    /// host name such as `updates.example.com` for a host.
+    /// host name such as `updates.example.com` for a host, the id of an
+    /// [`access::Permission`] such as `camera` for a permission.
     pub id: String,
 }
 
@@ -405,6 +447,10 @@ pub enum ObjectKind {
     /// A host the app's own files declare. Records hold the host only, never
     /// the address it was taken from.
     Host,
+    /// Something on the device the app asks to reach, such as the camera or
+    /// the contacts: one of the fixed list in [`access`](crate::access).
+    /// Only an access edge points at one.
+    Permission,
 }
 
 impl ObjectKind {
@@ -414,6 +460,7 @@ impl ObjectKind {
         match self {
             Self::Sdk => "sdk",
             Self::Host => "host",
+            Self::Permission => "permission",
         }
     }
 }
@@ -451,11 +498,21 @@ pub struct Proof {
     pub matcher: MatcherKind,
     /// The rule token that matched. For a host the app declares, the key of
     /// the property list that holds the declaration, such as `SUFeedURL`.
+    /// For a permission the app asks for, the platform's key that asks:
+    /// `NSCameraUsageDescription`, `com.apple.security.device.camera` or
+    /// `android.permission.CAMERA`.
     pub token: String,
-    /// How many times it matched in this place.
+    /// How many times it matched in this place. For an entitlement that
+    /// holds a list, the number of entries; the entries themselves are not
+    /// kept, since they can be paths outside the artifact.
     pub count: u32,
     /// The smallest matching value in byte order, capped at 160 bytes. Never
     /// "the first one seen", which would depend on thread timing.
+    ///
+    /// For a usage description, the purpose the app states under the key,
+    /// with runs of white space made one space and cut to the same 160
+    /// bytes: the sentence macOS shows the user when it asks. Absent when
+    /// the app states none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub example: Option<String>,
     /// The file or folder inside the artifact where the hit is.
@@ -465,6 +522,11 @@ pub struct Proof {
     pub region: Region,
     /// What kind of code the file is. Confidence depends on it.
     pub scope: Scope,
+    /// For an Android permission, the `android:maxSdkVersion` the manifest
+    /// gives it: the highest API level on which the app asks for it. Absent
+    /// when the app asks on every level, and for every other witness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_sdk: Option<u32>,
 }
 
 /// The table or section a hit was found in.
@@ -499,6 +561,10 @@ pub enum Region {
     StringIds,
     /// The names of the entries of a zip archive.
     ZipEntries,
+    /// The entitlements in the code signature of a Mach-O file.
+    Entitlements,
+    /// The `uses-permission` elements an Android manifest declares.
+    Permissions,
 }
 
 /// What kind of code a file holds (design report, section 5.2 control 1).
@@ -554,6 +620,16 @@ pub struct Facts {
     /// of the subject's identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team_id: Option<String>,
+    /// Whether the code signature of a macOS bundle's main executable asks
+    /// for the App Sandbox. `false` means the app runs outside it: then no
+    /// entitlement limits which files of the user's account it can read or
+    /// whether it can use the network, so the absence of such a permission
+    /// among its access edges says nothing. Absent when the main executable
+    /// or its signature could not be read, when the images of a universal
+    /// file disagree, and for an artifact that is not a macOS bundle. Like
+    /// the Team ID, it is what the signature says, unverified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<bool>,
     /// How many files the collector read.
     pub files_scanned: u64,
     /// How many bytes the collector read.
@@ -623,7 +699,9 @@ pub enum CoverageReason {
     /// as they are stored, so what sits there was not looked at as that part
     /// of the layout.
     UnexpectedCase,
-    /// An import format contained a record of an unknown shape.
+    /// An import format contained a record of an unknown shape, or an app's
+    /// own declarations hold an entry this build has no meaning for, such
+    /// as a usage description for a kind of access it does not know.
     UnrecognizedRecord,
     /// The input could not be read as one file: the file system refused the
     /// read, or the file changed while it was being read, so that what was
@@ -816,6 +894,114 @@ pub(crate) mod tests {
         assert_eq!(declared::category("sdk/sparkle"), None);
     }
 
+    /// An edge to a permission the app asks for: the object is one of the
+    /// fixed list, the rule is the built-in one of the place the app asks
+    /// in, and the token is a key that asks for that permission.
+    #[test]
+    fn a_requested_permission_is_an_access_edge_with_a_built_in_rule() {
+        let camera = json!({
+            "v": 1, "kind": "edge", "collector": "macos.bundle",
+            "subject": {
+                "kind": "app", "platform": "macos", "id": "com.example.app",
+                "digest": "bd1:8aa0e5bf089ace014976eb8cae42a857ceb0604a7d2f00870419a3f03c588293"
+            },
+            "edge": "access", "grade": "requested",
+            "object": {"kind": "permission", "id": "camera"},
+            "rule": "access/usage-description",
+            "proof": {
+                "matcher": "usage_description", "token": "NSCameraUsageDescription", "count": 1,
+                "example": "Example uses the camera for video calls.",
+                "where": "Contents/Info.plist", "region": "property_list", "scope": "app_code"
+            }
+        });
+        let record: Record = serde_json::from_value(camera.clone()).unwrap();
+        record.validate().unwrap();
+        assert_eq!(serde_json::to_value(&record).unwrap(), camera);
+
+        let with = |edits: &[(&str, serde_json::Value)]| {
+            let mut tree = camera.clone();
+            for (pointer, value) in edits {
+                *tree.pointer_mut(pointer).unwrap() = value.clone();
+            }
+            serde_json::from_value::<Record>(tree).unwrap().validate()
+        };
+        // The same permission, asked for in the two other places.
+        assert_eq!(
+            with(&[
+                ("/rule", json!("access/entitlement")),
+                ("/proof/matcher", json!("entitlement")),
+                ("/proof/token", json!("com.apple.security.device.camera")),
+                ("/proof/region", json!("entitlements")),
+            ]),
+            Ok(())
+        );
+        assert_eq!(
+            with(&[
+                ("/rule", json!("access/android-permission")),
+                ("/proof/matcher", json!("android_permission")),
+                ("/proof/token", json!("android.permission.CAMERA")),
+                ("/proof/region", json!("permissions")),
+            ]),
+            Ok(())
+        );
+        // A highest API level is part of an Android permission only.
+        let limited = |matcher: &str, token: &str, rule: &str, level: u32| {
+            let mut tree = camera.clone();
+            tree["rule"] = json!(rule);
+            tree["proof"]["matcher"] = json!(matcher);
+            tree["proof"]["token"] = json!(token);
+            tree["proof"]["max_sdk"] = json!(level);
+            serde_json::from_value::<Record>(tree).unwrap().validate()
+        };
+        let android =
+            ("android_permission", "android.permission.CAMERA", "access/android-permission");
+        assert_eq!(limited(android.0, android.1, android.2, 28), Ok(()));
+        assert_eq!(limited(android.0, android.1, android.2, 0), Err(RecordError::BadMaxSdk));
+        assert_eq!(
+            limited(
+                "usage_description",
+                "NSCameraUsageDescription",
+                "access/usage-description",
+                28
+            ),
+            Err(RecordError::BadMaxSdk)
+        );
+        // The key must ask for the permission the edge points at, and the
+        // rule must be the one of the place the key was read from.
+        let mismatch = Err(RecordError::ObjectRuleMismatch);
+        assert_eq!(with(&[("/object/id", json!("microphone"))]), mismatch);
+        assert_eq!(with(&[("/object/id", json!("everything"))]), mismatch);
+        assert_eq!(with(&[("/proof/token", json!("NSNoSuchUsageDescription"))]), mismatch);
+        assert_eq!(with(&[("/rule", json!("access/entitlement"))]), mismatch);
+        assert_eq!(with(&[("/rule", json!("sdk/sentry"))]), mismatch);
+        // The key of one place under the kind of another.
+        assert_eq!(with(&[("/proof/matcher", json!("entitlement"))]), mismatch);
+        // "May access" is the lowest rung of the access ladder, and a
+        // permission is the object of no other kind of edge.
+        assert_eq!(with(&[("/grade", json!("contains"))]), Err(RecordError::GradeOffLadder));
+        let off_edge = Err(RecordError::ObjectOffEdge);
+        assert_eq!(with(&[("/edge", json!("channel")), ("/grade", json!("declares"))]), off_edge);
+        // A framework folder is no declaration of access.
+        assert_eq!(with(&[("/proof/matcher", json!("apple_framework"))]), off_edge);
+    }
+
+    /// An SDK and a host are what a channel leads to. Neither is something
+    /// an app is given access to.
+    #[test]
+    fn an_access_edge_points_at_nothing_but_a_permission() {
+        let mut tree: serde_json::Value = serde_json::from_str(BITWARDEN_JSON).unwrap();
+        tree["edge"] = json!("access");
+        tree["grade"] = json!("requested");
+        let record: Record = serde_json::from_value(tree).unwrap();
+        assert_eq!(record.validate(), Err(RecordError::ObjectOffEdge));
+
+        // Nor does a declaration of access show that an SDK is shipped.
+        let mut tree: serde_json::Value = serde_json::from_str(BITWARDEN_JSON).unwrap();
+        tree["proof"]["matcher"] = json!("android_permission");
+        let record: Record = serde_json::from_value(tree).unwrap();
+        assert_eq!(record.validate(), Err(RecordError::ObjectOffEdge));
+    }
+
     #[test]
     fn grades_order_within_their_ladder() {
         assert!(Grade::Declares < Grade::Contains);
@@ -836,7 +1022,7 @@ pub(crate) mod tests {
                 "digest": "bd1:8aa0e5bf089ace014976eb8cae42a857ceb0604a7d2f00870419a3f03c588293"
             },
             "facts": {
-                "name": "Example", "team_id": "ABCDE12345",
+                "name": "Example", "team_id": "ABCDE12345", "sandbox": false,
                 "files_scanned": 41, "bytes_scanned": 68_219_904
             }
         });

@@ -233,6 +233,7 @@ mod tests {
                 location: RelPath::new("Contents/Frameworks").unwrap(),
                 region: Region::DirEntries,
                 scope: Scope::Dependency,
+                max_sdk: None,
             },
         })
     }
@@ -245,6 +246,7 @@ mod tests {
             facts: Facts {
                 name: Some("Example".into()),
                 team_id: None,
+                sandbox: None,
                 files_scanned: 2,
                 bytes_scanned: 64,
             },

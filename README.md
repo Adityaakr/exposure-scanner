@@ -26,6 +26,7 @@ the scan scheduler:
 | `exposure scan` on an Android package (`.apk`) | Done, with four witnesses: manifest components, classes defined in the DEX files, DEX string constants, and entry names |
 | Resolver: the company behind an SDK or a host, the app's vendor by Team ID then app id, first or third party, headline counts | Done (below) |
 | Scan scheduler: finding the installed apps, and bundles and packages in a folder; one queue of files for the whole scan, largest first; an app that cannot be read is reported and does not stop the scan | Done (below) |
+| What each app may access: usage descriptions and entitlements of a macOS bundle, `uses-permission` of an Android manifest, as access claims graded `requested` | Done (below) |
 | HTML report, cache | Not yet (build plan tasks 11 to 14) |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
@@ -39,7 +40,9 @@ What a scan of a macOS bundle reads, and what each part is a witness of:
 | Embedded-script sections such as `__BUN,__bun` | `content_literal` | SDK literals in the script of an app compiled into its runtime |
 | `NSPrivacyTrackingDomains` of every `PrivacyInfo.xcprivacy` | `privacy_manifest` | Tracking domains the app or a library declares, each shown as a host |
 | `SUFeedURL` of `Contents/Info.plist` | `update_feed` | The host the app fetches its updates from |
-| Code signature of the main executable | (a fact, not a witness) | The Apple Team ID the signature names. It is read, not verified |
+| Code signature of the main executable | (a fact, not a witness) | The Apple Team ID the signature names, and whether the app asks for the App Sandbox. Both are read, not verified |
+| `*UsageDescription` keys of `Contents/Info.plist` | `usage_description` | A permission the app asks for, with the purpose it states (an access edge, below) |
+| Entitlements in the code signature of the main executable | `entitlement` | A permission the app asks for (an access edge, below) |
 
 A declared address is cut down to its host; no URL is stored. A host is shown
 as itself, under the company the rule pack lists its domain for, or as
@@ -155,7 +158,7 @@ not part of the JSON report, and it never holds a path you gave.
 
 ```console
 $ target/release/exposure scan --json report.json
-exposure: scanned 16 apps (11658 files, 6813162633 bytes): 19 claims, 2 coverage notes
+exposure: scanned 16 apps (11658 files, 6813162633 bytes): 121 claims, 3 coverage notes
 exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
 exposure: scope: the apps installed in /Applications and ~/Applications; /System/Applications (Apple's own apps on the sealed system volume) was not searched: name the folder to scan it
 ```
@@ -198,6 +201,74 @@ names the rule token, where it was found and how often. `vendor` says what
 `party` rests on: here the pack lists nobody as the publisher of the app, and
 all that is known is the domain its app id spells.
 
+### What an app may access
+
+Besides what an app ships, a scan says what it may access: the camera, the
+microphone, the screen's sound, location, contacts, files and folders, the
+network, other apps. An app asks for these in its own files, and each place
+it asks is a witness of its own:
+
+| Where | Witness | Example key |
+|---|---|---|
+| `Contents/Info.plist` of a macOS bundle | `usage_description` | `NSCameraUsageDescription`, with the sentence macOS shows when it asks |
+| Entitlements of the main executable's code signature | `entitlement` | `com.apple.security.device.camera` |
+| `uses-permission` in an Android manifest | `android_permission` | `android.permission.CAMERA` |
+
+Each becomes an access claim, apart from every channel:
+
+```json
+{
+  "type": "access",
+  "object": {"kind": "permission", "id": "camera", "name": "Camera"},
+  "category": "capture", "company": null, "headline": false, "party": "unknown",
+  "grade": "requested", "rungs": ["requested"], "confidence": "high", "witnesses": 2,
+  "evidence": ["sha256:…", "sha256:…"]
+}
+```
+
+`requested` is the bottom rung of the access ladder and means "may access":
+the app asks for it. It does not mean the user allowed it, and it does not
+mean the app ever did it. The cited records carry the key, the file it is
+in, and for a usage description the purpose the app states, cut to 160
+bytes. A claim about access names no company and counts in no headline
+number. That an app may access the camera and ships an analytics SDK does
+not say the SDK receives pictures, and the report never joins the two.
+
+Which keys mean which permission is a fixed list in `xs-model`
+(`access.rs`), with its own categories: camera, microphone and screen;
+location; personal data; calls and messages; files and folders; network;
+nearby devices; control of other apps and the system; tracking identifiers;
+authentication. An Android permission that reaches nothing of the user's,
+such as `WAKE_LOCK`, is not listed and is no finding. A usage description
+under a key the list does not know is a coverage note (`unrecognized`,
+`unrecognized_record`), not silence. An entitlement that holds a list, such
+as a sandbox exception for paths on your disk, is recorded with the number
+of its entries and never the entries. An Android permission the manifest
+limits with `android:maxSdkVersion` keeps that level as `max_sdk` in its
+record. When every witness of a claim stops at a level, the claim's `notes`
+say which devices it is limited to, such as "only on Android 9 and older
+(API level 28)".
+
+Only the main executable speaks for the app; a helper's entitlements are the
+helper's. Its signature also says whether the app runs in the App Sandbox,
+recorded as `sandbox` in the app's facts. Outside the sandbox no
+entitlement limits which of your files the app can read or whether it can
+use the network, so the absence of those permissions says nothing about such
+an app. A main executable whose signature could not be read leaves a
+coverage note and `sandbox` unknown.
+
+Not seen: what macOS grants in System Settings without the app declaring
+it, such as Accessibility, Screen Recording and Full Disk Access, and which
+permissions you actually allowed. Both live in the system's permission
+store, outside the app's files, which macOS 27 closes to other apps
+(design report, C10). A scan of files says what an app may ask for, not what
+it was given.
+
+On the Mac this was built on, the 16 installed apps gave 102 access claims:
+14 of them may access the camera and the microphone, 7 may control other
+apps, 5 are sandboxed. Each claim matched what `plutil` and
+`codesign -d --entitlements -` show for the same app.
+
 ### Android packages
 
 ```console
@@ -219,6 +290,9 @@ are matched, each an independent witness:
 | `android_class_prefix` | Classes the `classes*.dex` files define, not merely refer to | Entry classes keep their names |
 | `dex_string` | String constants of the `classes*.dex` files | The code is fully obfuscated |
 | `apk_file` | Names of the archive's entries | The code is fully obfuscated |
+
+The manifest's `uses-permission` elements are read too, for what the app may
+access (above).
 
 A record names the table and the file a hit is in, so it can be checked with
 `unzip -l`, `aapt2 dump xmltree` or `dexdump`. A hit in the string table

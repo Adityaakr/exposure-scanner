@@ -27,8 +27,8 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use xs_model::record::{Platform, Record};
-use xs_model::{MatcherKind, Report, Sha256Stream};
+use xs_model::record::{EdgeType, Platform, Record};
+use xs_model::{Claim, MatcherKind, Report, Sha256Stream};
 
 const PINS: &str = include_str!("../../../tests/fixtures/real-apps.txt");
 
@@ -90,11 +90,57 @@ fn scan(paths: &[&Path], threads: usize) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-/// The matcher kinds behind each claim, by SDK.
-fn witnesses(report: &Report) -> Vec<(&str, Vec<MatcherKind>)> {
+/// The claims about channels: SDKs the app ships. What it may access is a
+/// claim of another type, checked by [`may_access`].
+fn channels(report: &Report) -> impl Iterator<Item = &Claim> {
+    report.claims.iter().filter(|claim| claim.edge == EdgeType::Channel)
+}
+
+/// What the app may access, each permission with the manifest permissions
+/// that ask for it, without the `android.permission.` they start with.
+fn may_access(report: &Report) -> Vec<(&str, Vec<&str>)> {
     report
         .claims
         .iter()
+        .filter(|claim| claim.edge == EdgeType::Access)
+        .map(|claim| {
+            let mut asked: Vec<&str> = claim
+                .evidence
+                .iter()
+                .map(|id| match report.evidence.get(id) {
+                    Some(Record::Edge(edge)) => {
+                        assert_eq!(edge.proof.matcher, MatcherKind::AndroidPermission);
+                        assert_eq!(edge.proof.location.as_str(), "AndroidManifest.xml");
+                        let name = edge.proof.token.as_str();
+                        name.strip_prefix("android.permission.").unwrap_or(name)
+                    }
+                    other => panic!("a claim cites {other:?}"),
+                })
+                .collect();
+            asked.sort_unstable();
+            (claim.object.id.as_str(), asked)
+        })
+        .collect()
+}
+
+/// What both builds of Bitwarden ask for in their manifest. The names were
+/// read out of the manifest's string pool by hand; the manifest asks for
+/// nine more that reach nothing of the user's, such as `WAKE_LOCK`.
+const BITWARDEN_MAY_ACCESS: [(&str, &[&str]); 5] = [
+    ("biometrics", &["USE_BIOMETRIC", "USE_FINGERPRINT"]),
+    ("camera", &["CAMERA"]),
+    ("local-network", &["ACCESS_LOCAL_NETWORK"]),
+    ("network-client", &["INTERNET"]),
+    ("nfc", &["NFC"]),
+];
+
+fn expected(asked: &[(&'static str, &[&'static str])]) -> Vec<(&'static str, Vec<&'static str>)> {
+    asked.iter().map(|(permission, names)| (*permission, names.to_vec())).collect()
+}
+
+/// The matcher kinds behind each claim about a channel, by SDK.
+fn witnesses(report: &Report) -> Vec<(&str, Vec<MatcherKind>)> {
+    channels(report)
         .map(|claim| {
             let mut kinds: Vec<MatcherKind> = claim
                 .evidence
@@ -133,13 +179,18 @@ fn the_play_build_of_bitwarden_reports_the_five_google_sdks() {
             ("sdk/play-billing", vec![Manifest, Class]),
         ]
     );
-    for claim in &report.claims {
+    for claim in channels(&report) {
         assert_eq!(claim.company.as_deref(), Some("google"), "{}", claim.object.id);
+    }
+    for claim in &report.claims {
         assert_eq!(claim.subject.platform, Platform::Android);
         assert_eq!(claim.subject.id, "com.x8bit.bitwarden");
         assert_eq!(claim.subject.version.as_deref(), Some("2026.9.1"));
         assert_eq!(claim.subject.digest.to_string(), format!("sha256:{}", pinned(BITWARDEN_PLAY)));
     }
+    // What the app may access is the same in both builds: the Google SDKs
+    // add channels, not permissions that reach the user's data.
+    assert_eq!(may_access(&report), expected(&BITWARDEN_MAY_ACCESS));
     // Every part of the package was read: no coverage record.
     assert!(!report.evidence.iter().any(|(_, record)| matches!(record, Record::Coverage(_))));
 
@@ -157,19 +208,28 @@ fn the_play_build_of_bitwarden_reports_the_five_google_sdks() {
 }
 
 /// The same app built without the Google SDKs, and a negative control. Any
-/// edge at any confidence fails (design report, section 3, issue A2).
+/// channel edge at any confidence fails (design report, section 3, issue
+/// A2). What each may access is what its manifest asks for.
 #[test]
 fn the_fdroid_build_of_bitwarden_and_newpipe_report_nothing() {
-    for (file, id, version) in [
-        (BITWARDEN_FDROID, "com.x8bit.bitwarden", "2026.9.1"),
-        (NEWPIPE, "org.schabi.newpipe", "0.29.3"),
+    let newpipe: [(&str, &[&str]); 2] =
+        [("network-client", &["INTERNET"]), ("shared-storage", &["WRITE_EXTERNAL_STORAGE"])];
+    for (file, id, version, asked) in [
+        (BITWARDEN_FDROID, "com.x8bit.bitwarden", "2026.9.1", &BITWARDEN_MAY_ACCESS[..]),
+        (NEWPIPE, "org.schabi.newpipe", "0.29.3", &newpipe[..]),
     ] {
         let Some(apk) = cached(file) else { return };
         let report: Report = serde_json::from_str(&scan(&[&apk], 2)).unwrap();
-        assert!(report.claims.is_empty(), "{file}: {:?}", report.claims);
-        // Nothing found, and nothing passed over: the one record is the
-        // package's identity.
-        let records: Vec<&Record> = report.evidence.iter().map(|(_, record)| record).collect();
+        assert_eq!(channels(&report).count(), 0, "{file}: {:?}", report.claims);
+        assert_eq!(may_access(&report), expected(asked), "{file}");
+        // No SDK found, and nothing passed over: beside what the manifest
+        // asks for, the one record is the package's identity.
+        let records: Vec<&Record> = report
+            .evidence
+            .iter()
+            .map(|(_, record)| record)
+            .filter(|record| !matches!(record, Record::Edge(edge) if edge.edge == EdgeType::Access))
+            .collect();
         let [Record::Artifact(artifact)] = records[..] else {
             panic!("{file}: expected one artifact record, got {records:?}")
         };
@@ -189,7 +249,9 @@ fn the_real_apps_give_one_report_whatever_the_order_and_thread_count() {
     let backward: Vec<&Path> = forward.iter().rev().copied().collect();
     let reference = scan(&forward, 1);
     let parsed: Report = serde_json::from_str(&reference).unwrap();
-    assert_eq!(parsed.claims.len(), 5, "two builds of one app id: only the Play build has claims");
+    let shipped = channels(&parsed).count();
+    assert_eq!(shipped, 5, "two builds of one app id: only the Play build ships SDKs");
+    assert_eq!(parsed.claims.len() - shipped, 5 + 5 + 2, "what each of the three may access");
     for threads in [2, 8] {
         assert!(scan(&forward, threads) == reference, "{threads} threads");
         assert!(scan(&backward, threads) == reference, "{threads} threads, reversed");
