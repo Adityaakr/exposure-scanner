@@ -37,7 +37,7 @@ use xs_model::matcher::MatcherKind;
 use xs_model::pack::{Rule, Token};
 use xs_model::text;
 
-use crate::hits::HitAcc;
+use crate::hits::{HitAcc, PatternId};
 use crate::matchers::{Matchers, TokenRef};
 
 /// A haystack whose content hits name this many companies or more is
@@ -47,6 +47,9 @@ pub const BREADTH_LIMIT: usize = 8;
 /// One token that was found in a haystack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding<'p> {
+    /// The token's id in the matchers that found it, for a collector that
+    /// gathers the findings of many haystacks in a [`HitAcc`] of its own.
+    pub pattern: PatternId,
     /// The rule the token belongs to.
     pub rule: &'p Rule,
     /// The kind of witness.
@@ -112,6 +115,7 @@ pub(crate) fn judge<'p>(matchers: &Matchers<'p>, hits: &HitAcc) -> Verdict<'p> {
                 .example(pattern)
                 .map(|bytes| text::clean(&String::from_utf8_lossy(bytes), text::MAX_EXAMPLE_BYTES));
             let finding = Finding {
+                pattern,
                 rule: token.rule,
                 matcher: token.matcher,
                 token: token.token,

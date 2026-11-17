@@ -101,9 +101,11 @@ pub(crate) fn run(strict: bool) -> Result<()> {
     let target =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
     let exposure = target.join("release/exposure");
-    let fixture = root.join("tests/fixtures/macos/Skeleton.app");
-    let fixture = fixture.to_str().ok_or("the repository path is not UTF-8")?;
-    let scan = ["scan", fixture, "--threads", "2"];
+    // Both fixtures, so that every collector reads something: a bundle with
+    // a framework folder, and an Electron app with an archive.
+    let fixtures = root.join("tests/fixtures/macos");
+    let fixtures = fixtures.to_str().ok_or("the repository path is not UTF-8")?;
+    let scan = ["scan", fixtures, "--threads", "2"];
     let me = std::env::current_exe()
         .map_err(|error| format!("cannot find the xtask binary: {error}"))?;
 

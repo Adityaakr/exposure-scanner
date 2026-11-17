@@ -12,6 +12,7 @@
 //!   (design report, section 3, issue C3).
 #![cfg_attr(not(test), deny(clippy::indexing_slicing, clippy::arithmetic_side_effects))]
 
+pub mod asar;
 pub mod info_plist;
 pub mod macho;
 

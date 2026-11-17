@@ -31,3 +31,10 @@ npm_package = ["@sentry/browser", "@sentry/electron", "@sentry/node", "@sentry/r
 apple_framework = ["Sentry.framework"]
 macho_objc_class = ["SentryHub", "SentryHubInternal", "SentrySDK", "SentrySDKInternal"]
 content_literal = [{ lit = "sentry.javascript.", at = "word" }]
+
+# Logseq 2.0.2 for macOS on Apple silicon bundles this SDK into `js/main.js`
+# of its `app.asar` (project spec, spike results).
+[[fixture]]
+sha256 = "ffd6e086ba6f68a4748f80eaa8b38244a9cf78b05c076343d75e0230fe9440b4"
+url = "https://github.com/logseq/logseq/releases/download/2.0.2/Logseq-darwin-arm64-2.0.2.zip"
+expect = ["content_literal"]

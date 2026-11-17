@@ -859,6 +859,7 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "rayon",
+ "serde_json",
  "tempfile",
  "xs-formats",
  "xs-match",
@@ -880,6 +881,8 @@ version = "0.1.0"
 dependencies = [
  "plist",
  "proptest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

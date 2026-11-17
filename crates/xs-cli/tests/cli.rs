@@ -307,7 +307,13 @@ fn help_and_version() {
 #[test]
 fn rules_show_lists_the_built_in_pack() {
     let listing = stdout(&exposure(&["rules", "show"]));
-    assert!(listing.starts_with("layer core version 1 (CC-BY-4.0), sha256 "), "{listing}");
+    // The version rises with every rule change, so it is not pinned here.
+    let rest = listing.strip_prefix("layer core version ").unwrap_or_else(|| panic!("{listing}"));
+    let after_version = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+    assert!(
+        rest != after_version && after_version.starts_with(" (CC-BY-4.0), sha256 "),
+        "{listing}"
+    );
     for expected in
         ["sdk/sentry", "sdk/firebase-crashlytics", "sdk/posthog", "sdk/appcenter-crashes"]
     {
@@ -321,7 +327,7 @@ fn rules_show_lists_the_built_in_pack() {
 #[test]
 fn rules_verify_accepts_the_signed_pack_and_refuses_a_tampered_one() {
     let ok = stdout(&exposure(&["rules", "verify", PACK, "--sig", PACK_SIGNATURE]));
-    assert!(ok.starts_with("ok: layer core version 1"), "{ok}");
+    assert!(ok.starts_with("ok: layer core version "), "{ok}");
     assert!(ok.contains("signed by exposure-pack-1"), "{ok}");
 
     let dir = tempfile::tempdir().unwrap();

@@ -7,6 +7,7 @@ sources = [
     "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/node/package.json",
     "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/browser/src/posthog-core.ts",
     "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/browser/src/utils/request-router.ts",
+    "https://raw.githubusercontent.com/PostHog/posthog-js/v1.10.0/src/posthog-core.js",
     "https://raw.githubusercontent.com/PostHog/posthog-android/main/posthog-android/build.gradle.kts",
     "https://raw.githubusercontent.com/PostHog/posthog-android/main/posthog/src/main/java/com/posthog/PostHogConfig.kt",
     "https://raw.githubusercontent.com/PostHog/posthog-ios/main/PostHog.xcodeproj/project.pbxproj",
@@ -14,6 +15,10 @@ sources = [
 
 # The Android prefix is com.posthog.android. and not com.posthog., because the
 # same repository ships a server-side JVM SDK under com.posthog.server.
+#
+# app.posthog.com was the JavaScript SDK's default host until the ingestion
+# hosts under i.posthog.com replaced it, and apps that bundle an old release
+# still carry it: Logseq 2.0.2 ships posthog-js 1.10.0.
 [match]
 android_class_prefix = ["com.posthog.android."]
 dex_string = [
@@ -23,6 +28,14 @@ dex_string = [
 npm_package = ["posthog-js", "posthog-node"]
 apple_framework = ["PostHog.framework"]
 content_literal = [
+    { lit = "app.posthog.com", at = "host" },
     { lit = "i.posthog.com", at = "host" },
     { lit = "us.i.posthog.com", at = "host" },
 ]
+
+# Logseq 2.0.2 for macOS on Apple silicon bundles this SDK into `js/main.js`
+# of its `app.asar` (project spec, spike results).
+[[fixture]]
+sha256 = "ffd6e086ba6f68a4748f80eaa8b38244a9cf78b05c076343d75e0230fe9440b4"
+url = "https://github.com/logseq/logseq/releases/download/2.0.2/Logseq-darwin-arm64-2.0.2.zip"
+expect = ["content_literal"]
