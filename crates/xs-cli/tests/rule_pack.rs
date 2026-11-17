@@ -215,7 +215,7 @@ fn what_real_apps_ship_is_found() {
 fn what_only_resembles_an_sdk_is_not_found() {
     let pack = pack();
     let matchers = Matchers::build(&pack).unwrap();
-    let cases: [(MatcherKind, &[&str]); 8] = [
+    let cases: [(MatcherKind, &[&str]); 10] = [
         // Dia names a module of its own TelemetryClient, the name of
         // TelemetryDeck's older module, and Segment is a common word.
         (
@@ -227,7 +227,7 @@ fn what_only_resembles_an_sdk_is_not_found() {
             ],
         ),
         // A plain word or bare brand word can be an app's own class name.
-        (MatcherKind::MachoObjcClass, &["Intercom", "OSNotification", "UnityAds"]),
+        (MatcherKind::MachoObjcClass, &["Intercom", "OSNotification", "UnityAds", "UXCam"]),
         (MatcherKind::AppleFramework, &["TelemetryClient.framework", "Segment.framework"]),
         // NewPipe, which shows no ads, has an ad host among its strings.
         (
@@ -236,6 +236,8 @@ fn what_only_resembles_an_sdk_is_not_found() {
         ),
         // One endpoint string of an ad network is not enough.
         (MatcherKind::DexString, &["https://ms.applovin.com/"]),
+        (MatcherKind::MachoToken, &["https://ms.applovin.com/"]),
+        (MatcherKind::ContentLiteral, &["https://api2.branch.io/v1/open"]),
         // Grok labels its own pages for Datadog's SDK without shipping it.
         (
             MatcherKind::ContentLiteral,

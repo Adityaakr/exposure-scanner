@@ -14,4 +14,4 @@ manifest_component = [
 ]
 android_class_prefix = ["com.uxcam."]
 apple_framework = ["UXCam.framework"]
-macho_objc_class = ["UXCam", "UXCamConfiguration", "UXCamHandler"]
+macho_objc_class = ["UXCamConfiguration", "UXCamHandler"]

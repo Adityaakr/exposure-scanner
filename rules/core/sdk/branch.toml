@@ -16,12 +16,12 @@ sources = [
 # Deep links and install attribution.
 #
 # Its endpoint hosts are strings an app that filters ad or tracking traffic can
-# hold as data, so two different ones must be in one DEX file to count.
+# hold as data, so two different ones must be in one file, a DEX file or a
+# binary, to count.
 [match]
 android_class_prefix = ["io.branch.referral."]
 dex_string = [{ lit = "api2.branch.io", at = "host" }, { lit = "cdn.branch.io", at = "host" }]
 npm_package = ["branch-sdk"]
-content_literal = [{ lit = "api2.branch.io", at = "host" }]
 apple_framework = ["BranchSDK.framework"]
 macho_objc_class = ["BNCDeviceInfo", "BNCLinkCache", "BranchUniversalObject"]
 macho_token = [{ lit = "api3.branch.io", at = "host" }, { lit = "cdn.branch.io", at = "host" }]
@@ -29,4 +29,4 @@ privacy_manifest = [
     { lit = "api-safetrack-eu.branch.io", at = "host" },
     { lit = "api-safetrack.branch.io", at = "host" },
 ]
-min_distinct = { dex_string = 2 }
+min_distinct = { dex_string = 2, macho_token = 2 }

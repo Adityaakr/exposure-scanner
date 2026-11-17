@@ -8,7 +8,8 @@ sources = [
 ]
 
 # Its endpoint hosts are strings an app that filters ad or tracking traffic can
-# hold as data, so two different ones must be in one DEX file to count.
+# hold as data, so two different ones must be in one file, a DEX file or a
+# binary, to count.
 [match]
 android_class_prefix = ["com.kochava.core.", "com.kochava.tracker."]
 dex_string = [
