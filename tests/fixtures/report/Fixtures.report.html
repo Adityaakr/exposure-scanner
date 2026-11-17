@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-rNa04b7I1iqCjn2UDk60hfrfNT0kV8XgvNEXLXEU8Gw='; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-FfPh1a5CrdCRxQbdjeFLYRUqW9y5h2BrjEWQB+KVgiU='; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
@@ -85,6 +85,16 @@ section { margin-top: 2.5rem; }
 .count .n { font-size: 2.4rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .count .label { font-weight: 600; margin-top: 0.25rem; }
 .count .sub { color: var(--soft-ink); font-size: 0.85rem; margin-top: 0.35rem; }
+#summary h3 { margin-top: 1.5rem; margin-bottom: 0.5rem; }
+.lead { font-size: 1.25rem; font-weight: 600; }
+.found { list-style: none; margin-top: 0.75rem; padding: 0; }
+.found li { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 0.7rem 1rem 0.8rem; }
+.found li + li { margin-top: 0.5rem; }
+.found p + p { margin-top: 0.3rem; }
+.thing strong { font-size: 1.05rem; }
+.owner { color: var(--soft-ink); font-size: 0.9rem; }
+.where { font-size: 0.9rem; }
+.zero { font-weight: 600; }
 .note, .meta, .none { color: var(--soft-ink); font-size: 0.9rem; }
 .none { background: var(--panel); border-radius: 0.5rem; padding: 0.75rem 1rem; }
 .totals {
@@ -124,7 +134,9 @@ th { color: var(--soft-ink); font-size: 0.8rem; font-weight: 600; white-space: n
 .g-confirmed { background: var(--confirmed-bg); color: var(--confirmed-ink); }
 .g-requested, .g-granted, .g-used { background: var(--access-bg); color: var(--access-ink); }
 .tag { background: var(--panel); color: var(--soft-ink); font-weight: 500; }
+.tag.counted, .tag.uncounted { border: 1px solid var(--counted-bg); font-weight: 600; }
 .tag.counted { background: var(--counted-bg); color: var(--counted-ink); }
+.tag.uncounted { background: none; color: var(--ink); }
 
 .company { border-top: 2px solid var(--ink); margin-top: 2rem; padding-top: 1rem; }
 .company > .meta { margin-top: 0.25rem; }
@@ -188,7 +200,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
   a { text-decoration: none; }
   section { margin-top: 1.6rem; }
   h2, h3, h4, h5 { break-after: avoid; }
-  .count, .finding, .record, .evidence li, tr { break-inside: avoid; }
+  .count, .finding, .record, .evidence li, .found li, tr { break-inside: avoid; }
   .scroll { overflow: visible; }
   .grade, .tag { border: 1px solid #888888; }
 }
@@ -213,12 +225,32 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <main>
 <section id="summary">
 <h2>Summary</h2>
+<h3>What was found</h3>
+<p class="lead">5 findings in 3 of 3 apps scanned.</p>
+<p class="note">Each entry is one thing the scan found and the apps it is in, with what is in the most apps first. An app's name links to its finding further down, which shows the evidence.</p>
+<ul class="found">
+<li>
+<p class="thing"><strong>Sentry</strong> <span class="tag">Crash reporting</span></p>
+<p class="owner">Functional Software, Inc. (Sentry)</p>
+<p class="fact"><span class="grade g-contains">contains</span> ships in 3 of 3 apps</p>
+<p class="where">In <a href="#f-c606554f70326e31474b5a98b99c610cec1d381190e534fa355e06e528ce30ac">ElectronSkeleton</a>, <a href="#f-898645fdb677a58f33e217cd971a0611720c3194cacbf704edf996890c7403db">Skeleton</a>, <a href="#f-2fc3cee02feee2e8db8c7eaa9879b54c28ac4f8e6ac3783a84be89276050b8a6">Skeleton</a></p>
+<p><span class="tag uncounted">not counted</span></p>
+</li>
+<li>
+<p class="thing"><strong>PostHog</strong> <span class="tag">Analytics</span></p>
+<p class="owner">PostHog Inc.</p>
+<p class="fact"><span class="grade g-contains">contains</span> ships in 2 of 3 apps</p>
+<p class="where">In <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a>, <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a></p>
+<p><span class="tag counted">counted</span></p>
+</li>
+</ul>
+<h3>The three headline counts</h3>
+<p class="note">These three numbers do not count every finding. They count the findings that name a company in the categories Advertising, Analytics, Attribution, Profiling and Session replay. Every other finding, such as crash reporting or an update feed, is in the list above and in the findings below, and in none of these numbers. There is no score.</p>
 <div class="counts">
 <div class="count"><p class="n">0</p><p class="label">companies with a recorded connection</p><p class="sub">Grade <code>contacts</code> or above: a connection to the company was recorded.</p></div>
 <div class="count"><p class="n">1</p><p class="label">company whose code the scanned apps ship</p><p class="sub">Strongest grade <code>contains</code>: the code is present. Presence is not use.</p></div>
 <div class="count"><p class="n">2</p><p class="label">apps with a third-party channel</p><p class="sub">A counted finding names a company that is not the app's own publisher.</p></div>
 </div>
-<p class="note">These three numbers count the findings that name a company in the categories Advertising, Analytics, Attribution, Profiling and Session replay. Every other finding, such as crash reporting or an update feed, is listed below and counted in none of them. There is no score.</p>
 <ul class="totals">
 <li>3 apps scanned</li>
 <li>5 findings</li>
@@ -332,7 +364,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </div>
 </section>
 <section class="company">
-<h3>Functional Software, Inc. (Sentry) <span class="tag">not counted</span></h3>
+<h3>Functional Software, Inc. (Sentry) <span class="tag uncounted">not in the counted categories</span></h3>
 <p class="meta">3 apps · 3 findings · strongest grade <span class="grade g-contains">contains</span></p>
 <div class="app">
 <h4>ElectronSkeleton</h4>
@@ -558,7 +590,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <dt>Scanner</dt><dd>exposure 0.1.0</dd>
 <dt>Rule pack</dt><dd>core version 4, SHA-256 <code>0f175e029a22eafd1d92d1721c3d82fa18c8220b59111343eae9dadac00996e8</code></dd>
 </dl>
-<p>The same evidence and the same rule pack always give this same file, byte for byte. It holds no date, no device name and no path outside an app.</p>
+<p>The same evidence, the same rule pack and the same scan scope always give this same file, byte for byte. It holds no date, no device name and no path outside an app.</p>
 </section>
 </main>
 </body>

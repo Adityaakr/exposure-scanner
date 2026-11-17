@@ -1,9 +1,14 @@
 //! The HTML report: one file a person can open, read and print.
 //!
-//! It shows the findings grouped by company, each with its grade, its
+//! It leads with what was found, each thing once with the apps it is in.
+//! Then it shows the findings grouped by company, each with its grade, its
 //! confidence and the records it rests on; what the scan covered and what it
 //! set aside; what no scan of a device can see; and every evidence record,
 //! exactly as stored.
+//!
+//! The page is made from one list, [`SECTIONS`]. The navigation at its top is
+//! written from the same list, so it names the sections that are on the page
+//! and no other.
 //!
 //! The values it shows come out of scanned apps, so the document is built to
 //! stay inert whatever they hold (design report, section 3, M3):
@@ -25,6 +30,7 @@ mod words;
 
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use xs_model::canon;
 use xs_model::claim::{Party, VendorBasis};
@@ -34,7 +40,7 @@ use xs_model::record::{
 };
 use xs_model::{Claim, EvidenceSet};
 
-use self::view::{App, AppFindings, Company, Finding, View};
+use self::view::{App, AppFindings, Company, Finding, Found, View};
 use self::words::{list_words, plural, short};
 use crate::markup::{Markup, Value};
 use crate::{RenderError, ReportMeta, check_honest};
@@ -44,7 +50,7 @@ use crate::{RenderError, ReportMeta, check_honest};
 /// it from the stylesheet.
 macro_rules! style_source {
     () => {
-        "'sha256-rNa04b7I1iqCjn2UDk60hfrfNT0kV8XgvNEXLXEU8Gw='"
+        "'sha256-FfPh1a5CrdCRxQbdjeFLYRUqW9y5h2BrjEWQB+KVgiU='"
     };
 }
 
@@ -66,7 +72,7 @@ macro_rules! policy {
 /// `form-action` do not fall back to `default-src` and are closed by name.
 pub const CONTENT_SECURITY_POLICY: &str = policy!();
 
-/// Everything before the first value: the head, and the top of the page.
+/// Everything before the navigation: the head, and the top of the page.
 const HEAD: &str = concat!(
     "<!doctype html>\n",
     "<html lang=\"en\">\n",
@@ -93,24 +99,55 @@ const HEAD: &str = concat!(
     "<p class=\"private\">This file was made on your device and lists apps you use, so treat \
      it as private. It loads nothing from the network and runs no script.</p>\n",
     "</header>\n",
-    "<nav class=\"toc\">\n",
-    "<a href=\"#summary\">Summary</a>\n",
-    "<a href=\"#reading\">How to read it</a>\n",
-    "<a href=\"#findings\">Findings</a>\n",
-    "<a href=\"#coverage\">Coverage</a>\n",
-    "<a href=\"#limits\">Limits</a>\n",
-    "<a href=\"#records\">Records</a>\n",
-    "<a href=\"#about\">About</a>\n",
-    "</nav>\n",
-    "<main>\n",
 );
+
+/// What a section is written from.
+struct Input<'a> {
+    view: &'a View<'a>,
+    evidence: &'a EvidenceSet,
+    meta: &'a ReportMeta,
+}
+
+/// One section of the page.
+struct Section {
+    /// Its anchor.
+    id: &'static str,
+    /// The link to that anchor.
+    href: &'static str,
+    /// What the navigation calls it.
+    nav: &'static str,
+    heading: &'static str,
+    /// Writes what is below the heading. A section whose body writes
+    /// nothing is not on the page, and not in the navigation.
+    body: fn(&mut Markup, &Input<'_>) -> Result<(), RenderError>,
+}
+
+macro_rules! section {
+    ($id:literal, $nav:literal, $heading:literal, $body:expr) => {
+        Section { id: $id, href: concat!("#", $id), nav: $nav, heading: $heading, body: $body }
+    };
+}
+
+/// The sections of the report, in the order they are on the page.
+const SECTIONS: [Section; 7] = [
+    section!("summary", "Summary", "Summary", summary),
+    section!("reading", "How to read it", "How to read this report", reading),
+    section!("findings", "Findings", "Findings by company", findings),
+    section!("coverage", "Coverage", "What was scanned, and what was not", coverage),
+    section!("limits", "Limits", "What this report cannot tell you", limits),
+    section!("records", "Records", "Evidence records", records),
+    section!("about", "About", "About this report", about),
+];
+
+/// What the summary and the findings say when there is no finding.
+const NOTHING_FOUND: &str = "<p class=\"none\">No scanned app matched a rule. That does not \
+show the apps hold no third-party code: the scanner recognises only what its rule pack \
+describes. See <a href=\"#limits\">the limits</a>.</p>\n";
 
 /// The limits statement. It is the same in every report, because it is true
 /// of every scan of a device (project spec, "What can be observed, and what
 /// cannot").
-const LIMITS: &str = "<section id=\"limits\">\n\
-<h2>What this report cannot tell you</h2>\n\
-<p>This report rests on files that are on the device. It shows what an app ships and what \
+const LIMITS: &str = "<p>This report rests on files that are on the device. It shows what an app ships and what \
 it declares. Three things are out of reach of this scan and of every scan of a device:</p>\n\
 <ul class=\"limits\">\n\
 <li><strong>What is sent.</strong> Apps encrypt their traffic, so the content of a request \
@@ -137,8 +174,7 @@ SDK from being recognised. What the scan set aside is listed under \
 <a href=\"#coverage\">coverage</a>.</li>\n\
 <li><strong>Names are as the files give them.</strong> An app's name, its id and the Team \
 ID in its signature are read from the app and are not verified.</li>\n\
-</ul>\n\
-</section>\n";
+</ul>\n";
 
 /// Renders the HTML report.
 ///
@@ -165,23 +201,180 @@ pub fn html(
         return Err(RenderError::PackMismatch);
     }
     let view = View::new(claims, evidence, pack)?;
+    document(&SECTIONS, &Input { view: &view, evidence, meta })
+}
+
+/// Writes the page: the head, a link to each section that is on the page,
+/// and those sections.
+fn document(sections: &[Section], input: &Input<'_>) -> Result<String, RenderError> {
+    let mut written = Vec::with_capacity(sections.len());
+    for section in sections {
+        let mut body = Markup::new();
+        (section.body)(&mut body, input)?;
+        if !body.is_empty() {
+            written.push((section, body));
+        }
+    }
 
     let mut page = Markup::new();
     page.raw(HEAD);
-    summary(&mut page, &view);
-    reading(&mut page, &view);
-    findings(&mut page, &view, evidence);
-    coverage(&mut page, &view, meta);
-    page.raw(LIMITS);
-    records(&mut page, &view)?;
-    about(&mut page, meta);
+    page.raw("<nav class=\"toc\">\n");
+    for (section, _) in &written {
+        page.element("a", &[("href", Value::Fixed(section.href))], section.nav);
+        page.raw("\n");
+    }
+    page.raw("</nav>\n<main>\n");
+    for (section, body) in written {
+        page.open("section", &[("id", Value::Fixed(section.id))]);
+        page.raw("\n");
+        page.element("h2", &[], section.heading);
+        page.raw("\n");
+        page.append(body);
+        page.close();
+        page.raw("\n");
+    }
     page.raw("</main>\n</body>\n</html>\n");
     Ok(page.finish())
 }
 
-/// The three counts of the headline, and what was scanned.
-fn summary(page: &mut Markup, view: &View<'_>) {
-    page.raw("<section id=\"summary\">\n<h2>Summary</h2>\n<div class=\"counts\">\n");
+/// What was found, then the three counts of the headline, then the totals.
+fn summary(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
+    let view = input.view;
+    found(page, view);
+    headline(page, view);
+    page.raw("<ul class=\"totals\">\n");
+    for total in [
+        plural(view.read_apps().count() as u64, "app scanned", "apps scanned"),
+        plural(view.claims, "finding", "findings"),
+        plural(view.company_count(), "company named", "companies named"),
+        plural(view.coverage_notes, "coverage note", "coverage notes"),
+        plural(view.records, "evidence record", "evidence records"),
+    ] {
+        page.element("li", &[], &total);
+        page.raw("\n");
+    }
+    page.raw("</ul>\n");
+    Ok(())
+}
+
+/// Everything the scan found, once each, whether or not it counts in the
+/// headline: what it is, whose it is, in how many apps, and in which.
+fn found(page: &mut Markup, view: &View<'_>) {
+    page.raw("<h3>What was found</h3>\n");
+    if view.claims == 0 {
+        page.raw(NOTHING_FOUND);
+        return;
+    }
+    let scanned = view.read_apps().count() as u64;
+    let with_findings = view.read_apps().filter(|app| app.findings > 0).count() as u64;
+    page.open_class("p", "lead");
+    page.text(&plural(view.claims, "finding", "findings"));
+    page.raw(" in ");
+    page.number(with_findings);
+    page.raw(" of ");
+    page.text(&plural(scanned, "app scanned", "apps scanned"));
+    page.raw(".");
+    page.close();
+    page.raw(
+        "\n<p class=\"note\">Each entry is one thing the scan found and the apps it is in, \
+         with what is in the most apps first. An app's name links to its finding further \
+         down, which shows the evidence.</p>\n<ul class=\"found\">\n",
+    );
+    for thing in &view.found {
+        found_item(page, view, thing, scanned);
+    }
+    page.raw("</ul>\n");
+}
+
+/// One thing that was found.
+fn found_item(page: &mut Markup, view: &View<'_>, thing: &Found<'_>, scanned: u64) {
+    page.open("li", &[]);
+    page.raw("\n");
+    page.open_class("p", "thing");
+    page.element("strong", &[], thing.name);
+    page.raw(" ");
+    page.classed("span", "tag", &thing.category.name);
+    page.close();
+    page.raw("\n");
+
+    page.open_class("p", "owner");
+    match (thing.company, thing.edge, thing.kind) {
+        (Some(company), _, _) => page.text(&company.name),
+        (None, EdgeType::Channel, ObjectKind::Sdk) => {
+            page.raw("No company named: a component, with no network side of its own.");
+        }
+        (None, EdgeType::Channel, ObjectKind::Host) => {
+            page.raw("No company named: a host the rule pack lists under no company.");
+        }
+        (None, EdgeType::Access, _) => {
+            page.raw("No company named: this is about what the apps may access.");
+        }
+    }
+    page.close();
+    page.raw("\n");
+
+    page.open_class("p", "fact");
+    for (at, (grade, apps)) in thing.by_grade().into_iter().enumerate() {
+        if at == 0 {
+            grade_badge(page, grade);
+            page.raw(" ");
+        } else {
+            page.raw(", ");
+        }
+        page.text(&words::found_words(grade, apps, scanned));
+    }
+    page.close();
+    page.raw("\n");
+
+    page.open_class("p", "where");
+    page.raw("In ");
+    for (at, (&app, found)) in thing.apps.iter().enumerate() {
+        let Some(app) = view.apps.get(app) else { continue };
+        if at > 0 {
+            page.raw(", ");
+        }
+        page.element("a", &[("href", Value::Link("f-", found.claim.id.digest()))], app.title());
+    }
+    page.close();
+    page.raw("\n");
+
+    page.open("p", &[]);
+    if thing.counted {
+        page.classed("span", "tag counted", "counted");
+    } else {
+        page.classed("span", "tag uncounted", "not counted");
+    }
+    page.close();
+    page.raw("\n");
+    page.close();
+    page.raw("\n");
+}
+
+/// The three counts of the headline, and what they count.
+fn headline(page: &mut Markup, view: &View<'_>) {
+    page.raw("<h3>The three headline counts</h3>\n");
+    page.open_class("p", "note");
+    page.raw(
+        "These three numbers do not count every finding. They count the findings that name a \
+         company",
+    );
+    if !view.counted_categories.is_empty() {
+        page.raw(" in the categories ");
+        page.text(&list_words(&view.counted_categories));
+    }
+    page.raw(
+        ". Every other finding, such as crash reporting or an update feed, is in the list \
+         above and in the findings below, and in none of these numbers. There is no score.",
+    );
+    page.close();
+    page.raw("\n");
+    if view.claims > 0 && view.found.iter().all(|thing| !thing.counted) {
+        page.raw(
+            "<p class=\"zero\">None of the findings above names a company in a counted \
+             category, which is why these three counts are zero.</p>\n",
+        );
+    }
+    page.raw("<div class=\"counts\">\n");
     let headline = view.headline;
     count(
         page,
@@ -202,30 +395,6 @@ fn summary(page: &mut Markup, view: &View<'_>) {
         "A counted finding names a company that is not the app's own publisher.",
     );
     page.raw("</div>\n");
-
-    page.open_class("p", "note");
-    page.raw("These three numbers count the findings that name a company");
-    if !view.counted_categories.is_empty() {
-        page.raw(" in the categories ");
-        page.text(&list_words(&view.counted_categories));
-    }
-    page.raw(
-        ". Every other finding, such as crash reporting or an update feed, is listed below \
-         and counted in none of them. There is no score.",
-    );
-    page.close();
-    page.raw("\n<ul class=\"totals\">\n");
-    for total in [
-        plural(view.read_apps().count() as u64, "app scanned", "apps scanned"),
-        plural(view.claims, "finding", "findings"),
-        plural(view.company_count(), "company named", "companies named"),
-        plural(view.coverage_notes, "coverage note", "coverage notes"),
-        plural(view.records, "evidence record", "evidence records"),
-    ] {
-        page.element("li", &[], &total);
-        page.raw("\n");
-    }
-    page.raw("</ul>\n</section>\n");
 }
 
 fn count(page: &mut Markup, number: u32, label: (&str, &str), sub: &'static str) {
@@ -242,17 +411,16 @@ fn count(page: &mut Markup, number: u32, label: (&str, &str), sub: &'static str)
 }
 
 /// What a grade, a confidence and a party mean.
-fn reading(page: &mut Markup, view: &View<'_>) {
+fn reading(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
     page.raw(
-        "<section id=\"reading\">\n<h2>How to read this report</h2>\n\
-         <p>Each finding is a graded fact about what an app's files hold. The grade says what \
+        "<p>Each finding is a graded fact about what an app's files hold. The grade says what \
          kind of evidence there is, and a finding takes the highest grade its evidence \
          reaches. No finding says what an app or a company intends.</p>\n\
          <div class=\"scroll\">\n<table class=\"ladder\">\n\
          <thead><tr><th scope=\"col\">Grade</th><th scope=\"col\">In a word</th>\
          <th scope=\"col\">What it shows</th></tr></thead>\n<tbody>\n",
     );
-    let access = if view.has_access { &words::ACCESS_LADDER[..] } else { &[] };
+    let access = if input.view.access.is_empty() { &[] } else { &words::ACCESS_LADDER[..] };
     for &grade in words::CHANNEL_LADDER.iter().chain(access) {
         page.open("tr", &[]);
         page.open("td", &[]);
@@ -276,23 +444,21 @@ fn reading(page: &mut Markup, view: &View<'_>) {
          updater. It names no company.</dd>\n\
          <dt>Unmapped host</dt>\n<dd>A host the app declares that the rule pack lists under no \
          company. It is shown as itself and nobody is named as its owner.</dd>\n\
-         </dl>\n</section>\n",
+         </dl>\n",
     );
+    Ok(())
 }
 
 fn grade_badge(page: &mut Markup, grade: Grade) {
     page.classed("span", words::grade_class(grade), words::grade_name(grade));
 }
 
-/// The findings: by company, then the ones that name no company.
-fn findings(page: &mut Markup, view: &View<'_>, evidence: &EvidenceSet) {
-    page.raw("<section id=\"findings\">\n<h2>Findings by company</h2>\n");
+/// The findings: by company, then the channels that name no company, then
+/// what the apps may access.
+fn findings(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
+    let (view, evidence) = (input.view, input.evidence);
     if view.claims == 0 {
-        page.raw(
-            "<p class=\"none\">No scanned app matched a rule. That does not show the apps hold \
-             no third-party code: the scanner recognises only what its rule pack describes. \
-             See <a href=\"#limits\">the limits</a>.</p>\n",
-        );
+        page.raw(NOTHING_FOUND);
     } else {
         page.raw(
             "<p>Companies with a finding that counts in the summary come first, then the \
@@ -306,14 +472,27 @@ fn findings(page: &mut Markup, view: &View<'_>, evidence: &EvidenceSet) {
         page.raw(
             "<section class=\"company\">\n<h3>No company named</h3>\n\
              <p class=\"meta\">Components, and hosts the rule pack lists under no company. \
-             They are shown for completeness and counted nowhere.</p>\n",
+             They are findings like the others, and the three headline counts hold none of \
+             them.</p>\n",
         );
         for group in &view.unnamed {
             app_block(page, view, group, evidence);
         }
         page.raw("</section>\n");
     }
-    page.raw("</section>\n");
+    if !view.access.is_empty() {
+        page.raw(
+            "<section class=\"company access\">\n<h3>What the apps may access</h3>\n\
+             <p class=\"meta\">What an app asks for, what was allowed on this device, and \
+             what the operating system logged as used. These are not channels to a company, \
+             so they are under none, and the three headline counts hold none of them.</p>\n",
+        );
+        for group in &view.access {
+            app_block(page, view, group, evidence);
+        }
+        page.raw("</section>\n");
+    }
+    Ok(())
 }
 
 fn company_block(
@@ -329,7 +508,7 @@ fn company_block(
     if company.counted {
         page.classed("span", "tag counted", "counted in the summary");
     } else {
-        page.classed("span", "tag", "not counted");
+        page.classed("span", "tag uncounted", "not in the counted categories");
     }
     page.close();
     page.raw("\n");
@@ -454,16 +633,19 @@ fn finding_block(page: &mut Markup, finding: &Finding<'_>, evidence: &EvidenceSe
     page.close();
     page.raw("\n<dl class=\"facts\">\n");
 
-    match (claim.object.kind, finding.company) {
-        (ObjectKind::Sdk, Some(_)) => fact(page, "Rule", |page| code(page, &claim.object.id)),
-        (ObjectKind::Sdk, None) => fact(page, "Kind", |page| {
+    match (claim.edge, claim.object.kind, finding.company) {
+        (EdgeType::Access, _, _) => {}
+        (EdgeType::Channel, ObjectKind::Sdk, Some(_)) => {
+            fact(page, "Rule", |page| code(page, &claim.object.id));
+        }
+        (EdgeType::Channel, ObjectKind::Sdk, None) => fact(page, "Kind", |page| {
             page.raw("Component: a library with no network side of its own. Rule ");
             code(page, &claim.object.id);
         }),
-        (ObjectKind::Host, Some(_)) => {
+        (EdgeType::Channel, ObjectKind::Host, Some(_)) => {
             fact(page, "Kind", |page| page.raw("A host the app's own files declare."));
         }
-        (ObjectKind::Host, None) => fact(page, "Kind", |page| {
+        (EdgeType::Channel, ObjectKind::Host, None) => fact(page, "Kind", |page| {
             page.raw("Unmapped host: the rule pack lists it under no company.");
         }),
     }
@@ -604,17 +786,22 @@ fn evidence_item(page: &mut Markup, id: &RecordId, edge: &EdgeRecord) {
 }
 
 /// What the scan read, and what it set aside and why.
-fn coverage(page: &mut Markup, view: &View<'_>, meta: &ReportMeta) {
+fn coverage(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
     page.raw(
-        "<section id=\"coverage\">\n<h2>What was scanned, and what was not</h2>\n\
-         <p>Nothing found is not the same as not looked at. This section says where the scan \
+        "<p>Nothing found is not the same as not looked at. This section says where the scan \
          looked, lists every app it read, and lists everything it set aside or could not \
          interpret.</p>\n",
     );
-    scope(page, meta);
-    apps_scanned(page, view);
-    set_aside(page, view);
-    page.raw("</section>\n");
+    scope(page, input.meta);
+    apps_scanned(page, input.view);
+    set_aside(page, input.view);
+    Ok(())
+}
+
+/// What no scan of a device can see.
+fn limits(page: &mut Markup, _: &Input<'_>) -> Result<(), RenderError> {
+    page.raw(LIMITS);
+    Ok(())
 }
 
 /// Where the scan looked for apps, and where it deliberately did not.
@@ -740,10 +927,10 @@ fn coverage_row(page: &mut Markup, app: &App<'_>, id: &RecordId, note: &Coverage
 }
 
 /// Every record of the evidence set, as stored, grouped by app.
-fn records(page: &mut Markup, view: &View<'_>) -> Result<(), RenderError> {
+fn records(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
+    let view = input.view;
     page.raw(
-        "<section id=\"records\">\n<h2>Evidence records</h2>\n\
-         <p>Every record the scan produced, exactly as it is stored. The findings above link \
+        "<p>Every record the scan produced, exactly as it is stored. The findings above link \
          to the records they rest on. The id of a record is the SHA-256 of its text as shown \
          here, so a record that was changed no longer matches its id.</p>\n",
     );
@@ -780,13 +967,13 @@ fn records(page: &mut Markup, view: &View<'_>) -> Result<(), RenderError> {
             page.raw("\n");
         }
     }
-    page.raw("</section>\n");
     Ok(())
 }
 
 /// What made the report: the scanner and the rule pack.
-fn about(page: &mut Markup, meta: &ReportMeta) {
-    page.raw("<section id=\"about\">\n<h2>About this report</h2>\n<dl class=\"facts\">\n");
+fn about(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
+    let meta = input.meta;
+    page.raw("<dl class=\"facts\">\n");
     fact(page, "Scanner", |page| {
         page.text(&meta.scanner.name);
         page.raw(" ");
@@ -802,10 +989,11 @@ fn about(page: &mut Markup, meta: &ReportMeta) {
         });
     }
     page.raw(
-        "</dl>\n<p>The same evidence and the same rule pack always give this same file, byte \
-         for byte. It holds no date, no device name and no path outside an app.</p>\n\
-         </section>\n",
+        "</dl>\n<p>The same evidence, the same rule pack and the same scan scope always give \
+         this same file, byte for byte. It holds no date, no device name and no path outside \
+         an app.</p>\n",
     );
+    Ok(())
 }
 
 #[cfg(test)]

@@ -81,6 +81,21 @@ pub(crate) const fn grade_meaning(grade: Grade) -> &'static str {
     }
 }
 
+/// The graded fact about a thing found in `apps` of the `scanned` apps:
+/// `ships in 10 of 16 apps`.
+pub(crate) fn found_words(grade: Grade, apps: u64, scanned: u64) -> String {
+    let of = format!("{apps} of {}", plural(scanned, "app", "apps"));
+    match grade {
+        Grade::Declares => format!("declared by {of}"),
+        Grade::Contains => format!("ships in {of}"),
+        Grade::Contacts => format!("contacted by {of}"),
+        Grade::Confirmed => format!("confirmed for {of}"),
+        Grade::Requested => format!("{of} may access it"),
+        Grade::Granted => format!("{of} may access it, and it was allowed on this device"),
+        Grade::Used => format!("accessed by {of}"),
+    }
+}
+
 pub(crate) const fn confidence_name(confidence: Confidence) -> &'static str {
     match confidence {
         Confidence::Low => "low",
@@ -256,11 +271,29 @@ mod tests {
         assert_eq!(grade_verb(Grade::Confirmed), "confirmed");
     }
 
+    /// What the summary says of a thing found in some of the apps: the same
+    /// graded facts, with the count. The words are the project spec's
+    /// (declares, ships, may access, contacted, confirmed).
+    #[test]
+    fn a_thing_found_is_stated_as_a_graded_fact_with_its_count() {
+        assert_eq!(found_words(Grade::Declares, 1, 16), "declared by 1 of 16 apps");
+        assert_eq!(found_words(Grade::Contains, 10, 16), "ships in 10 of 16 apps");
+        assert_eq!(found_words(Grade::Contacts, 2, 3), "contacted by 2 of 3 apps");
+        assert_eq!(found_words(Grade::Confirmed, 1, 1), "confirmed for 1 of 1 app");
+        assert_eq!(found_words(Grade::Requested, 3, 16), "3 of 16 apps may access it");
+        assert_eq!(
+            found_words(Grade::Granted, 1, 2),
+            "1 of 2 apps may access it, and it was allowed on this device"
+        );
+        assert_eq!(found_words(Grade::Used, 1, 2), "accessed by 1 of 2 apps");
+    }
+
     /// No word in the vocabulary says what an app or company intends.
     #[test]
     fn nothing_in_the_vocabulary_accuses() {
         let mut words: Vec<String> = Vec::new();
         for grade in CHANNEL_LADDER.into_iter().chain(ACCESS_LADDER) {
+            words.push(found_words(grade, 2, 3));
             words.push(grade_verb(grade).to_string());
             words.push(grade_meaning(grade).to_string());
         }

@@ -114,6 +114,17 @@ impl Markup {
         self.element(tag, &[("class", Value::Fixed(class))], value);
     }
 
+    /// Whether nothing has been written.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.out.is_empty()
+    }
+
+    /// Writes a piece that this writer built, as it is. Elements the piece
+    /// left open are ended first.
+    pub(crate) fn append(&mut self, piece: Self) {
+        self.out.push_str(&piece.finish());
+    }
+
     /// The document. Elements still open are ended first, so what comes out
     /// is well nested whatever the caller did.
     pub(crate) fn finish(mut self) -> String {
@@ -197,6 +208,19 @@ mod tests {
                 "<p class=\"note\" id=\"r-{hex}\"><a href=\"#r-{hex}\">a &lt;b&gt; c</a>42<br></p>"
             )
         );
+    }
+
+    #[test]
+    fn a_piece_is_appended_as_it_was_written_and_closed() {
+        let mut piece = Markup::new();
+        assert!(piece.is_empty());
+        piece.open("li", &[]);
+        piece.text("a <b>");
+        assert!(!piece.is_empty());
+        let mut markup = Markup::new();
+        markup.open("ul", &[]);
+        markup.append(piece);
+        assert_eq!(markup.finish(), "<ul><li>a &lt;b&gt;</li></ul>");
     }
 
     #[test]

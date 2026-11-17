@@ -1,13 +1,15 @@
 //! What the HTML report shows, worked out before a single tag is written.
 //!
-//! The claims are grouped by company, then by app; the records by app. Every
-//! order here is defined by content (a name, an id, a digest) and never by
-//! the order the claims or records arrived in, so the same evidence and the
-//! same rule pack give the same document.
+//! The claims are grouped by company, then by app, and once more by what
+//! was found; the records by app. Every order here is defined by content (a
+//! name, an id, a digest) and never by the order the claims or records
+//! arrived in, so the same evidence and the same rule pack give the same
+//! view.
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::cmp::Reverse;
 
 use xs_model::pack::{Category, Entity, Pack};
 use xs_model::record::{CoverageRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject};
@@ -132,6 +134,50 @@ impl Company<'_> {
     }
 }
 
+/// One app that holds a thing the scan found.
+pub(crate) struct FoundIn<'a> {
+    /// The finding that says so. When one build has more than one, the
+    /// first in the order of the findings.
+    pub(crate) claim: &'a Claim,
+    /// The highest grade the app has it at.
+    pub(crate) grade: Grade,
+}
+
+/// One thing the scan found: one object, under one company or under none,
+/// with every app it was found in.
+pub(crate) struct Found<'a> {
+    /// The name of the object.
+    pub(crate) name: &'a str,
+    pub(crate) kind: ObjectKind,
+    pub(crate) edge: EdgeType,
+    pub(crate) category: &'a Category,
+    /// The company its findings name.
+    pub(crate) company: Option<&'a Entity>,
+    /// Whether any of its findings counts in the headline.
+    pub(crate) counted: bool,
+    /// The apps it was found in, by index into [`View::apps`], which is the
+    /// order a reader looks them up in.
+    pub(crate) apps: BTreeMap<usize, FoundIn<'a>>,
+}
+
+impl<'a> Found<'a> {
+    fn add(&mut self, app: usize, claim: &'a Claim) {
+        self.counted |= claim.headline;
+        let found = self.apps.entry(app).or_insert(FoundIn { claim, grade: claim.grade });
+        found.grade = found.grade.max(claim.grade);
+    }
+
+    /// How many apps have it at each grade, the highest grade first. An app
+    /// is counted once, at the highest grade it has it at.
+    pub(crate) fn by_grade(&self) -> Vec<(Grade, u64)> {
+        let mut counts: BTreeMap<Grade, u64> = BTreeMap::new();
+        for found in self.apps.values() {
+            *counts.entry(found.grade).or_default() += 1;
+        }
+        counts.into_iter().rev().collect()
+    }
+}
+
 /// Everything the report shows.
 pub(crate) struct View<'a> {
     /// The scanned builds, in the order a reader looks them up.
@@ -139,14 +185,18 @@ pub(crate) struct View<'a> {
     /// The companies findings name: those with a counted finding first, each
     /// group by name.
     pub(crate) companies: Vec<Company<'a>>,
-    /// The findings that name no company: components and unmapped hosts.
+    /// The channels that name no company: components and unmapped hosts.
     pub(crate) unnamed: Vec<AppFindings<'a>>,
+    /// The findings on the access ladder. They are not channels to a
+    /// company, and are under none.
+    pub(crate) access: Vec<AppFindings<'a>>,
+    /// Everything that was found, once each: what is in the most apps
+    /// first, then by name.
+    pub(crate) found: Vec<Found<'a>>,
     pub(crate) headline: Headline,
     pub(crate) claims: u64,
     pub(crate) coverage_notes: u64,
     pub(crate) records: u64,
-    /// Whether any claim is on the access ladder.
-    pub(crate) has_access: bool,
     /// The names of the categories the headline counts.
     pub(crate) counted_categories: Vec<&'a str>,
 }
@@ -175,14 +225,30 @@ impl<'a> View<'a> {
         // Company id, then app, then the claims in a fixed order.
         let mut named: BTreeMap<&str, BTreeMap<usize, Vec<Finding<'a>>>> = BTreeMap::new();
         let mut unnamed: BTreeMap<usize, Vec<Finding<'a>>> = BTreeMap::new();
+        let mut access: BTreeMap<usize, Vec<Finding<'a>>> = BTreeMap::new();
+        let mut things: BTreeMap<_, Found<'a>> = BTreeMap::new();
         let mut ordered: Vec<&Claim> = claims.iter().collect();
         ordered.sort_by_key(|&claim| (claim.object.kind, &claim.object.id, claim.edge, claim.id));
         for claim in ordered {
             let finding = finding(claim, pack)?;
             let Some(&app) = index.get(&Build::of(&claim.subject)) else { continue };
-            let group = match claim.company.as_deref() {
-                Some(company) => named.entry(company).or_default(),
-                None => &mut unnamed,
+            let company = claim.company.as_deref();
+            things
+                .entry((claim.object.kind, claim.object.id.as_str(), claim.edge, company))
+                .or_insert_with(|| Found {
+                    name: &claim.object.name,
+                    kind: claim.object.kind,
+                    edge: claim.edge,
+                    category: finding.category,
+                    company: finding.company,
+                    counted: false,
+                    apps: BTreeMap::new(),
+                })
+                .add(app, claim);
+            let group = match (claim.edge, company) {
+                (EdgeType::Access, _) => &mut access,
+                (EdgeType::Channel, Some(company)) => named.entry(company).or_default(),
+                (EdgeType::Channel, None) => &mut unnamed,
             };
             group.entry(app).or_default().push(finding);
         }
@@ -204,17 +270,23 @@ impl<'a> View<'a> {
             (!company.counted, company.entity.name.to_lowercase(), company.entity.id.as_str())
         });
 
+        // What is in the most apps first. The sort keeps the order of the
+        // keys for the rest.
+        let mut found: Vec<Found<'a>> = things.into_values().collect();
+        found.sort_by_key(|thing| (Reverse(thing.apps.len()), thing.name.to_lowercase()));
+
         let coverage_notes =
             evidence.iter().filter(|(_, record)| matches!(record, Record::Coverage(_))).count();
         Ok(Self {
             apps,
             companies,
             unnamed: group(unnamed),
+            access: group(access),
+            found,
             headline: Headline::of(claims),
             claims: claims.len() as u64,
             coverage_notes: coverage_notes as u64,
             records: evidence.len() as u64,
-            has_access: claims.iter().any(|claim| claim.edge == EdgeType::Access),
             counted_categories: pack
                 .layers()
                 .iter()

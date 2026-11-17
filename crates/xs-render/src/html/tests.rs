@@ -577,8 +577,9 @@ fn the_document_names_no_address_and_holds_no_script() {
     }
 }
 
-/// Property 3, "deterministic": the same evidence and pack give the same
-/// bytes, and the order the claims come in does not reach the document.
+/// Property 3, "deterministic": the same evidence, rule pack and scan scope
+/// give the same bytes, and the order the claims come in does not reach the
+/// document.
 #[test]
 fn the_same_evidence_and_pack_give_the_same_bytes() {
     let (pack, evidence) = (pack(), evidence());
@@ -609,7 +610,7 @@ fn findings_are_grouped_by_company_with_the_counted_ones_first() {
             // Counted: analytics. Its name is the pack's, escaped.
             "Acme <Analytics> & \"Sons\" counted in the summary",
             // Not counted: crash reporting and an update feed.
-            "Google LLC not counted",
+            "Google LLC not in the counted categories",
             "No company named",
         ]
     );
@@ -696,23 +697,151 @@ fn a_finding_says_who_operates_it_whose_party_it_is_and_whether_it_counts() {
     ));
 }
 
+/// The entries of the summary's list of what was found: the text of each
+/// paragraph of each entry.
+fn found(root: &Element) -> Vec<Vec<String>> {
+    let list = section(root, "summary")
+        .named("ul")
+        .into_iter()
+        .find(|list| list.has_class("found"))
+        .expect("the summary lists what was found");
+    list.named("li")
+        .into_iter()
+        .map(|entry| entry.named("p").into_iter().map(Element::text).collect())
+        .collect()
+}
+
+/// The three headline counts as the summary shows them.
+fn counts(root: &Element) -> Vec<String> {
+    section(root, "summary")
+        .descendants()
+        .into_iter()
+        .filter(|e| e.has_class("count"))
+        .map(|count| format!("{} {}", count.named("p")[0].text(), count.named("p")[1].text()))
+        .collect()
+}
+
+/// The summary leads with what was found, whether or not it counts: the
+/// fixture has six findings in three of its four apps, about five things.
+/// Each is stated once, as a graded fact with the number of apps, what is
+/// in the most apps first and then by name.
+#[test]
+fn the_summary_leads_with_everything_that_was_found() {
+    let root = report();
+    let summary = section(&root, "summary");
+    let parts: Vec<String> = summary.named("h3").into_iter().map(Element::text).collect();
+    assert_eq!(parts, ["What was found", "The three headline counts"]);
+    let lead = summary.named("p")[0];
+    assert!(lead.has_class("lead"));
+    assert_eq!(lead.text(), "6 findings in 3 of 4 apps scanned.");
+
+    assert_eq!(
+        found(&root),
+        [
+            [
+                "AcmeAnalytics Analytics",
+                "Acme <Analytics> & \"Sons\"",
+                "contains ships in 2 of 4 apps",
+                "In Droid, Notes",
+                "counted",
+            ],
+            // Outside the counted categories, and as plain as the one above.
+            [
+                "Crashlytics Crash reporting",
+                "Google LLC",
+                "contains ships in 1 of 4 apps",
+                "In Mail",
+                "not counted",
+            ],
+            [
+                "dl.google.com Update feed",
+                "Google LLC",
+                "declares declared by 1 of 4 apps",
+                "In Notes",
+                "not counted",
+            ],
+            [
+                "Sparkle Component",
+                "No company named: a component, with no network side of its own.",
+                "contains ships in 1 of 4 apps",
+                "In Notes",
+                "not counted",
+            ],
+            [
+                "updates.example.org Update feed",
+                "No company named: a host the rule pack lists under no company.",
+                "declares declared by 1 of 4 apps",
+                "In Notes",
+                "not counted",
+            ],
+        ]
+    );
+    // The tag that says a thing is not counted is a tag of its own kind,
+    // not the grey of a category.
+    let tags =
+        |class: &str| summary.descendants().into_iter().filter(|e| e.has_class(class)).count();
+    assert_eq!((tags("counted"), tags("uncounted")), (1, 4));
+}
+
+/// Each app named in the summary links to the finding about that thing in
+/// that app, further down the page.
+#[test]
+fn each_app_in_the_summary_links_to_its_finding() {
+    let (pack, evidence) = (pack(), evidence());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let list = section(&root, "summary").named("ul")[0];
+    let links: Vec<(String, &str)> =
+        list.named("a").into_iter().map(|link| (link.text(), link.attr("href").unwrap())).collect();
+    let to = |app: &str, object: &str| {
+        let claim = claims.iter().find(|c| c.subject.id == app && c.object.id == object).unwrap();
+        format!("#{}", anchor("f-", claim.id.digest()))
+    };
+    let expected = [
+        ("Droid", to("org.example.droid", "sdk/acme-analytics")),
+        ("Notes", to("org.example.notes", "sdk/acme-analytics")),
+        ("Mail", to("com.google.mail", "sdk/crashlytics")),
+        ("Notes", to("org.example.notes", "dl.google.com")),
+        ("Notes", to("org.example.notes", "sdk/sparkle")),
+        ("Notes", to("org.example.notes", "updates.example.org")),
+    ];
+    assert_eq!(links.len(), expected.len());
+    for ((name, href), (app, target)) in links.iter().zip(&expected) {
+        assert_eq!((name.as_str(), *href), (*app, target.as_str()));
+        let shown = root.by_id(href.strip_prefix('#').unwrap()).unwrap();
+        assert!(shown.has_class("finding"));
+    }
+}
+
+/// A thing two apps have at different grades is not stated at the higher
+/// grade for both: each grade has its own count.
+#[test]
+fn a_thing_found_at_two_grades_is_counted_at_each() {
+    let (pack, evidence) = (pack(), evidence());
+    let mut claims = claims(&evidence, &pack);
+    let droid = claims
+        .iter_mut()
+        .find(|c| c.subject.id == "org.example.droid" && c.object.id == "sdk/acme-analytics")
+        .unwrap();
+    droid.grade = Grade::Contacts;
+    droid.rungs = vec![Grade::Contains, Grade::Contacts];
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    assert_eq!(found(&root)[0][2], "contacts contacted by 1 of 4 apps, ships in 1 of 4 apps");
+}
+
+/// Under what was found come the three headline counts, said to be counts
+/// of the counted categories, and then the totals.
 #[test]
 fn the_summary_is_the_headline_of_the_claims_and_says_what_it_counts() {
     let (pack, evidence) = (pack(), evidence());
     let claims = claims(&evidence, &pack);
     let root = render(&claims, &evidence, &meta(&pack), &pack);
     let summary = section(&root, "summary");
-    let counts: Vec<String> = summary
-        .descendants()
-        .into_iter()
-        .filter(|e| e.has_class("count"))
-        .map(|count| format!("{} {}", count.named("p")[0].text(), count.named("p")[1].text()))
-        .collect();
     let headline = xs_model::Headline::of(&claims);
     assert_eq!((headline.companies_contacts, headline.companies_contains), (0, 1));
     assert_eq!(headline.apps_third_party, 2);
     assert_eq!(
-        counts,
+        counts(&root),
         [
             "0 companies with a recorded connection",
             "1 company whose code the scanned apps ship",
@@ -720,9 +849,29 @@ fn the_summary_is_the_headline_of_the_claims_and_says_what_it_counts() {
         ]
     );
     let text = summary.text();
+    assert!(text.contains("These three numbers do not count every finding."));
     assert!(text.contains("in the categories Analytics and Session replay."));
     assert!(text.contains("There is no score."));
-    let totals: Vec<String> = summary.named("li").into_iter().map(Element::text).collect();
+    assert!(!text.contains("which is why these three counts are zero"));
+    // What was found, then the counts, then the totals.
+    let at = |part: &str| text.find(part).unwrap_or_else(|| panic!("no `{part}`"));
+    let order = [
+        at("What was found"),
+        at("In Droid, Notes"),
+        at("The three headline counts"),
+        at("companies with a recorded connection"),
+        at("13 evidence records"),
+    ];
+    assert!(order.is_sorted(), "{order:?}");
+    let totals: Vec<String> = summary
+        .named("ul")
+        .into_iter()
+        .find(|list| list.has_class("totals"))
+        .unwrap()
+        .named("li")
+        .into_iter()
+        .map(Element::text)
+        .collect();
     assert_eq!(
         totals,
         [
@@ -733,6 +882,111 @@ fn the_summary_is_the_headline_of_the_claims_and_says_what_it_counts() {
             "13 evidence records"
         ]
     );
+}
+
+/// The case the owner reported: findings, none of them in a counted
+/// category. Three zeros must not read as "nothing found": the findings
+/// lead, and the page says why the counts are zero.
+#[test]
+fn three_zeros_beside_findings_are_explained() {
+    let pack = pack();
+    let notes = subject(Platform::Macos, "org.example.notes", 1);
+    let mail = subject(Platform::Macos, "com.google.mail", 2);
+    let evidence = set([
+        artifact(&notes, "Notes", None),
+        sdk(&notes, "sdk/sparkle", MatcherKind::AppleFramework, None),
+        artifact(&mail, "Mail", Some(GOOGLE_TEAM)),
+        sdk(&mail, "sdk/crashlytics", MatcherKind::MachoObjcClass, None),
+    ]);
+    let claims = claims(&evidence, &pack);
+    assert_eq!(xs_model::Headline::of(&claims), xs_model::Headline::default());
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let summary = section(&root, "summary");
+    assert_eq!(summary.named("p")[0].text(), "2 findings in 2 of 2 apps scanned.");
+    let names: Vec<String> = found(&root).into_iter().map(|entry| entry[0].clone()).collect();
+    assert_eq!(names, ["Crashlytics Crash reporting", "Sparkle Component"]);
+    assert_eq!(counts(&root).len(), 3);
+    let explained: Vec<String> = summary
+        .descendants()
+        .into_iter()
+        .filter(|e| e.has_class("zero"))
+        .map(Element::text)
+        .collect();
+    assert_eq!(
+        explained,
+        ["None of the findings above names a company in a counted category, which is why these \
+          three counts are zero."]
+    );
+
+    // With no finding there is nothing to explain, and no list: the plain
+    // statement that nothing matched stands where the findings would lead.
+    let nothing = render(&[], &set([artifact(&notes, "Notes", None)]), &meta(&pack), &pack);
+    let summary = section(&nothing, "summary");
+    assert!(summary.descendants().into_iter().all(|e| !e.has_class("zero")));
+    assert!(summary.named("ul").into_iter().all(|list| !list.has_class("found")));
+    assert!(summary.named("p")[0].text().starts_with("No scanned app matched a rule."));
+}
+
+/// The navigation is written from the sections that are on the page: one
+/// link per section, in the order of the page.
+#[test]
+fn the_navigation_names_the_sections_of_the_page_in_order() {
+    let root = report();
+    let links: Vec<(String, String)> = root.named("nav")[0]
+        .named("a")
+        .into_iter()
+        .map(|link| (link.text(), link.attr("href").unwrap().to_string()))
+        .collect();
+    let labels: Vec<&str> = links.iter().map(|(label, _)| label.as_str()).collect();
+    assert_eq!(
+        labels,
+        ["Summary", "How to read it", "Findings", "Coverage", "Limits", "Records", "About"]
+    );
+    let sections: Vec<String> = root
+        .named("section")
+        .into_iter()
+        .filter_map(|section| section.attr("id"))
+        .map(|id| format!("#{id}"))
+        .collect();
+    let targets: Vec<String> = links.into_iter().map(|(_, href)| href).collect();
+    assert_eq!(targets, sections);
+}
+
+/// A section with nothing to say is not on the page, under no heading, and
+/// the navigation does not link to it.
+#[test]
+fn a_section_with_nothing_under_it_is_left_out_of_the_page_and_the_navigation() {
+    fn said(page: &mut Markup, _: &Input<'_>) -> Result<(), RenderError> {
+        page.raw("<p>Something true.</p>\n");
+        Ok(())
+    }
+    fn silent(_: &mut Markup, _: &Input<'_>) -> Result<(), RenderError> {
+        Ok(())
+    }
+    let (pack, evidence) = (pack(), evidence());
+    let claims = claims(&evidence, &pack);
+    let view = View::new(&claims, &evidence, &pack).unwrap();
+    let meta = meta(&pack);
+    let sections = [
+        section!("first", "First", "The first", said),
+        section!("absent", "Absent", "Nothing to say", silent),
+        section!("last", "Last", "The last", said),
+    ];
+    let page =
+        document(&sections, &Input { view: &view, evidence: &evidence, meta: &meta }).unwrap();
+    let root = testkit::parse(&page).unwrap();
+    testkit::check_inert(&root, CONTENT_SECURITY_POLICY).unwrap();
+
+    let links: Vec<(String, &str)> = root.named("nav")[0]
+        .named("a")
+        .into_iter()
+        .map(|link| (link.text(), link.attr("href").unwrap()))
+        .collect();
+    assert_eq!(links, [("First".to_string(), "#first"), ("Last".to_string(), "#last")]);
+    let headings: Vec<String> = root.named("h2").into_iter().map(Element::text).collect();
+    assert_eq!(headings, ["The first", "The last"]);
+    assert!(root.by_id("absent").is_none());
+    assert_eq!(section(&root, "last").text(), "\nThe last\nSomething true.\n");
 }
 
 /// The coverage section: what was read, and what was skipped and why.
@@ -972,24 +1226,100 @@ fn the_report_states_graded_facts_and_accuses_nobody() {
 }
 
 /// The access ladder is explained when a finding is on it, and only then.
+/// Such a finding is not a channel to a company: it is in a part of its
+/// own, by app, and neither under a company nor with the components.
 #[test]
-fn the_access_ladder_is_explained_when_a_finding_is_on_it() {
+fn findings_about_access_have_their_own_part_and_their_own_words() {
     let (pack, evidence) = (pack(), evidence());
     let mut claims = claims(&evidence, &pack);
-    let rows = |claims: &[Claim]| {
-        let root = render(claims, &evidence, &meta(&pack), &pack);
-        section(&root, "reading").named("tbody")[0].named("tr").len()
+    let rows = |root: &Element| section(root, "reading").named("tbody")[0].named("tr").len();
+    let parts = |root: &Element| -> Vec<String> {
+        section(root, "findings").named("h3").into_iter().map(Element::text).collect()
     };
-    assert_eq!(rows(&claims), 4);
-    claims[0].edge = EdgeType::Access;
-    claims[0].headline = false;
-    claims[0].grade = Grade::Requested;
-    claims[0].rungs = vec![Grade::Requested];
     let root = render(&claims, &evidence, &meta(&pack), &pack);
-    assert_eq!(rows(&claims), 7);
-    let shown = root.by_id(&anchor("f-", claims[0].id.digest())).unwrap().text();
-    assert!(shown.contains("requested The app asks for this permission."));
-    assert!(shown.contains("Not counted: the summary counts channels."));
+    assert_eq!(rows(&root), 4);
+    // No heading with nothing under it.
+    assert!(!parts(&root).iter().any(|part| part == "What the apps may access"));
+
+    // One that named a company, and one that named none.
+    let on_access = |claims: &mut [Claim], app: &str, object: &str, grade: Grade| {
+        let claim =
+            claims.iter_mut().find(|c| c.subject.id == app && c.object.id == object).unwrap();
+        claim.edge = EdgeType::Access;
+        claim.headline = false;
+        claim.grade = grade;
+        claim.rungs = vec![grade];
+        *claim.id.digest()
+    };
+    let asked = on_access(&mut claims, "org.example.droid", "sdk/acme-analytics", Grade::Requested);
+    let allowed = on_access(&mut claims, "org.example.notes", "sdk/sparkle", Grade::Granted);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    assert_eq!(rows(&root), 7);
+    assert_eq!(
+        parts(&root),
+        [
+            "Acme <Analytics> & \"Sons\" counted in the summary",
+            "Google LLC not in the counted categories",
+            "No company named",
+            "What the apps may access",
+        ]
+    );
+
+    let groups: Vec<&Element> = section(&root, "findings")
+        .descendants()
+        .into_iter()
+        .filter(|e| e.has_class("company"))
+        .collect();
+    let shown = |group: &Element| -> Vec<String> {
+        group
+            .descendants()
+            .into_iter()
+            .filter(|e| e.has_class("finding"))
+            .map(|finding| finding.attr("id").unwrap().to_string())
+            .collect()
+    };
+    // Both are in the last part, by app, and nowhere else.
+    let access = groups[3];
+    assert!(access.has_class("access"));
+    let apps: Vec<String> = access.named("h4").into_iter().map(Element::text).collect();
+    assert_eq!(apps, ["Droid", "Notes"]);
+    assert_eq!(shown(access), [anchor("f-", &asked), anchor("f-", &allowed)]);
+    let apps: Vec<String> = groups[0].named("h4").into_iter().map(Element::text).collect();
+    assert_eq!(apps, ["Notes"], "Acme keeps the channel and not the access");
+    assert_eq!(shown(groups[2]).len(), 1, "the unmapped host, without the former component");
+
+    let asked = root.by_id(&anchor("f-", &asked)).unwrap().text();
+    assert!(asked.contains("requested The app asks for this permission."));
+    assert!(asked.contains("Not counted: the summary counts channels."));
+    let allowed = root.by_id(&anchor("f-", &allowed)).unwrap().text();
+    assert!(allowed.contains("granted The permission was allowed on this device."));
+    assert!(!allowed.contains("Component:"), "{allowed}");
+
+    // The summary states them in the words of the access ladder.
+    let entries = found(&root);
+    let entry = |name: &str| entries.iter().find(|entry| entry[0] == name).unwrap()[1..].to_vec();
+    assert_eq!(
+        entry("Sparkle Component"),
+        [
+            "No company named: this is about what the apps may access.",
+            "granted 1 of 4 apps may access it, and it was allowed on this device",
+            "In Notes",
+            "not counted",
+        ]
+    );
+    // What Droid may access and what Notes ships are two things, though
+    // they share an object.
+    let acme: Vec<&Vec<String>> =
+        entries.iter().filter(|entry| entry[0] == "AcmeAnalytics Analytics").collect();
+    let facts: Vec<(&str, &str)> =
+        acme.iter().map(|entry| (entry[2].as_str(), entry[3].as_str())).collect();
+    assert_eq!(
+        facts,
+        [
+            ("contains ships in 1 of 4 apps", "In Notes"),
+            ("requested 1 of 4 apps may access it", "In Droid"),
+        ]
+    );
 }
 
 #[test]

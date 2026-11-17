@@ -1,6 +1,6 @@
 //! The HTML report through the `exposure` binary (build plan, task 11): the
 //! honesty test, the markup-injection fixture, and the same bytes for the
-//! same evidence and rule pack.
+//! same evidence, rule pack and scan scope.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, reason = "test code")]
 #![allow(
     clippy::disallowed_types,

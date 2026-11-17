@@ -76,6 +76,16 @@ section { margin-top: 2.5rem; }
 .count .n { font-size: 2.4rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .count .label { font-weight: 600; margin-top: 0.25rem; }
 .count .sub { color: var(--soft-ink); font-size: 0.85rem; margin-top: 0.35rem; }
+#summary h3 { margin-top: 1.5rem; margin-bottom: 0.5rem; }
+.lead { font-size: 1.25rem; font-weight: 600; }
+.found { list-style: none; margin-top: 0.75rem; padding: 0; }
+.found li { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 0.7rem 1rem 0.8rem; }
+.found li + li { margin-top: 0.5rem; }
+.found p + p { margin-top: 0.3rem; }
+.thing strong { font-size: 1.05rem; }
+.owner { color: var(--soft-ink); font-size: 0.9rem; }
+.where { font-size: 0.9rem; }
+.zero { font-weight: 600; }
 .note, .meta, .none { color: var(--soft-ink); font-size: 0.9rem; }
 .none { background: var(--panel); border-radius: 0.5rem; padding: 0.75rem 1rem; }
 .totals {
@@ -115,7 +125,9 @@ th { color: var(--soft-ink); font-size: 0.8rem; font-weight: 600; white-space: n
 .g-confirmed { background: var(--confirmed-bg); color: var(--confirmed-ink); }
 .g-requested, .g-granted, .g-used { background: var(--access-bg); color: var(--access-ink); }
 .tag { background: var(--panel); color: var(--soft-ink); font-weight: 500; }
+.tag.counted, .tag.uncounted { border: 1px solid var(--counted-bg); font-weight: 600; }
 .tag.counted { background: var(--counted-bg); color: var(--counted-ink); }
+.tag.uncounted { background: none; color: var(--ink); }
 
 .company { border-top: 2px solid var(--ink); margin-top: 2rem; padding-top: 1rem; }
 .company > .meta { margin-top: 0.25rem; }
@@ -179,7 +191,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
   a { text-decoration: none; }
   section { margin-top: 1.6rem; }
   h2, h3, h4, h5 { break-after: avoid; }
-  .count, .finding, .record, .evidence li, tr { break-inside: avoid; }
+  .count, .finding, .record, .evidence li, .found li, tr { break-inside: avoid; }
   .scroll { overflow: visible; }
   .grade, .tag { border: 1px solid #888888; }
 }
