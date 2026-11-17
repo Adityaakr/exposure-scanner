@@ -13,7 +13,7 @@
 //! | `homepage_url` | the text; the caller keeps the host only |
 //! | `developer` | `name` and `url`, used where `author` and `homepage_url` are absent |
 //! | `permissions`, `optional_permissions` | the text entries: interface names, and site patterns in a version 2 manifest |
-//! | `host_permissions`, `optional_host_permissions` | the text entries: site patterns |
+//! | `host_permissions`, `optional_host_permissions` | the text entries: site patterns, which a browser takes from version 3 on |
 //! | `content_scripts` | per script: its `matches`, whether it lists a `js` file, whether `include_globs` narrows it |
 //!
 //! The reader is lenient where the browser is strict. A key of an
@@ -98,8 +98,9 @@ impl Manifest {
     /// Whether the browser takes the site patterns listed under
     /// `permissions` and `optional_permissions`, as it does up to version 2.
     /// From version 3 sites are granted only under `host_permissions` and
-    /// `optional_host_permissions`. A manifest that states no version is
-    /// read as version 2.
+    /// `optional_host_permissions`, keys a browser does not take before
+    /// version 3: what is granted is under one pair of keys or the other,
+    /// never both. A manifest that states no version is read as version 2.
     #[must_use]
     pub fn sites_in_permissions(&self) -> bool {
         self.manifest_version.is_none_or(|version| version < 3)

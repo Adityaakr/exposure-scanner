@@ -854,7 +854,7 @@ fn asked(manifest: &Manifest) -> Asked<'_> {
         (ManifestKey::HostPermissions, &manifest.host_permissions),
         (ManifestKey::OptionalHostPermissions, &manifest.optional_host_permissions),
     ];
-    for (key, entries) in sites {
+    for (key, entries) in sites.into_iter().filter(|_| !sites_in_permissions) {
         for entry in entries {
             if let Some(breadth) = breadth(entry, Paths::Ignored) {
                 ask(&mut asked, breadth.permission(), key, entry);
@@ -1413,7 +1413,7 @@ mod tests {
         );
         assert_eq!(
             asks(
-                r#"{"host_permissions": ["https://*/"], "optional_host_permissions": ["*://*/x"]}"#
+                r#"{"manifest_version": 3, "host_permissions": ["https://*/"], "optional_host_permissions": ["*://*/x"]}"#
             ),
             [
                 "extension/all-sites host_permissions 1 https://*/",
@@ -1425,7 +1425,7 @@ mod tests {
             ["extension/broad-sites permissions 1 http://*/"]
         );
         assert_eq!(
-            asks(r#"{"host_permissions": ["https://*:8443/*"]}"#),
+            asks(r#"{"manifest_version": 3, "host_permissions": ["https://*:8443/*"]}"#),
             ["extension/broad-sites host_permissions 1 https://*:8443/*"]
         );
         assert_eq!(
@@ -1439,6 +1439,7 @@ mod tests {
         assert_eq!(
             asks(
                 r#"{
+                  "manifest_version": 3,
                   "permissions": ["storage", "tabs", "webRequest", "webRequestBlocking", "cookies", "activeTab"],
                   "optional_permissions": ["clipboardRead", "history"],
                   "host_permissions": ["https://*/*", "http://*/*", "https://api.example.com/*"],
@@ -1469,6 +1470,25 @@ mod tests {
                 "extension/broad-sites host_permissions 1 *://*.com/*",
                 "extension/tabs permissions 1 tabs",
             ]
+        );
+    }
+
+    /// Before version 3 a browser does not know the host keys, and grants
+    /// nothing listed under them.
+    #[test]
+    fn a_version_2_manifest_grants_no_sites_under_the_host_keys() {
+        for manifest in [
+            r#"{"manifest_version": 2, "host_permissions": ["<all_urls>"], "permissions": ["storage"]}"#,
+            r#"{"host_permissions": ["<all_urls>"], "optional_host_permissions": ["*://*/*"]}"#,
+        ] {
+            assert_eq!(asks(manifest), Vec::<String>::new(), "{manifest}");
+        }
+        assert_eq!(
+            asks(
+                r#"{"manifest_version": 2, "permissions": ["*://*.com/*"],
+                    "host_permissions": ["<all_urls>"]}"#
+            ),
+            ["extension/broad-sites permissions 1 *://*.com/*"]
         );
     }
 
@@ -1503,10 +1523,10 @@ mod tests {
         for quiet in [
             "{}",
             r#"{"permissions": ["storage", "alarms", "activeTab", "scripting", "contextMenus"]}"#,
-            r#"{"host_permissions": ["https://api.example.com/*", "*://*.example.com/*"]}"#,
+            r#"{"manifest_version": 3, "host_permissions": ["https://api.example.com/*", "*://*.example.com/*"]}"#,
             r#"{"content_scripts": [{"matches": ["https://mail.example.com/*"], "js": ["a.js"]}]}"#,
             // Interface names are not looked for among site patterns.
-            r#"{"host_permissions": ["history", "tabs"]}"#,
+            r#"{"manifest_version": 3, "host_permissions": ["history", "tabs"]}"#,
         ] {
             assert_eq!(asks(quiet), Vec::<String>::new(), "{quiet}");
         }
@@ -1543,12 +1563,14 @@ mod tests {
     #[test]
     fn a_broad_set_is_not_reported_next_to_every_website() {
         assert_eq!(
-            asks(r#"{"host_permissions": ["http://*/*", "https://*/*", "*://*.com/*"]}"#),
+            asks(
+                r#"{"manifest_version": 3, "host_permissions": ["http://*/*", "https://*/*", "*://*.com/*"]}"#
+            ),
             ["extension/all-sites host_permissions 1 https://*/*"]
         );
         assert_eq!(
             asks(
-                r#"{"host_permissions": ["https://*/*"],
+                r#"{"manifest_version": 3, "host_permissions": ["https://*/*"],
                     "optional_host_permissions": ["*://*.com/*"],
                     "content_scripts": [{"matches": ["http://*/*"], "js": ["a.js"]}]}"#
             ),
@@ -1556,7 +1578,7 @@ mod tests {
         );
         assert_eq!(
             asks(
-                r#"{"host_permissions": ["*://*.com/*", "*://*.org/*"],
+                r#"{"manifest_version": 3, "host_permissions": ["*://*.com/*", "*://*.org/*"],
                     "optional_host_permissions": ["<all_urls>", "http://*/*"]}"#
             ),
             [
@@ -1565,7 +1587,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            asks(r#"{"optional_host_permissions": ["http://*/*"]}"#),
+            asks(r#"{"manifest_version": 3, "optional_host_permissions": ["http://*/*"]}"#),
             ["extension/broad-sites optional_host_permissions 1 http://*/*"]
         );
     }
@@ -1574,7 +1596,7 @@ mod tests {
     fn an_entry_listed_twice_counts_once() {
         assert_eq!(
             asks(
-                r#"{"permissions": ["tabs", "tabs", "history"], "host_permissions": ["*://*/*", "*://*/*"]}"#
+                r#"{"manifest_version": 3, "permissions": ["tabs", "tabs", "history"], "host_permissions": ["*://*/*", "*://*/*"]}"#
             ),
             [
                 "extension/all-sites host_permissions 1 *://*/*",

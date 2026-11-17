@@ -469,6 +469,10 @@ site: `<all_urls>`, or a wildcard host on any port over `https` or both
 schemes. The browser grants a site whole whatever path a permission's pattern
 gives, so `https://*/` under `host_permissions` (or, in a version 2 manifest,
 `permissions`) is every website; a script's `matches` must have the path `/*`.
+A browser takes sites under `host_permissions` and `optional_host_permissions`
+only from manifest version 3, and under `permissions` and
+`optional_permissions` only before it, so what the other pair lists is not
+reported; a manifest that states no version counts as version 2.
 A wildcard pattern that covers less (only `http`, one port, part of each site
 for a script, a script that `include_globs` narrows, or every site under a
 suffix such as `*.com`) is a broad set; a pattern that names sites is not
