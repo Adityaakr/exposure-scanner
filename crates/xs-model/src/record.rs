@@ -863,6 +863,10 @@ pub enum CoverageReason {
     OverBudget,
     /// The input is damaged or not what its name says.
     ParseError,
+    /// Older versions of the same browser extension are still on disk next
+    /// to the one reported, left for the browser to remove later; they were
+    /// not scanned. The count is how many.
+    SupersededVersion,
     /// A name differs only in letter case from one the artifact's layout
     /// fixes, such as `contents` for `Contents`. The collector takes names
     /// as they are stored, so what sits there was not looked at as that part

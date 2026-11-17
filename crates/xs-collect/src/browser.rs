@@ -10,7 +10,7 @@
 //!
 //! | Browser | Where its extensions are | What is read of each |
 //! |---|---|---|
-//! | Chromium family: Arc, Brave, Chrome, Chromium, Dia, Edge, Vivaldi | `<profile>/Extensions/<id>/<version>/`, one folder per installed version | `manifest.json`, and the one message catalogue `_locales/<default_locale>/messages.json` when the name is a reference into it |
+//! | Chromium family: Arc, Brave, Chrome, Chromium, Dia, Edge, Vivaldi | `<profile>/Extensions/<id>/<version>/`, one folder per installed version, of which the highest is read | `manifest.json`, and the one message catalogue `_locales/<default_locale>/messages.json` when the name is a reference into it |
 //! | Firefox | `<profile>/extensions/<id>.xpi`, one zip archive per add-on | the archive, for its hash, and the same two entries inside it |
 //!
 //! Nothing else in a profile is opened: not the history, the cookies, the
@@ -18,6 +18,12 @@
 //! find the extensions, and of a profile only the fact that it holds an
 //! `Extensions` (or `extensions`) folder is used. A record holds no path of
 //! the machine and no name of a profile.
+//!
+//! An update leaves the folder of the version it replaced until the browser
+//! next tidies up, and which version runs is written only in the
+//! preferences. So of an extension's version folders in one profile the
+//! highest version is read, and the others are counted in one `coverage`
+//! record under it, with the reason `superseded_version`.
 //!
 //! Everything is read-only and needs no privilege. A browser whose folders
 //! the system will not let the scan list is not a failure of the scan: it
@@ -53,11 +59,14 @@
 //! find them. Two rules keep the edges from saying more than the manifest:
 //!
 //! * **Every website** is said only of a pattern that covers every site in
-//!   full: `<all_urls>`, or any host with the path `/*` over `https` or
-//!   both schemes. A pattern with a wildcard host that covers less is **a
-//!   broad set of websites**: `http` only, a narrower path, a script that
-//!   `include_globs` narrows, or every site under one public suffix such as
-//!   `*.com`. A pattern for named sites is not reported.
+//!   full: `<all_urls>`, or any host on any port over `https` or both
+//!   schemes. The browser ignores the path of a pattern that grants sites,
+//!   under the permission keys, so there any path will do; a script's
+//!   `matches` must have the path `/*`. A pattern with a wildcard host that
+//!   covers less is **a broad set of websites**: `http` only, one port, a
+//!   script's narrower path, a script that `include_globs` narrows, or
+//!   every site under one public suffix such as `*.com`. A pattern for
+//!   named sites is not reported.
 //! * A script the browser puts into pages counts only if it lists a `js`
 //!   file. Style sheets alone change how a page looks and cannot read it.
 //!
@@ -70,7 +79,9 @@
 //! while it is read, one at a time; the manifest reader's own budgets for
 //! the two files; and the zip reader's for the directory of an archive.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -138,6 +149,9 @@ pub struct Extension {
     /// The browser whose profile it was found in. `None` for an extension
     /// given by path.
     pub browser: Option<Browser>,
+    /// How many older version folders of the same extension, in the same
+    /// profile, were passed over for this one.
+    pub superseded: u32,
 }
 
 /// The extensions installed in the browsers of one user, and the folders
@@ -262,11 +276,15 @@ impl Search<'_> {
         })
     }
 
-    fn add(&mut self, path: PathBuf, form: Form) {
-        self.found.extensions.push(Extension { path, form, browser: Some(self.browser) });
+    fn add(&mut self, path: PathBuf, form: Form, superseded: u32) {
+        let browser = Some(self.browser);
+        self.found.extensions.push(Extension { path, form, browser, superseded });
     }
 
-    /// `<root>/<profile>/Extensions/<id>/<version>/`.
+    /// `<root>/<profile>/Extensions/<id>/<version>/`, the highest version
+    /// of each extension. The browser leaves the folder of the version an
+    /// update replaced until it next tidies up, and which one it runs is
+    /// written only in the profile's preferences, which are not read.
     fn chromium(&mut self, root: &Path) {
         for profile in self.list(root, subfolders) {
             for extension in self.list(&profile.join(CHROMIUM_EXTENSIONS), subfolders) {
@@ -275,8 +293,14 @@ impl Search<'_> {
                     // `Temp`, where the browser unpacks an update.
                     continue;
                 }
-                for version in self.list(&extension, subfolders) {
-                    self.add(version, Form::Folder);
+                let versions = self.list(&extension, subfolders);
+                let superseded =
+                    u32::try_from(versions.len().saturating_sub(1)).unwrap_or(u32::MAX);
+                let name = |path: &PathBuf| path.file_name().unwrap_or_default().to_owned();
+                if let Some(latest) =
+                    versions.into_iter().max_by(|a, b| version_order(&name(a), &name(b)))
+                {
+                    self.add(latest, Form::Folder, superseded);
                 }
             }
         }
@@ -288,11 +312,50 @@ impl Search<'_> {
             let archives = |folder: &Path| entries(folder, fs::FileType::is_file);
             for archive in self.list(&profile.join(FIREFOX_EXTENSIONS), archives) {
                 if is_archive_name(&archive) {
-                    self.add(archive, Form::Archive);
+                    self.add(archive, Form::Archive, 0);
                 }
             }
         }
     }
+}
+
+/// The version and the suffix a Chromium version folder is named with,
+/// such as `[2, 1, 0]` and `0` for `2.1.0_0`. `None` for a name not of that
+/// shape.
+fn folder_version(name: &OsStr) -> Option<(Vec<u64>, u64)> {
+    fn number(digits: &str) -> Option<u64> {
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        digits.parse().ok()
+    }
+    let (version, suffix) = name.to_str()?.rsplit_once('_')?;
+    let parts = version.split('.').map(number).collect::<Option<Vec<_>>>()?;
+    Some((parts, number(suffix)?))
+}
+
+/// The order of two version folders of one extension, the newest last.
+///
+/// The dotted parts of the version are compared as numbers, a missing part
+/// counting as 0, then the suffix. A name not of that shape sorts below
+/// every one that is. Names equal so far are ordered by their bytes, so
+/// the order is total.
+fn version_order(a: &OsStr, b: &OsStr) -> Ordering {
+    let by_version = match (folder_version(a), folder_version(b)) {
+        (Some((a_parts, a_suffix)), Some((b_parts, b_suffix))) => {
+            let width = a_parts.len().max(b_parts.len());
+            let part = |parts: &[u64], index: usize| parts.get(index).copied().unwrap_or(0);
+            (0..width)
+                .map(|index| part(&a_parts, index).cmp(&part(&b_parts, index)))
+                .find(|order| order.is_ne())
+                .unwrap_or(Ordering::Equal)
+                .then(a_suffix.cmp(&b_suffix))
+        }
+        (Some(_), None) => Ordering::Greater,
+        (None, Some(_)) => Ordering::Less,
+        (None, None) => Ordering::Equal,
+    };
+    by_version.then_with(|| a.as_encoded_bytes().cmp(b.as_encoded_bytes()))
 }
 
 /// The record that says `count` folders of `browser` could not be listed
@@ -415,6 +478,8 @@ struct Reading {
     id: String,
     digest: SubjectDigest,
     browser: Option<Browser>,
+    /// How many older version folders were passed over for this one.
+    superseded: u32,
     manifest: Option<Manifest>,
     /// The name, once a reference into the message catalogue is resolved.
     name: Option<String>,
@@ -434,6 +499,7 @@ pub(crate) fn read(extension: &Extension) -> Outcome {
     match reading {
         Ok(mut reading) => {
             reading.browser = extension.browser;
+            reading.superseded = extension.superseded;
             let (files, bytes) = (reading.files, reading.bytes);
             Outcome::Scanned { records: records(reading), files, bytes }
         }
@@ -492,6 +558,7 @@ fn read_folder(root: &Path) -> Result<Reading, Unread> {
         id: String::from(id),
         digest: SubjectDigest::Unread,
         browser: None,
+        superseded: 0,
         manifest: None,
         name: None,
         gaps: Vec::new(),
@@ -608,6 +675,7 @@ fn read_archive(path: &Path) -> Result<Reading, Unread> {
         id,
         digest: SubjectDigest::Sha256(Sha256Digest::of(&archive)),
         browser: None,
+        superseded: 0,
         manifest: None,
         name: None,
         gaps: Vec::new(),
@@ -709,15 +777,29 @@ fn is_public_suffix(domain: &str) -> bool {
         .is_some_and(|suffix| suffix.is_known() && suffix.as_bytes() == domain.as_bytes())
 }
 
-/// How broad the site pattern `entry` is. `None` for an entry that is not
-/// a pattern for web pages, and for one that names its sites.
-fn breadth(entry: &str) -> Option<Breadth> {
+/// Whether the path of a site pattern narrows what it covers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Paths {
+    /// A permission to reach sites: the browser grants a pattern's whole
+    /// site whatever its path says.
+    Ignored,
+    /// A script's `matches`: the script runs only on the pages whose path
+    /// the pattern matches.
+    Matched,
+}
+
+/// How broad the site pattern `entry` is, read as `paths` says. `None` for
+/// an entry that is not a pattern for web pages, and for one that names
+/// its sites.
+fn breadth(entry: &str, paths: Paths) -> Option<Breadth> {
     match extension_manifest::site_pattern(entry)? {
         SitePattern::AllUrls => Some(Breadth::All),
-        SitePattern::Web { scheme, host: Host::Any, every_path } => {
+        SitePattern::Web { scheme, host: Host::Any, every_path, every_port } => {
             // Sites are served over `https`: `http` alone reaches what is
             // left of the unencrypted web.
-            let all = every_path && matches!(scheme, Scheme::Any | Scheme::Https);
+            let all = (every_path || paths == Paths::Ignored)
+                && every_port
+                && matches!(scheme, Scheme::Any | Scheme::Https);
             Some(if all { Breadth::All } else { Breadth::Broad })
         }
         SitePattern::Web { host: Host::Under(domain), .. } => {
@@ -745,7 +827,7 @@ fn asked(manifest: &Manifest) -> Asked<'_> {
     for (key, entries) in named {
         for entry in entries {
             let permission = Permission::from_manifest_name(entry)
-                .or_else(|| breadth(entry).map(Breadth::permission));
+                .or_else(|| breadth(entry, Paths::Ignored).map(Breadth::permission));
             if let Some(permission) = permission {
                 ask(&mut asked, permission, key, entry);
             }
@@ -757,14 +839,14 @@ fn asked(manifest: &Manifest) -> Asked<'_> {
     ];
     for (key, entries) in sites {
         for entry in entries {
-            if let Some(breadth) = breadth(entry) {
+            if let Some(breadth) = breadth(entry, Paths::Ignored) {
                 ask(&mut asked, breadth.permission(), key, entry);
             }
         }
     }
     for script in manifest.content_scripts.iter().filter(|script| script.runs_script) {
         for entry in &script.matches {
-            let breadth = breadth(entry).map(|breadth| match breadth {
+            let breadth = breadth(entry, Paths::Matched).map(|breadth| match breadth {
                 // The script runs on the matched pages its globs also cover.
                 Breadth::All if script.narrowed => Breadth::Broad,
                 other => other,
@@ -847,6 +929,18 @@ fn records(reading: Reading) -> Vec<Record> {
             },
         }));
     }
+    if reading.superseded > 0 {
+        records.push(Record::Coverage(CoverageRecord {
+            v: V1,
+            collector: Collector::BrowserExtension,
+            subject: subject.clone(),
+            status: CoverageStatus::Skipped,
+            reason: CoverageReason::SupersededVersion,
+            location: None,
+            bytes: None,
+            count: reading.superseded,
+        }));
+    }
     for gap in reading.gaps {
         records.push(Record::Coverage(CoverageRecord {
             v: V1,
@@ -911,7 +1005,7 @@ mod tests {
     }
 
     fn folder(path: PathBuf) -> Extension {
-        Extension { path, form: Form::Folder, browser: Some(Browser::Brave) }
+        Extension { path, form: Form::Folder, browser: Some(Browser::Brave), superseded: 0 }
     }
 
     fn artifact(records: &[Record]) -> &ArtifactRecord {
@@ -961,8 +1055,10 @@ mod tests {
         let support = tempfile::tempdir().unwrap();
         let support = support.path();
         let brave = support.join("BraveSoftware/Brave-Browser");
+        // An update leaves the folder of the version it replaced behind.
         chromium(&brave.join("Default"), ID, "2.1.0_0", LOCALIZED);
         chromium(&brave.join("Default"), ID, "2.0.9_0", LOCALIZED);
+        chromium(&brave.join("Default"), ID, "10_0", LOCALIZED);
         chromium(&brave.join("Profile 1"), OTHER_ID, "1.0_0", "{}");
         // Where an update is unpacked, and a folder that is no extension id.
         chromium(&brave.join("Default"), "Temp", "x", "{}");
@@ -983,28 +1079,30 @@ mod tests {
 
         let found = installed(support);
         assert!(found.unlisted.is_empty(), "{:?}", found.unlisted);
-        let listed: Vec<(String, Form, Option<Browser>)> = found
+        let listed: Vec<(String, Form, Option<Browser>, u32)> = found
             .extensions
             .iter()
             .map(|extension| {
                 let path = extension.path.strip_prefix(support).unwrap();
-                (path.display().to_string(), extension.form, extension.browser)
+                let shown = path.display().to_string();
+                (shown, extension.form, extension.browser, extension.superseded)
             })
             .collect();
-        let brave_at = |path: &str| {
-            (format!("BraveSoftware/Brave-Browser/{path}"), Form::Folder, Some(Browser::Brave))
+        let brave_at = |path: &str, superseded| {
+            let path = format!("BraveSoftware/Brave-Browser/{path}");
+            (path, Form::Folder, Some(Browser::Brave), superseded)
         };
         assert_eq!(
             listed,
             [
-                brave_at(&format!("Default/Extensions/{ID}/2.0.9_0")),
-                brave_at(&format!("Default/Extensions/{ID}/2.1.0_0")),
-                brave_at(&format!("Profile 1/Extensions/{OTHER_ID}/1.0_0")),
+                brave_at(&format!("Default/Extensions/{ID}/10_0"), 2),
+                brave_at(&format!("Profile 1/Extensions/{OTHER_ID}/1.0_0"), 0),
                 (
                     "Firefox/Profiles/abc123.default-release/extensions/addon@example.org.xpi"
                         .into(),
                     Form::Archive,
-                    Some(Browser::Firefox)
+                    Some(Browser::Firefox),
+                    0
                 ),
             ]
         );
@@ -1164,7 +1262,8 @@ mod tests {
         let path = dir.path().join("addon@example.org.xpi");
         let bytes = xpi(LOCALIZED);
         write(&path, &bytes);
-        let extension = Extension { path: path.clone(), form: Form::Archive, browser: None };
+        let extension =
+            Extension { path: path.clone(), form: Form::Archive, browser: None, superseded: 0 };
         let records = scanned(&extension);
         valid(&records);
         let found = artifact(&records);
@@ -1240,35 +1339,80 @@ mod tests {
 
     #[test]
     fn only_a_pattern_for_every_page_of_every_site_is_every_website() {
-        for all in ["<all_urls>", "*://*/*", "https://*/*", "*://*:*/*", "HTTPS://*/*"] {
-            assert!(matches!(breadth(all), Some(Breadth::All)), "{all}");
+        for paths in [Paths::Ignored, Paths::Matched] {
+            for all in ["<all_urls>", "*://*/*", "https://*/*", "*://*:*/*", "HTTPS://*/*"] {
+                assert!(matches!(breadth(all, paths), Some(Breadth::All)), "{all}");
+            }
+            for broad in [
+                "http://*/*",
+                "http://*/",
+                "https://*:8443/*",
+                "*://*:80/*",
+                "*://*.com/*",
+                "https://*.co.uk/*",
+                "*://*.github.io/*",
+                "*://*.COM/path/*",
+            ] {
+                assert!(matches!(breadth(broad, paths), Some(Breadth::Broad)), "{broad}");
+            }
+            for named in [
+                "https://example.com/*",
+                "*://*.example.com/*",
+                "*://*.google.co.uk/*",
+                "http://localhost:8545/",
+                "*://*.localhost/*",
+                "*://*.internal/*",
+                "file:///*",
+                "ws://*/*",
+                "tabs",
+                "",
+            ] {
+                assert!(breadth(named, paths).is_none(), "{named}");
+            }
         }
-        for broad in [
-            "http://*/*",
-            "*://*/*.pdf",
-            "https://*/",
-            "https://*",
-            "*://*.com/*",
-            "https://*.co.uk/*",
-            "*://*.github.io/*",
-            "*://*.COM/path/*",
-        ] {
-            assert!(matches!(breadth(broad), Some(Breadth::Broad)), "{broad}");
+        // A permission grants whole sites, whatever its path says; a
+        // script runs only on the pages its path matches.
+        for path_only in ["https://*/", "*://*/*.pdf", "https://*", "*://*:*/app/*"] {
+            assert!(
+                matches!(breadth(path_only, Paths::Ignored), Some(Breadth::All)),
+                "{path_only}"
+            );
+            assert!(
+                matches!(breadth(path_only, Paths::Matched), Some(Breadth::Broad)),
+                "{path_only}"
+            );
         }
-        for named in [
-            "https://example.com/*",
-            "*://*.example.com/*",
-            "*://*.google.co.uk/*",
-            "http://localhost:8545/",
-            "*://*.localhost/*",
-            "*://*.internal/*",
-            "file:///*",
-            "ws://*/*",
-            "tabs",
-            "",
-        ] {
-            assert!(breadth(named).is_none(), "{named}");
-        }
+    }
+
+    /// A browser ignores the path of a pattern that grants sites, so the
+    /// common version 2 idiom of two bare origins holds every website.
+    #[test]
+    fn the_path_of_a_granted_pattern_does_not_narrow_it() {
+        assert_eq!(
+            asks(r#"{"manifest_version": 2, "permissions": ["http://*/", "https://*/", "tabs"]}"#),
+            ["extension/all-sites permissions 1 https://*/", "extension/tabs permissions 1 tabs"]
+        );
+        assert_eq!(
+            asks(
+                r#"{"host_permissions": ["https://*/"], "optional_host_permissions": ["*://*/x"]}"#
+            ),
+            [
+                "extension/all-sites host_permissions 1 https://*/",
+                "extension/all-sites optional_host_permissions 1 *://*/x",
+            ]
+        );
+        assert_eq!(
+            asks(r#"{"permissions": ["http://*/"]}"#),
+            ["extension/broad-sites permissions 1 http://*/"]
+        );
+        assert_eq!(
+            asks(r#"{"host_permissions": ["https://*:8443/*"]}"#),
+            ["extension/broad-sites host_permissions 1 https://*:8443/*"]
+        );
+        assert_eq!(
+            asks(r#"{"content_scripts": [{"matches": ["https://*/"], "js": ["a.js"]}]}"#),
+            ["extension/broad-sites content_scripts 1 https://*/"]
+        );
     }
 
     #[test]
@@ -1405,6 +1549,47 @@ mod tests {
                 "extension/tabs permissions 1 tabs",
             ]
         );
+    }
+
+    /// Of the version folders an update leaves side by side, the highest
+    /// version is the one reported; the order is by number, not by text.
+    #[test]
+    fn version_folders_are_ordered_by_number() {
+        let newest = |names: &[&str]| {
+            names
+                .iter()
+                .map(OsStr::new)
+                .max_by(|a, b| version_order(a, b))
+                .and_then(OsStr::to_str)
+                .map(String::from)
+        };
+        assert_eq!(newest(&["9.9_0", "10.0_0"]).as_deref(), Some("10.0_0"));
+        assert_eq!(newest(&["1.2_1", "1.2_0"]).as_deref(), Some("1.2_1"));
+        assert_eq!(newest(&["1.10_0", "1.9.9_0"]).as_deref(), Some("1.10_0"));
+        assert_eq!(newest(&["1.2.1_0", "1.2_5"]).as_deref(), Some("1.2.1_0"));
+        // `1.2` is `1.2.0`: the same version, so the name decides, by bytes.
+        assert_eq!(newest(&["1.2.0_0", "1.2_0"]).as_deref(), Some("1.2_0"));
+        assert_eq!(newest(&["1.2_0", "1.2.0_0"]).as_deref(), Some("1.2_0"));
+        // A name not of the shape sorts below every one that is.
+        for odd in ["latest", "2.0", "2.0_x", "2..0_0", "+2_0", "z_0", "99999999999999999999_0"] {
+            assert_eq!(newest(&[odd, "0_0"]).as_deref(), Some("0_0"), "{odd}");
+        }
+        assert_eq!(newest(&["b", "a"]).as_deref(), Some("b"));
+    }
+
+    /// The folders an update left behind are not scanned, and the report
+    /// says they are there under the extension that is.
+    #[test]
+    fn older_version_folders_are_a_coverage_record() {
+        let profile = tempfile::tempdir().unwrap();
+        let root = chromium(profile.path(), ID, "2.1.0_0", LOCALIZED);
+        let records = scanned(&Extension { superseded: 2, ..folder(root.clone()) });
+        valid(&records);
+        assert_eq!(gaps(&records), ["Skipped SupersededVersion -"]);
+        let Some(Record::Coverage(coverage)) = records.last() else { panic!() };
+        assert_eq!(coverage.count, 2);
+        assert_eq!(coverage.subject, artifact(&records).subject);
+        assert!(gaps(&scanned(&folder(root))).is_empty());
     }
 
     #[test]

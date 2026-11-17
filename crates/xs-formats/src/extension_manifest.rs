@@ -592,6 +592,9 @@ pub enum SitePattern {
         host: Host,
         /// Whether the path is `/*`, which covers every page of a site.
         every_path: bool,
+        /// Whether the pattern names no port or the port `*`, and so covers
+        /// a site on every port.
+        every_port: bool,
     },
 }
 
@@ -620,15 +623,15 @@ pub fn site_pattern(entry: &str) -> Option<SitePattern> {
     };
     // A port, where a browser accepts one, is digits or `*` after the last
     // colon. An address in brackets is one host whatever follows it.
-    let name = match authority.rsplit_once(':') {
+    let (name, every_port) = match authority.rsplit_once(':') {
         Some((name, port))
             if !name.is_empty()
                 && !authority.starts_with('[')
                 && (port == "*" || port.bytes().all(|byte| byte.is_ascii_digit())) =>
         {
-            name
+            (name, port == "*")
         }
-        _ => authority,
+        _ => (authority, true),
     };
     let host = match name.strip_prefix("*.") {
         _ if name == "*" => Host::Any,
@@ -637,7 +640,7 @@ pub fn site_pattern(entry: &str) -> Option<SitePattern> {
         }
         _ => Host::Named,
     };
-    Some(SitePattern::Web { scheme, host, every_path: path == "/*" })
+    Some(SitePattern::Web { scheme, host, every_path: path == "/*", every_port })
 }
 
 #[cfg(test)]
@@ -935,7 +938,11 @@ mod tests {
     }
 
     fn web(scheme: Scheme, host: Host, every_path: bool) -> Option<SitePattern> {
-        Some(SitePattern::Web { scheme, host, every_path })
+        Some(SitePattern::Web { scheme, host, every_path, every_port: true })
+    }
+
+    fn web_on_port(scheme: Scheme, host: Host, every_path: bool) -> Option<SitePattern> {
+        Some(SitePattern::Web { scheme, host, every_path, every_port: false })
     }
 
     #[test]
@@ -951,33 +958,34 @@ mod tests {
         assert_eq!(site_pattern("*://*:*/*"), web(Scheme::Any, Host::Any, true));
         assert_eq!(site_pattern("*://*.com/*"), web(Scheme::Any, under("com"), true));
         assert_eq!(site_pattern("*://*.Co.UK/*"), web(Scheme::Any, under("co.uk"), true));
+        assert_eq!(site_pattern("https://*:8443/*"), web_on_port(Scheme::Https, Host::Any, true));
         assert_eq!(
             site_pattern("https://*.example.com:8443/app/*"),
-            web(Scheme::Https, under("example.com"), false)
+            web_on_port(Scheme::Https, under("example.com"), false)
         );
-        for one_host in [
-            "https://example.com/*",
-            "http://localhost:8545/",
-            "*://connect.trezor.io/9/*",
-            "https://[::1]:8080/*",
-            "https://*.*/*",
-            "https://*./*",
-            "https://ex*ample.com/*",
-            "https:///*",
+        for (one_host, every_port) in [
+            ("https://example.com/*", true),
+            ("http://localhost:8545/", false),
+            ("*://connect.trezor.io/9/*", true),
+            ("https://[::1]:8080/*", true),
+            ("https://*.*/*", true),
+            ("https://*./*", true),
+            ("https://ex*ample.com/*", true),
+            ("https:///*", true),
         ] {
-            assert_eq!(site_pattern(one_host), web_scheme_of(one_host), "{one_host}");
+            assert_eq!(site_pattern(one_host), web_scheme_of(one_host, every_port), "{one_host}");
         }
     }
 
     /// A pattern for one host, whatever its scheme and path.
-    fn web_scheme_of(pattern: &str) -> Option<SitePattern> {
+    fn web_scheme_of(pattern: &str, every_port: bool) -> Option<SitePattern> {
         let scheme = match pattern.split_once("://").unwrap().0 {
             "*" => Scheme::Any,
             "http" => Scheme::Http,
             _ => Scheme::Https,
         };
         let every_path = pattern.ends_with("/*") && pattern.matches('/').count() == 3;
-        web(scheme, Host::Named, every_path)
+        Some(SitePattern::Web { scheme, host: Host::Named, every_path, every_port })
     }
 
     #[test]

@@ -214,6 +214,7 @@ report as a coverage note, never passed off as "nothing found":
 | A browser whose profile folder the system will not let the scan list (macOS protects some apps' data this way) | `skipped`, `no_privilege`, under the browser, such as `chrome`, with how many folders |
 | A browser extension whose `manifest.json` is missing, is a link, or cannot be read; an add-on archive over 64 MiB | `skipped`, `unreadable` or `over_budget`, under the extension's id |
 | A `manifest.json` that is not JSON, or a message catalogue the name points at that is missing | `unrecognized`, `parse_error`, or `skipped`, `unreadable`, under the extension, with the place inside it |
+| Older version folders of a Chromium extension that an update left behind, next to the highest version, which is the one scanned | `skipped`, `superseded_version`, under the extension, with how many folders |
 
 An `.apk` file is identified by its hash. One that was not read to its end
 as one file has none, so its coverage note carries the digest `unread` and
@@ -434,7 +435,7 @@ listed there. So that file is what is read, and nothing else:
 
 | Browser | Where its extensions are | What is read |
 |---|---|---|
-| Arc, Brave, Google Chrome, Chromium, Dia, Microsoft Edge, Vivaldi | `~/Library/Application Support/<browser>/<profile>/Extensions/<id>/<version>/`, every profile | `manifest.json`, and `_locales/<default_locale>/messages.json` when the name is a reference into it |
+| Arc, Brave, Google Chrome, Chromium, Dia, Microsoft Edge, Vivaldi | `~/Library/Application Support/<browser>/<profile>/Extensions/<id>/<version>/`, every profile, the highest version of each extension | `manifest.json`, and `_locales/<default_locale>/messages.json` when the name is a reference into it |
 | Firefox | `~/Library/Application Support/Firefox/Profiles/<profile>/extensions/<id>.xpi` | The archive, for its hash, and the same two entries inside it |
 
 Your history, cookies, bookmarks, saved logins, preferences and pages are
@@ -450,7 +451,7 @@ that is part of the scanner, not of the rule pack:
 | Permission | The extension may |
 |---|---|
 | `extension/all-sites` | read and change data on every website you visit |
-| `extension/broad-sites` | read and change data on a broad set of websites: every site under one domain ending, or part of every site |
+| `extension/broad-sites` | read and change data on a broad set of websites: every site under one domain ending, every site over plain http or on one port, or some pages of every site |
 | `extension/history` | read and change your browsing history |
 | `extension/tabs` | see the address and title of every tab you have open |
 | `extension/web-navigation` | see the address of each page as you open it |
@@ -464,10 +465,14 @@ that is part of the scanner, not of the rule pack:
 | `extension/proxy` | route the browser's traffic through a proxy it chooses |
 
 "Every website" is said only of a pattern that covers every page of every
-site: `<all_urls>`, or a wildcard host with the path `/*` over `https` or
-both schemes. A wildcard pattern that covers less (only `http`, part of each
-site, a script that `include_globs` narrows, or every site under a suffix such
-as `*.com`) is a broad set; a pattern that names sites is not reported. A
+site: `<all_urls>`, or a wildcard host on any port over `https` or both
+schemes. The browser grants a site whole whatever path a permission's pattern
+gives, so `https://*/` under `host_permissions` (or, in a version 2 manifest,
+`permissions`) is every website; a script's `matches` must have the path `/*`.
+A wildcard pattern that covers less (only `http`, one port, part of each site
+for a script, a script that `include_globs` narrows, or every site under a
+suffix such as `*.com`) is a broad set; a pattern that names sites is not
+reported. A
 script the browser puts into pages counts only if it runs code: style sheets
 alone cannot read a page. What an extension lists under an `optional_` key
 it holds only once it asks while it runs and you agree, so such a claim

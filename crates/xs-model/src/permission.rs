@@ -35,7 +35,9 @@ pub const RULE: &str = "declared/extension-permission";
 /// rank channels. An access has no company and counts in no headline.
 pub const CATEGORY: &str = "extension_permission";
 
-/// The name of [`CATEGORY`], for a reader.
+/// The name of [`CATEGORY`], for a reader. It is the plain-language
+/// wording the report renderer will use for extension and app access
+/// findings.
 pub const CATEGORY_NAME: &str = "Browser extension permission";
 
 /// The note on a claim whose every record comes from an optional manifest
@@ -50,12 +52,14 @@ pub const NOTE_OPTIONAL: &str = "optional";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Permission {
     /// A site pattern that covers every website: `<all_urls>`, or a pattern
-    /// such as `https://*/*` or `*://*/*`.
+    /// such as `https://*/*` or `*://*/*`. A pattern that grants sites
+    /// grants them whole, whatever its path, so `https://*/` is one too.
     AllSites,
     /// A site pattern with a wildcard for the whole host that still covers
-    /// less than every website: only `http`, only some paths, only pages a
-    /// further filter lets through, or every site under one public suffix
-    /// such as `*://*.com/*`.
+    /// less than every website: only `http`, only one port, only some
+    /// pages of each site for a script the browser puts into pages, only
+    /// pages a further filter lets through, or every site under one public
+    /// suffix such as `*://*.com/*`.
     BroadSites,
     /// `history`: the browsing history.
     History,
@@ -179,13 +183,15 @@ impl Permission {
     ///
     /// The words say what the browser allows an extension that holds the
     /// permission, and nothing about what a given extension does with it.
+    /// They are the plain-language wording the report renderer will use for
+    /// extension and app access findings.
     #[must_use]
     pub const fn allows(self) -> &'static str {
         match self {
             Self::AllSites => "read and change data on every website you visit",
             Self::BroadSites => {
                 "read and change data on a broad set of websites: every site under one domain \
-                 ending, or part of every site"
+                 ending, every site over plain http or on one port, or some pages of every site"
             }
             Self::History => "read and change your browsing history",
             Self::Tabs => "see the address and title of every tab you have open",

@@ -125,7 +125,7 @@ impl Found {
     /// Adds the extension at the canonical path `path`, found by path and
     /// so in no browser's profile.
     fn extension(&mut self, path: PathBuf, form: Form) {
-        self.extensions.insert(Extension { path, form, browser: None });
+        self.extensions.insert(Extension { path, form, browser: None, superseded: 0 });
     }
 }
 
