@@ -287,7 +287,7 @@ fn finish(
         && company.is_some()
         && pack.category(category).is_some_and(|category| category.headline);
     let vendor = resolve::vendor(group.subject, signers, pack);
-    let party = resolve::party(company.as_deref(), group.object, vendor.as_ref(), pack);
+    let party = resolve::party(company.as_deref(), group.object, vendor.as_ref());
     // Variants are declared in ladder order, so the last rung is the highest.
     // A group is only created for a record, so it always has one.
     let grade = group.rungs.last().copied().unwrap_or(Grade::Declares);
@@ -783,20 +783,59 @@ mod tests {
         }
     }
 
-    /// The pack lists `firebaseio.com` as Firebase's and no app id under it.
-    /// An app that names itself after that domain may be Firebase's own, and
-    /// nothing confirms it: neither first nor third is said.
+    /// Design report, section 3, M5: an app id is only looked up among the
+    /// listed app ids and never matched against a company's domains. GitHub
+    /// lists `github.com` and `github.io` and is owned by Microsoft, as in
+    /// the shipped pack; `com.github.<user>` and `io.github.<user>` are
+    /// names unrelated developers give their apps.
     #[test]
-    fn unless_its_app_id_points_at_that_company() {
-        let claims = claims_of(
-            "com.firebaseio.Console",
-            None,
-            &["sdk/crashlytics", "sdk/acme-analytics"],
-            &[],
-        );
-        assert_eq!(claim(&claims, "sdk/crashlytics").vendor, unlisted("firebaseio.com"));
-        assert_eq!(claim(&claims, "sdk/crashlytics").party, Party::Unknown);
-        assert_eq!(claim(&claims, "sdk/acme-analytics").party, Party::Third);
+    fn an_app_named_after_a_listed_domain_is_still_third_party() {
+        let mut layers = pack().layers().to_vec();
+        let layer = &mut layers[0].layer;
+        let entity = |id: &str, parent: Option<&str>, domains: &[&str]| Entity {
+            id: id.into(),
+            name: id.into(),
+            parent: parent.map(Into::into),
+            website: format!("https://{id}.example/"),
+            team_ids: vec![],
+            app_ids: vec![],
+            domains: domains.iter().map(|&domain| domain.into()).collect(),
+            sources: vec![format!("https://{id}.example/terms")],
+        };
+        layer.entities.push(entity(
+            "github",
+            Some("microsoft"),
+            &["github.com", "github.io", "githubusercontent.com"],
+        ));
+        layer.entities.push(entity("microsoft", None, &["microsoft.com"]));
+        layer.entities.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut appcenter =
+            layer.rules.iter().find(|rule| rule.id == "sdk/acme-analytics").unwrap().clone();
+        appcenter.id = "sdk/appcenter".into();
+        appcenter.name = "AppCenterAnalytics".into();
+        appcenter.entity = Some("microsoft".into());
+        layer.rules.push(appcenter);
+        layer.rules.sort_by(|a, b| a.id.cmp(&b.id));
+        let pack = Pack::new(layers).unwrap();
+
+        for (app, domain) in [
+            ("com.github.alice.tool", "github.com"),
+            ("io.github.alice.tool", "alice.github.io"),
+        ] {
+            let records = [
+                artifact(app, 1, None),
+                framework_edge(app, 1, "sdk/appcenter"),
+                feed(app, 1, "raw.githubusercontent.com"),
+            ];
+            let claims = derive(&set(records), &pack).unwrap();
+            assert_eq!(claims.len(), 2, "{app}");
+            for claim in &claims {
+                assert_eq!(claim.company.as_deref(), Some("microsoft"), "{app}");
+                assert_eq!(claim.vendor, unlisted(domain), "{app}");
+                assert_eq!(claim.party, Party::Third, "{app} {}", claim.object.id);
+            }
+            assert_eq!(Headline::of(&claims).apps_third_party, 1, "{app}");
+        }
     }
 
     #[test]

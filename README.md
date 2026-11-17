@@ -71,7 +71,7 @@ same.
 | Who is behind an SDK? | The rule names the entity that operates it; the claim names the company at the top of that entity's ownership chain. A library with no network side of its own, such as an updater, is a component and names no company. |
 | Who is behind a host? | The company whose listed domain the host is under. A host under no listed domain is **unmapped**: it is shown as itself, nobody is named as its owner, and it is counted nowhere. There is no generic table of host owners. |
 | Who publishes the app? | First the Apple Team ID its code signature names, then its app id, each looked up among the identifiers the rule pack lists per company. Reversing an app id proves nothing about ownership, so an app id is not believed against a signature: an app that calls itself `com.microsoft.x` and is signed by a team the pack does not list for Microsoft has no known vendor. |
-| First or third party? | `first` when a listed identifier says the app is the company's own, or when a host that belongs to no listed company is under the domain the app id spells (`ranchero.com` for `com.ranchero.NetNewsWire-Evergreen`). `third` when the app belongs to another listed company or to nobody the pack lists. `unknown` otherwise: no company is named, nothing identifies the vendor, or the app id points at the company and nothing confirms it. |
+| First or third party? | `first` when a listed identifier says the app is the company's own, or when a host that belongs to no listed company is under the domain the app id spells (`ranchero.com` for `com.ranchero.NetNewsWire-Evergreen`). `third` when the app belongs to another listed company or to nobody the pack lists. `unknown` otherwise: no company is named, or nothing identifies the vendor. |
 
 Only companies that own an SDK can be first party to one, so the pack lists
 identifiers for those companies and no others. Each claim carries a `vendor`
@@ -122,7 +122,7 @@ $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exp
 ```
 exposure scan PATH... [--json FILE] [--threads N]   scan .app bundles, folders of them, or .apk files
 exposure report FILE [--json FILE]                  derive the report again from saved evidence
-exposure rules show                                 list the built-in rule pack: its rules and its companies
+exposure rules show                                 list the built-in rule pack
 exposure rules verify PACK --sig SIGNATURE          check a signed pack file offline
 ```
 

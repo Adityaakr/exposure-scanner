@@ -221,8 +221,7 @@ pub enum Party {
     /// rule pack lists, or to nobody it lists.
     Third,
     /// Neither is asserted. The object names no company (a component, an
-    /// unmapped host), or the app's vendor could not be established, or the
-    /// app id points at the company while nothing confirms it.
+    /// unmapped host), or the app's vendor could not be established.
     Unknown,
 }
 

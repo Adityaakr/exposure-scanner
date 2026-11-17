@@ -162,24 +162,6 @@ pub(crate) fn rules_show() -> Result<()> {
         let owner = owner.map_or("component, no company", |company| company.name.as_str());
         out.push_str(&format!("{:<28} {:<32} {:<16} {owner}\n", rule.id, rule.name, rule.category));
     }
-
-    // The companies, and what tells that an app or a host is their own. A
-    // reader checks a first-party finding against these lines.
-    out.push_str(&format!("\n{}\n\n", plural(pack.entities().count() as u64, "company")));
-    for entity in pack.entities() {
-        let owner = pack.company_of(&entity.id).filter(|owner| owner.id != entity.id);
-        let owner = owner.map(|owner| format!(", owned by {}", owner.name)).unwrap_or_default();
-        out.push_str(&format!("{:<28} {}{owner}\n", entity.id, entity.name));
-        for (label, identifiers) in [
-            ("team ids", &entity.team_ids),
-            ("app ids", &entity.app_ids),
-            ("domains", &entity.domains),
-        ] {
-            if !identifiers.is_empty() {
-                out.push_str(&format!("{:<28} {label}: {}\n", "", identifiers.join(", ")));
-            }
-        }
-    }
     print(&out)
 }
 

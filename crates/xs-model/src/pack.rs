@@ -563,11 +563,6 @@ impl Pack {
             .any(|entity| self.company_of(&entity.id).is_some_and(|top| top.id == company_id))
     }
 
-    /// Every entity, in id order.
-    pub fn entities(&self) -> impl Iterator<Item = &Entity> {
-        self.entities.values().filter_map(|position| self.entity_at(position))
-    }
-
     /// Every rule, in id order.
     pub fn rules(&self) -> impl Iterator<Item = &Rule> {
         self.rules.keys().filter_map(|id| self.rule(id))
@@ -816,13 +811,6 @@ pub(crate) mod tests {
         assert!(pack_of(layer.clone()).unwrap().lists_team_ids("google"));
         layer.entities[0].team_ids.clear();
         assert!(!pack_of(layer).unwrap().lists_team_ids("google"));
-    }
-
-    #[test]
-    fn entities_are_listed_in_id_order() {
-        let pack = pack_of(layer()).unwrap();
-        let ids: Vec<&str> = pack.entities().map(|entity| entity.id.as_str()).collect();
-        assert_eq!(ids, ["firebase", "google"]);
     }
 
     #[test]

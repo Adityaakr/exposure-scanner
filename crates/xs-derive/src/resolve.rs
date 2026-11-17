@@ -23,14 +23,14 @@
 //! |---|---|---|
 //! | names a company | that company | first |
 //! | names a company | another listed company | third |
-//! | names a company | nobody the pack lists | third, unless the app id's domain is one of that company's: then unknown |
+//! | names a company | nobody the pack lists | third |
 //! | names a company | none | unknown |
 //! | a host nobody is named for | its app id spells the host's registrable domain | first |
 //! | names no company | anything else | unknown |
 //!
-//! `third` is therefore only said when nothing the app says of itself points
-//! at the company, and `first` only when a listed identifier does, or when a
-//! host that belongs to no listed company sits under the app's own domain.
+//! `first` is therefore only said when a listed identifier names the company,
+//! or when a host that belongs to no listed company sits under the app's own
+//! domain. An app id is never matched against a company's domains.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
@@ -140,23 +140,11 @@ pub(crate) fn party(
     company: Option<&str>,
     object: &ObjectRef,
     vendor: Option<&Vendor>,
-    pack: &Pack,
 ) -> Party {
     let Some(vendor) = vendor else { return Party::Unknown };
     match (company, vendor.company.as_deref()) {
         (Some(company), Some(own)) if company == own => Party::First,
-        (Some(_), Some(_)) => Party::Third,
-        (Some(company), None) => {
-            // Nobody the pack lists publishes the app. Its own id may still
-            // point at this very company, which no listed identifier
-            // confirms: then neither is said.
-            let points_at_it = vendor
-                .domain
-                .as_deref()
-                .and_then(|domain| host_company(pack, domain))
-                .is_some_and(|owner| owner == company);
-            if points_at_it { Party::Unknown } else { Party::Third }
-        }
+        (Some(_), _) => Party::Third,
         (None, _) => {
             let own_domain = object.kind == ObjectKind::Host
                 && vendor.domain.is_some()

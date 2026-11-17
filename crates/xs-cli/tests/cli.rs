@@ -331,16 +331,6 @@ fn rules_show_lists_the_built_in_pack() {
     }
     let sparkle = listing.lines().find(|line| line.starts_with("sdk/sparkle")).unwrap();
     assert!(sparkle.ends_with("component, no company"), "{sparkle}");
-
-    // The companies, with what tells that an app or a host is their own.
-    let lines: Vec<&str> = listing.lines().collect();
-    let microsoft = lines.iter().position(|line| line.starts_with("microsoft ")).unwrap();
-    assert!(lines[microsoft].ends_with("Microsoft Corporation"), "{listing}");
-    assert_eq!(lines[microsoft + 1].trim(), "team ids: UBF8T346G9");
-    assert_eq!(lines[microsoft + 2].trim(), "app ids: com.microsoft");
-    assert_eq!(lines[microsoft + 3].trim(), "domains: microsoft.com");
-    let github = lines.iter().position(|line| line.starts_with("github ")).unwrap();
-    assert!(lines[github].ends_with("GitHub, Inc., owned by Microsoft Corporation"), "{listing}");
 }
 
 /// Build plan, task 3: a tampered pack is refused.
