@@ -39,7 +39,7 @@ fn script_verdict<'p>(
             break;
         }
     }
-    matchers.judge(&hits, scope)
+    matchers.judge(&hits)
 }
 
 /// `rule token count` for every edge of a verdict.
@@ -143,7 +143,7 @@ fn android_tables_give_the_sdks_their_names_and_strings_belong_to() {
         matchers.match_value(MatcherKind::DexString, scope, string.as_bytes(), &mut hits);
     }
 
-    let verdict = matchers.judge(&hits, scope);
+    let verdict = matchers.judge(&hits);
     assert!(verdict.mentions.is_empty());
     let found: Vec<String> = verdict
         .edges

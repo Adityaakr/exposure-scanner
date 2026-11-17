@@ -560,7 +560,7 @@ fn finish(
         for folder in &plan.frameworks {
             matchers.match_value(MatcherKind::AppleFramework, scope, folder.as_bytes(), &mut hits);
         }
-        for finding in matchers.judge(&hits, scope).edges {
+        for finding in matchers.judge(&hits).edges {
             records.push(Record::Edge(EdgeRecord {
                 v: V1,
                 collector: Collector::MacosBundle,

@@ -56,6 +56,10 @@ impl core::error::Error for BuildError {}
 /// of the 71 `doubleclick.net` hits on 16 real bundles sat in a browser
 /// engine. Table matchers run everywhere, because a table says what a file
 /// is made of, not what text it happens to contain.
+///
+/// The control is enforced by [`Matchers::content`] and
+/// [`Matchers::match_value`], which find nothing where a kind is not
+/// applied.
 #[must_use]
 pub const fn applies(matcher: MatcherKind, scope: Scope) -> bool {
     !(matcher.is_content() && matches!(scope, Scope::Runtime))
@@ -81,7 +85,8 @@ struct KindMatchers<'p> {
 ///    each entry of a parsed table goes to [`match_value`](Self::match_value).
 ///    Both record into a [`HitAcc`].
 /// 2. [`judge`](Self::judge) the hits. This is where the false-positive
-///    controls that need the whole haystack are applied.
+///    controls that need the whole haystack are applied. The scope control
+///    is not one of them: step 1 enforces it.
 /// 3. Turn each edge of the [`Verdict`] into a record.
 #[derive(Debug, Clone)]
 pub struct Matchers<'p> {
@@ -183,6 +188,9 @@ impl<'p> Matchers<'p> {
     /// Matches `value`, one entry of a parsed table, against every token of
     /// `matcher`, and records the tokens that hit in `out`.
     ///
+    /// Nothing is recorded if the kind is not applied to a file of `scope`
+    /// (see [`applies`]).
+    ///
     /// A token hits a value at most once, however often its literal occurs
     /// in it, so a count is the number of table entries that matched. The
     /// smallest matching value becomes the token's example.
@@ -202,11 +210,11 @@ impl<'p> Matchers<'p> {
         }
     }
 
-    /// Decides what the hits collected from one haystack of `scope` are
-    /// evidence of. See [`Verdict`].
+    /// Decides what the hits collected from one haystack are evidence of.
+    /// See [`Verdict`].
     #[must_use]
-    pub fn judge(&self, hits: &HitAcc, scope: Scope) -> Verdict<'p> {
-        judge::judge(self, hits, scope)
+    pub fn judge(&self, hits: &HitAcc) -> Verdict<'p> {
+        judge::judge(self, hits)
     }
 }
 

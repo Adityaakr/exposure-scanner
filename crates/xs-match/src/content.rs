@@ -128,12 +128,6 @@ impl ContentEngine {
         self.patterns.is_empty()
     }
 
-    /// Heap memory the automaton uses, in bytes.
-    #[must_use]
-    pub fn memory_usage(&self) -> usize {
-        self.automaton.as_ref().map_or(0, AhoCorasick::memory_usage)
-    }
-
     /// Calls `found` for every occurrence in `window` that is this window's
     /// to judge and that sits on its token's boundary.
     fn each_hit(&self, window: &[u8], carry: usize, last: bool, mut found: impl FnMut(PatternId)) {
@@ -244,7 +238,6 @@ pub(crate) mod tests {
         let engine = engine(&[]);
         assert!(engine.is_empty());
         assert_eq!(engine.overlap(), 0);
-        assert_eq!(engine.memory_usage(), 0);
         assert!(whole(&engine, b"doubleclick.net google-analytics.com").is_empty());
         assert!(whole(&NoContent, b"doubleclick.net google-analytics.com").is_empty());
         assert_eq!(NoContent.overlap(), 0);
@@ -255,7 +248,6 @@ pub(crate) mod tests {
         let engine = engine(&[("0123456789", Boundary::None), ("abc", Boundary::Host)]);
         assert_eq!(engine.len(), 2);
         assert_eq!(engine.overlap(), 9 + 3);
-        assert!(engine.memory_usage() > 0);
     }
 
     /// Build plan, task 5: "Overlapping tokens are both reported."

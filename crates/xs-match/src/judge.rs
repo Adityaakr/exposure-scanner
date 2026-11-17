@@ -9,13 +9,22 @@
 //! * **Breadth guard** (control 4). A file that names eight or more companies
 //!   in its free-form bytes is a list, such as the filter list of an ad
 //!   blocker, and not code that talks to all of them. In the lab run one 129
-//!   KB script named 25 ad and analytics domains.
+//!   KB script named 25 ad and analytics domains. The guard counts companies
+//!   over content-matcher hits only and holds back content-matcher hits
+//!   only. Table-matcher hits add no breadth and stay edges, because a table
+//!   says what a file is made of. `dex_string` is a content matcher, so the
+//!   `dex_string` hits of an Android app whose string table names eight or
+//!   more companies are mentions: the strings show that the app handles
+//!   those names, not that it sends data, and its edges come from the class
+//!   table and the manifest.
 //! * **Distinct-token minimum** (control 5). A rule may demand that several
 //!   different tokens of one matcher kind hit before that kind counts, so a
 //!   single coincidental string proves nothing.
 //!
-//! The scope control (control 1) is applied before the search, by
-//! [`Matchers::content`](crate::Matchers::content), and checked again here.
+//! The scope control (control 1) is not applied here. It is enforced before
+//! the search, by [`Matchers::content`](crate::Matchers::content) and
+//! [`Matchers::match_value`](crate::Matchers::match_value), which find
+//! nothing for a content matcher in a runtime file.
 //!
 //! A hit that a control holds back is a **mention**: it is reported to the
 //! collector with the reason, and it must never become an edge.
@@ -26,11 +35,10 @@ use alloc::vec::Vec;
 
 use xs_model::matcher::MatcherKind;
 use xs_model::pack::{Rule, Token};
-use xs_model::record::Scope;
 use xs_model::text;
 
 use crate::hits::HitAcc;
-use crate::matchers::{Matchers, TokenRef, applies};
+use crate::matchers::{Matchers, TokenRef};
 
 /// A haystack whose content hits name this many companies or more is
 /// list-like.
@@ -56,11 +64,9 @@ pub struct Finding<'p> {
 /// Why a hit is not evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Held {
-    /// A content matcher hit in a runtime file, where content matchers do
-    /// not apply.
-    Runtime,
-    /// The haystack names [`BREADTH_LIMIT`] companies or more, so it is a
-    /// list and not code that uses them.
+    /// The content hits of the haystack name [`BREADTH_LIMIT`] companies or
+    /// more, so it is a list and not code that uses them. Only content hits
+    /// are held back for this.
     ListLike,
     /// Fewer different tokens of the rule hit than its `min_distinct` asks
     /// of this matcher kind.
@@ -96,7 +102,7 @@ impl Verdict<'_> {
     }
 }
 
-pub(crate) fn judge<'p>(matchers: &Matchers<'p>, hits: &HitAcc, scope: Scope) -> Verdict<'p> {
+pub(crate) fn judge<'p>(matchers: &Matchers<'p>, hits: &HitAcc) -> Verdict<'p> {
     // An id from another pack's matchers has no token here and is dropped.
     let found: Vec<(TokenRef<'p>, Finding<'p>)> = hits
         .iter()
@@ -115,7 +121,6 @@ pub(crate) fn judge<'p>(matchers: &Matchers<'p>, hits: &HitAcc, scope: Scope) ->
             Some((token, finding))
         })
         .collect();
-    let searched = |token: &TokenRef<'_>| applies(token.matcher, scope);
 
     // Breadth is a property of the haystack, so it is measured on every
     // content hit, also on those a minimum would hold back. A company is the
@@ -123,7 +128,7 @@ pub(crate) fn judge<'p>(matchers: &Matchers<'p>, hits: &HitAcc, scope: Scope) ->
     // has no company and adds no breadth.
     let companies: BTreeSet<&str> = found
         .iter()
-        .filter(|(token, _)| token.matcher.is_content() && searched(token))
+        .filter(|(token, _)| token.matcher.is_content())
         .filter_map(|(token, _)| matchers.pack().company_of(token.rule.entity.as_deref()?))
         .map(|company| company.id.as_str())
         .collect();
@@ -132,7 +137,7 @@ pub(crate) fn judge<'p>(matchers: &Matchers<'p>, hits: &HitAcc, scope: Scope) ->
     // Tokens are unique within a rule and matcher kind, and the accumulator
     // holds each pattern once, so this counts different tokens.
     let mut distinct: BTreeMap<(&str, MatcherKind), u32> = BTreeMap::new();
-    for (token, _) in found.iter().filter(|(token, _)| searched(token)) {
+    for (token, _) in &found {
         let count = distinct.entry((token.rule.id.as_str(), token.matcher)).or_insert(0);
         *count = count.saturating_add(1);
     }
@@ -141,9 +146,7 @@ pub(crate) fn judge<'p>(matchers: &Matchers<'p>, hits: &HitAcc, scope: Scope) ->
     for (token, finding) in found {
         let minimum = token.rule.min_distinct.get(&token.matcher).copied().unwrap_or(1);
         let hit = distinct.get(&(token.rule.id.as_str(), token.matcher)).copied().unwrap_or(0);
-        let held = if !searched(&token) {
-            Some(Held::Runtime)
-        } else if list_like && token.matcher.is_content() {
+        let held = if list_like && token.matcher.is_content() {
             Some(Held::ListLike)
         } else if hit < minimum {
             Some(Held::BelowMinimum)
@@ -166,6 +169,7 @@ mod tests {
     use xs_model::Pack;
     use xs_model::matcher::Boundary;
     use xs_model::pack::Entity;
+    use xs_model::record::Scope;
 
     use super::*;
     use crate::content::ContentMatcher as _;
@@ -212,7 +216,7 @@ mod tests {
         let matchers = Matchers::build(&pack).unwrap();
         let script = "x('collect.vendor-3.example'); y('collect.vendor-3.example')";
         let hits = scan(&matchers, MatcherKind::ContentLiteral, SCRIPT, script.as_bytes());
-        let verdict = matchers.judge(&hits, SCRIPT);
+        let verdict = matchers.judge(&hits);
         assert!(verdict.mentions.is_empty());
         assert!(!verdict.is_list_like());
         assert_eq!(verdict.edges.len(), 1);
@@ -228,7 +232,7 @@ mod tests {
     fn nothing_found_is_an_empty_verdict() {
         let pack = vendors();
         let matchers = Matchers::build(&pack).unwrap();
-        assert_eq!(matchers.judge(&HitAcc::new(), SCRIPT), Verdict::default());
+        assert_eq!(matchers.judge(&HitAcc::new()), Verdict::default());
     }
 
     /// Design report, section 5.2 control 4.
@@ -239,7 +243,7 @@ mod tests {
         for count in 0..=10 {
             let script = script_naming(count);
             let hits = scan(&matchers, MatcherKind::ContentLiteral, SCRIPT, script.as_bytes());
-            let verdict = matchers.judge(&hits, SCRIPT);
+            let verdict = matchers.judge(&hits);
             if count >= BREADTH_LIMIT {
                 assert!(verdict.is_list_like(), "{count} companies");
                 assert!(verdict.edges.is_empty(), "{count} companies");
@@ -295,7 +299,7 @@ mod tests {
 
         let script: String = literals.iter().map(|(a, b)| format!("'{a}' '{b}'\n")).collect();
         let hits = scan(&matchers, MatcherKind::ContentLiteral, SCRIPT, script.as_bytes());
-        let verdict = matchers.judge(&hits, SCRIPT);
+        let verdict = matchers.judge(&hits);
         // 18 tokens of 9 rules hit, from 7 companies: not a list.
         assert_eq!(verdict.edges.len(), 18);
         assert!(verdict.mentions.is_empty());
@@ -334,7 +338,7 @@ mod tests {
                 &mut folders,
             );
         }
-        let verdict = matchers.judge(&folders, Scope::Dependency);
+        let verdict = matchers.judge(&folders);
         assert_eq!(verdict.edges.len(), 8);
         assert!(!verdict.is_list_like());
 
@@ -343,7 +347,7 @@ mod tests {
         let script: String = names.iter().map(|(host, _)| format!("||{host}^\n")).collect();
         let mut both = scan(&matchers, MatcherKind::ContentLiteral, SCRIPT, script.as_bytes());
         both.merge(&folders);
-        let verdict = matchers.judge(&both, SCRIPT);
+        let verdict = matchers.judge(&both);
         assert!(verdict.is_list_like());
         assert_eq!(verdict.edges.len(), 8);
         assert!(verdict.edges.iter().all(|edge| edge.matcher == MatcherKind::AppleFramework));
@@ -379,7 +383,7 @@ mod tests {
         let matchers = Matchers::build(&pack).unwrap();
         let judge = |binary: &[u8]| {
             let hits = scan(&matchers, MatcherKind::MachoToken, SCRIPT, binary);
-            matchers.judge(&hits, SCRIPT)
+            matchers.judge(&hits)
         };
 
         // One token, however often, is a coincidence.
@@ -415,7 +419,7 @@ mod tests {
         let matchers = Matchers::build(&pack).unwrap();
         let mut hits = scan(&matchers, MatcherKind::MachoToken, SCRIPT, b"FIRCLSSettings\0");
         matchers.match_value(MatcherKind::MachoObjcClass, SCRIPT, b"FIRCrashlytics", &mut hits);
-        let verdict = matchers.judge(&hits, SCRIPT);
+        let verdict = matchers.judge(&hits);
         // The class name has no minimum and counts. It does not make up for
         // the missing second binary token.
         assert_eq!(verdict.edges.len(), 1);
@@ -445,56 +449,13 @@ mod tests {
         for class in [&b"TWOBetaOne"[..], b"TWOBetaTwo"] {
             matchers.match_value(MatcherKind::MachoObjcClass, SCRIPT, class, &mut hits);
         }
-        assert!(matchers.judge(&hits, SCRIPT).edges.is_empty());
+        assert!(matchers.judge(&hits).edges.is_empty());
         matchers.match_value(MatcherKind::MachoObjcClass, SCRIPT, b"TWOAlpha", &mut hits);
-        let verdict = matchers.judge(&hits, SCRIPT);
+        let verdict = matchers.judge(&hits);
         assert!(verdict.mentions.is_empty());
         let counts: Vec<u32> = verdict.edges.iter().map(|edge| edge.count).collect();
         assert_eq!(counts, [1, 2]);
         assert_eq!(verdict.edges[1].example.as_deref(), Some("TWOBetaOne"));
-    }
-
-    /// Design report, section 5.2 control 1, from the judging side: hits a
-    /// collector gathered with the wrong scope still cannot become edges.
-    #[test]
-    fn content_hits_judged_as_a_runtime_file_are_held_back() {
-        let pack = crashlytics();
-        let matchers = Matchers::build(&pack).unwrap();
-        let mut hits = scan(
-            &matchers,
-            MatcherKind::MachoToken,
-            Scope::AppCode,
-            b"FIRCLSSettings\0FIRCLSReportManager\0",
-        );
-        matchers.match_value(
-            MatcherKind::MachoObjcClass,
-            Scope::Runtime,
-            b"FIRCrashlytics",
-            &mut hits,
-        );
-
-        for scope in [Scope::AppCode, Scope::Dependency, Scope::Resource] {
-            let verdict = matchers.judge(&hits, scope);
-            assert_eq!(verdict.edges.len(), 3, "{scope:?}");
-            assert!(verdict.mentions.is_empty(), "{scope:?}");
-        }
-        let verdict = matchers.judge(&hits, Scope::Runtime);
-        assert_eq!(verdict.edges.len(), 1);
-        assert_eq!(verdict.edges[0].matcher, MatcherKind::MachoObjcClass);
-        assert_eq!(verdict.mentions.len(), 2);
-        assert!(verdict.mentions.iter().all(|mention| mention.held == Held::Runtime));
-    }
-
-    #[test]
-    fn hits_held_as_runtime_add_no_breadth_and_meet_no_minimum() {
-        let pack = vendors();
-        let matchers = Matchers::build(&pack).unwrap();
-        let script = script_naming(10);
-        let hits = scan(&matchers, MatcherKind::ContentLiteral, SCRIPT, script.as_bytes());
-        let verdict = matchers.judge(&hits, Scope::Runtime);
-        assert!(verdict.edges.is_empty());
-        assert!(!verdict.is_list_like());
-        assert!(verdict.mentions.iter().all(|mention| mention.held == Held::Runtime));
     }
 
     #[test]
@@ -509,7 +470,7 @@ mod tests {
         let example = |value: &[u8]| {
             let mut hits = HitAcc::new();
             matchers.match_value(MatcherKind::AndroidClassPrefix, SCRIPT, value, &mut hits);
-            matchers.judge(&hits, SCRIPT).edges.remove(0).example.unwrap()
+            matchers.judge(&hits).edges.remove(0).example.unwrap()
         };
 
         let long = format!("com.long.{}", "x".repeat(4000));
@@ -533,6 +494,6 @@ mod tests {
         let matchers = Matchers::build(&pack).unwrap();
         let mut hits = HitAcc::new();
         hits.hit(crate::PatternId(4000));
-        assert_eq!(matchers.judge(&hits, SCRIPT), Verdict::default());
+        assert_eq!(matchers.judge(&hits), Verdict::default());
     }
 }

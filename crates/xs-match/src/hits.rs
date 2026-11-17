@@ -73,6 +73,9 @@ impl HitAcc {
     }
 
     /// Adds everything `other` saw, as if both had been one accumulator.
+    ///
+    /// The scan scheduler (build plan, task 9) merges the accumulators of
+    /// the files it reads with this.
     pub fn merge(&mut self, other: &Self) {
         for (&pattern, theirs) in &other.tallies {
             let ours = self.tallies.entry(pattern).or_default();

@@ -24,10 +24,10 @@
 //!
 //! | Control | Where |
 //! |---|---|
-//! | 1. Scope: content matchers do not run on runtime files | [`applies`], enforced by `content`, `match_value` and `judge` |
+//! | 1. Scope: content matchers do not run on runtime files | [`applies`], enforced by [`Matchers::content`] and [`Matchers::match_value`] |
 //! | 2. Boundaries: `word` and `host` anchors | the search itself |
 //! | 3. Token lints | the pack compiler in `xs-rules`, before a pack is signed |
-//! | 4. Breadth guard: a file naming 8 companies is a list | `judge` |
+//! | 4. Breadth guard: a file whose content-matcher hits name 8 or more companies is a list | `judge`. It counts companies over content-matcher hits only and holds back content-matcher hits only. Table-matcher hits stay edges. `dex_string` is a content matcher, so this includes the `dex_string` hits of an Android app whose string table names 8 or more companies |
 //! | 5. Distinct-token minimum per rule and matcher kind | `judge` |
 //!
 //! The crate is `no_std`: matching is a pure function of bytes and the pack.
