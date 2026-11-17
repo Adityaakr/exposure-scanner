@@ -6,7 +6,7 @@
 //! They are found either below the paths a scan is given ([`artifacts`]) or,
 //! when it is given none, where macOS keeps installed apps ([`installed`]).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -78,30 +78,6 @@ pub struct Artifacts {
     pub bundles: Vec<PathBuf>,
     /// Android packages: regular files named `.apk`.
     pub packages: Vec<PathBuf>,
-    /// Every root that was searched in full, canonical: a path given, or a
-    /// folder of installed apps that exists. Whatever was in one and is not
-    /// among the artifacts is not there any more.
-    pub roots: BTreeSet<PathBuf>,
-    /// Where a search of a folder found each artifact, by its canonical
-    /// path: the path in the folder, which may be a link to it.
-    pub found_at: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
-}
-
-impl Artifacts {
-    /// The paths whose search finds the artifact at the canonical path
-    /// `artifact`, a bundle if `bundle` and else a package: those that
-    /// find it where it is, and those that find it where this search found
-    /// it, through a link.
-    pub(crate) fn reached_from<'a>(
-        &'a self,
-        artifact: &'a Path,
-        bundle: bool,
-    ) -> BTreeSet<&'a Path> {
-        let found_at = self.found_at.get(artifact).into_iter().flatten();
-        let mut from: BTreeSet<&Path> = reached_from(artifact, bundle).into_iter().collect();
-        from.extend(found_at.flat_map(|path| reached_from(path, bundle)));
-        from
-    }
 }
 
 /// What a search has found so far.
@@ -109,45 +85,15 @@ impl Artifacts {
 struct Found {
     bundles: BTreeSet<PathBuf>,
     packages: BTreeSet<PathBuf>,
-    roots: BTreeSet<PathBuf>,
-    found_at: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
 }
 
 impl Found {
-    /// Notes that the artifact at the canonical path `resolved` was found
-    /// at `path` in a folder.
-    fn at(&mut self, resolved: &Path, path: PathBuf) {
-        self.found_at.entry(resolved.to_path_buf()).or_default().insert(path);
-    }
-
     fn finish(self) -> Artifacts {
         Artifacts {
             bundles: self.bundles.into_iter().collect(),
             packages: self.packages.into_iter().collect(),
-            roots: self.roots,
-            found_at: self.found_at,
         }
     }
-}
-
-/// The paths a search finds the artifact at `artifact` from, a bundle if
-/// `bundle` and else a package: the artifact itself, and each folder above it
-/// that a search reaches it from. A search goes two levels down, never into a
-/// bundle, and finds an artifact only by its name; a bundle given as a path is
-/// not searched at all.
-fn reached_from(artifact: &Path, bundle: bool) -> Vec<&Path> {
-    let mut from = vec![artifact];
-    let named = if bundle { is_bundle_name(artifact) } else { is_package_name(artifact) };
-    if !named {
-        return from;
-    }
-    let mut below = artifact;
-    for _ in 0..MAX_FOLDER_DEPTH {
-        let Some(folder) = below.parent().filter(|folder| !is_bundle_name(folder)) else { break };
-        from.push(folder);
-        below = folder;
-    }
-    from
 }
 
 /// Resolves `paths` to the artifacts they name or contain.
@@ -173,15 +119,14 @@ pub fn artifacts(paths: &[PathBuf]) -> Result<Artifacts, ScanError> {
         let metadata = fs::metadata(&resolved).map_err(fail)?;
         let is_named = |test: fn(&Path) -> bool| test(path) || test(&resolved);
         if metadata.is_file() && is_named(is_package_name) {
-            found.packages.insert(resolved.clone());
+            found.packages.insert(resolved);
         } else if !metadata.is_dir() {
             return Err(ScanError::Unsupported(path.clone()));
         } else if is_named(is_bundle_name) {
-            found.bundles.insert(resolved.clone());
+            found.bundles.insert(resolved);
         } else {
             search_folder(&resolved, MAX_FOLDER_DEPTH, &mut found).map_err(fail)?;
         }
-        found.roots.insert(resolved);
     }
     Ok(found.finish())
 }
@@ -229,7 +174,6 @@ fn in_roots(roots: &[PathBuf]) -> Result<Artifacts, ScanError> {
         match fs::canonicalize(root) {
             Ok(resolved) => {
                 search_folder(&resolved, MAX_FOLDER_DEPTH, &mut found).map_err(fail)?;
-                found.roots.insert(resolved);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(fail(error)),
@@ -252,14 +196,12 @@ fn search_folder(folder: &Path, depth: u32, found: &mut Found) -> io::Result<()>
                 && let Ok(resolved) = fs::canonicalize(&path)
                 && is_package_name(&resolved)
             {
-                found.at(&resolved, path);
                 found.packages.insert(resolved);
             }
         } else if !metadata.is_dir() {
             // A socket, a pipe or a device node.
         } else if is_bundle_name(&path) {
             if let Ok(resolved) = fs::canonicalize(&path) {
-                found.at(&resolved, path);
                 found.bundles.insert(resolved);
             }
         } else if depth > 1 && !linked() {
@@ -335,73 +277,6 @@ mod tests {
             names(dir.path(), &found),
             ["Apps/One.app", "Apps/Two.APP", "Apps/Utilities/Three.app", "Elsewhere/Five.app"]
         );
-    }
-
-    /// Every path given is a root that was searched, whatever the order
-    /// they were given in.
-    #[test]
-    fn every_path_given_is_a_root_searched() {
-        let dir = package_tree();
-        let paths =
-            ["Apps/One.app", "Apps", "Elsewhere/five.apk"].map(|path| dir.path().join(path));
-        let mut backward = paths.clone();
-        backward.reverse();
-        let found = artifacts(&paths).unwrap();
-        assert_eq!(found, artifacts(&backward).unwrap());
-        assert_eq!(
-            names(dir.path(), &found.roots.iter().cloned().collect::<Vec<_>>()),
-            ["Apps", "Apps/One.app", "Elsewhere/five.apk"]
-        );
-    }
-
-    /// The folders an artifact is reached from are exactly those whose
-    /// search finds it: searching each one of them, and the folder above the
-    /// last, is the oracle.
-    #[test]
-    fn an_artifact_is_reached_from_the_folders_whose_search_finds_it() {
-        let dir = package_tree();
-        fs::create_dir_all(dir.path().join("Apps/One.app/Contents/Inner.app")).unwrap();
-        let root = fs::canonicalize(dir.path()).unwrap();
-        for (artifact, bundle, expected) in [
-            ("Apps/One.app", true, &["Apps/One.app", "Apps", ""][..]),
-            (
-                "Apps/Utilities/Three.app",
-                true,
-                &["Apps/Utilities/Three.app", "Apps/Utilities", "Apps"],
-            ),
-            (
-                "Apps/Utilities/three.apk",
-                false,
-                &["Apps/Utilities/three.apk", "Apps/Utilities", "Apps"],
-            ),
-            (
-                "Apps/One.app/Contents/Inner.app",
-                true,
-                &["Apps/One.app/Contents/Inner.app", "Apps/One.app/Contents"],
-            ),
-            ("Apps/NotAnApp", true, &["Apps/NotAnApp"]),
-        ] {
-            let path = root.join(artifact);
-            let from: Vec<String> = reached_from(&path, bundle)
-                .iter()
-                .map(|folder| folder.strip_prefix(&root).unwrap().display().to_string())
-                .collect();
-            assert_eq!(from, expected, "{artifact}");
-            for folder in &from[1..] {
-                let found = artifacts(&[root.join(folder)]).unwrap();
-                let list = if bundle { found.bundles } else { found.packages };
-                assert!(list.contains(&path), "{artifact} is not found from {folder:?}");
-            }
-            // The folder above the last one reached does not find it.
-            if let Some(above) = root.join(from.last().unwrap()).parent()
-                && above.starts_with(&root)
-                && from.len() > 1
-            {
-                let found = artifacts(&[above.to_path_buf()]).unwrap();
-                let list = if bundle { found.bundles } else { found.packages };
-                assert!(!list.contains(&path), "{artifact} is found from {}", above.display());
-            }
-        }
     }
 
     #[test]
@@ -535,7 +410,7 @@ mod tests {
         ));
         // A folder that happens to be named like a package is a folder.
         let found = artifacts(&[dir.path().join("Apps/folder.apk")]).unwrap();
-        assert_eq!((found.bundles, found.packages), (vec![], vec![]));
+        assert_eq!(found, Artifacts::default());
     }
 
     #[test]

@@ -57,7 +57,7 @@ pub mod macos;
 pub mod read;
 pub mod schedule;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,7 +67,7 @@ use xs_model::EvidenceSet;
 use xs_model::evidence::EvidenceError;
 
 pub use crate::cache::CacheError;
-use crate::cache::{Cache, Collected, Key, Kind, Slot, State, path_digest};
+use crate::cache::{Cache, Collected, Kind, Slot, State};
 use crate::discover::Artifacts;
 pub use crate::discover::ScanScope;
 use crate::schedule::{Job, Pool};
@@ -179,9 +179,8 @@ impl From<EvidenceError> for ScanError {
 ///
 /// With a folder for the [`cache`], an artifact that has not changed since
 /// it was last read is not read again, and what is read is stored there. A
-/// scan also removes what is stored about every app that was found in a root
-/// it searched and that it did not find. A cache that cannot be used does not
-/// fail the scan: the outcome says why, and every artifact is read.
+/// cache that cannot be used does not fail the scan: the outcome says why,
+/// and every artifact is read.
 ///
 /// # Errors
 ///
@@ -207,20 +206,7 @@ pub fn scan(
         None => (None, None),
     };
     let (evidence, stats) = collect(&found, matchers, &pool, cache.as_ref())?;
-    if let Some(cache) = &cache {
-        forget_gone(cache, &found);
-    }
     Ok(ScanOutcome { evidence, stats, scope, cache_failure })
-}
-
-/// Removes from `cache` what it holds about the apps that a root of `found`
-/// would have found and that are not among `found`. Every root was searched
-/// in full, so such an app is gone.
-fn forget_gone(cache: &Cache, found: &Artifacts) {
-    let bundles = found.bundles.iter().map(|path| Key::of(Kind::Bundle, path));
-    let packages = found.packages.iter().map(|path| Key::of(Kind::Package, path));
-    let roots = found.roots.iter().map(|root| path_digest(root));
-    cache.evict(&roots.collect(), &bundles.chain(packages).collect::<BTreeSet<Key>>());
 }
 
 /// An artifact once it is listed, which reads none of its content.
@@ -277,11 +263,9 @@ fn collect<'c>(
     cache: Option<&'c Cache>,
 ) -> Result<(EvidenceSet, ScanStats), EvidenceError> {
     // Listing is stat-bound and independent per artifact.
-    let bundles: Vec<Listed<'c, macos::Plan>> = pool.map(&found.bundles, |bundle| {
-        let plan = macos::plan(bundle);
-        let slot = cache.map(|cache| {
-            cache.slot(Kind::Bundle, bundle, found.reached_from(bundle, true), plan.state())
-        });
+    let bundles: Vec<Listed<'c, macos::Plan>> = pool.map(&found.bundles, |root| {
+        let plan = macos::plan(root);
+        let slot = cache.map(|cache| cache.slot(Kind::Bundle, root, plan.state()));
         Listed::new(plan, slot)
     });
     let packages: Vec<Listed<'c, u64>> = pool.map(&found.packages, |path| {
@@ -290,9 +274,7 @@ fn collect<'c>(
         let metadata = fs::metadata(path).ok();
         let size = metadata.as_ref().map_or(0, fs::Metadata::len);
         let state = metadata.as_ref().map(State::of_file);
-        let slot = cache.zip(state).map(|(cache, state)| {
-            cache.slot(Kind::Package, path, found.reached_from(path, false), state)
-        });
+        let slot = cache.zip(state).map(|(cache, state)| cache.slot(Kind::Package, path, state));
         Listed::new(size, slot)
     });
 

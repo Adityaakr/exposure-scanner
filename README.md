@@ -29,6 +29,7 @@ scan scheduler and the results cache:
 | Scan scheduler: finding the installed apps, and bundles and packages in a folder; one queue of files for the whole scan, largest first; an app that cannot be read is reported and does not stop the scan | Done (below) |
 | What each app may access: usage descriptions and entitlements of a macOS bundle, `uses-permission` of an Android manifest, as access claims graded `requested` | Done (below) |
 | Results cache: an app that has not changed since an earlier scan is not read again; private, deletable, off with `--no-cache`; the report is the same with it and without | Done (below) |
+| Automatic eviction of removed apps from the results cache | Not yet (follow-up); until then, delete the cache folder |
 | HTML report | Not yet (build plan tasks 11, 13 and 14) |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
@@ -212,24 +213,14 @@ in a folder created for its owner only:
 | elsewhere | `$XDG_CACHE_HOME/exposure`, or `~/.cache/exposure` without that variable |
 
 A file holds the records about one app, the same records the report shows,
-and hashes: of the four things above, of the file's own content, and of the
-app's path and each folder above it whose search finds the app (its parent,
-and the folder above that unless the parent is a bundle). For an app found
-through a link in a folder, as Nix installs apps in `/Applications`, the same
-goes for the link's path, so the app's entry is removed once the link points
-elsewhere or is gone. It holds no path
-and no list of the app's files. The folder can be deleted at any time; the
-next scan reads everything and fills it again.
+and two hashes: of the four things above, and of the file's own content. It
+holds no path and no list of the app's files.
 
-A scan also removes what is kept about an app that it did not find although
-it searched the app's path or a folder whose search finds the app, so the
-cache does not go on holding an app you removed. That holds however the app
-was first scanned: an app scanned by its own path and then deleted is
-removed by any later scan of a folder above it that reaches it, such as a
-scan of the installed apps for an app that was in `/Applications`. Nothing
-else is removed: a scan of the installed apps leaves what scans of paths
-elsewhere kept, and the other way round. A file in the cache whose first line
-cannot be read, such as one left by another version, is removed by any scan.
+No scan removes anything from the cache. The entry of an app you removed
+stays until you delete the folder; it is never used again, since no app is
+in the state it was made from, and no report depends on it. Deleting the
+folder is safe at any time: the next scan reads everything and fills it
+again. Removing the entries of removed apps automatically is a follow-up.
 
 `--no-cache` reads every app, uses nothing that is kept and keeps nothing.
 A scan run as root, with `sudo` for example, uses no cache either and

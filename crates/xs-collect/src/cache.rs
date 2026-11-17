@@ -38,18 +38,14 @@
 //! One file per app, in a folder of the user's own (see [`default_dir`]),
 //! created for its owner alone and written whole under another name before it
 //! takes its place, so that a reader never sees half of one. A file holds
-//! the app's records, the hash of the state above, the hash of its own
-//! content, and the hashes of the app's path and of each folder above it
-//! whose search finds the app, and the same of the link the app was found
-//! through, if it was. It holds no path and no list of the app's
-//! files. The state is kept as its hash, because that is all a comparison
-//! needs (the spec's trust rule 5: store the minimum).
+//! the app's records and two hashes: of the state above, and of its own
+//! content. It holds no path and no list of the app's files. The state is
+//! kept as its hash, because that is all a comparison needs (the spec's
+//! trust rule 5: store the minimum).
 //!
-//! A scan removes the entry of an app that it did not find although it
-//! searched a folder that finds the app, so the cache does not go on holding
-//! an app that was removed. It touches no other entry: a scan of the
-//! installed apps leaves what scans of given paths elsewhere stored, and the
-//! other way round. An entry whose first line cannot be read is removed too.
+//! No scan removes an entry. The entry of an app that was removed stays until
+//! the folder is deleted, which is safe at any time; it is never used, since
+//! no app is in the state it was made from.
 //!
 //! The cache is the user's own, so a scan run as root keeps none: it would
 //! leave files in the user's folder that the user cannot replace.
@@ -76,7 +72,6 @@
 //! What the state cannot show is a right to read that is taken away without
 //! any file changing. Then the stored result still says what the app holds.
 
-use std::collections::BTreeSet;
 use std::fmt;
 use std::fs::{self, File, Metadata};
 use std::io::{self, Read as _, Write as _};
@@ -94,7 +89,7 @@ use xs_model::{EvidenceSet, Sha256Digest, Sha256Stream};
 const FOLDER: &str = "exposure";
 /// The first word of every entry. The number is the format's version: an
 /// entry of another format is not understood and so not used.
-const MAGIC: &str = "exposure-cache/2";
+const MAGIC: &str = "exposure-cache/3";
 /// What an entry's file name ends in, after the hash of the app's path.
 const ENTRY_SUFFIX: &str = ".entry";
 /// What the name of a file that is still being written ends in.
@@ -103,9 +98,6 @@ const TEMP_SUFFIX: &str = ".tmp";
 /// take a few kilobytes. An app whose records take more than this is read
 /// on every scan.
 pub const MAX_ENTRY_BYTES: u64 = 8 << 20;
-/// Largest first line of an entry that is read to decide whether to remove
-/// it. Its words take a few hundred bytes.
-const MAX_HEAD_BYTES: u64 = 1 << 10;
 /// How long before the scan began every file of an app must have been
 /// touched last for its result to be stored, in whole seconds. It covers the
 /// coarsest clock of a file system in use, the two seconds of FAT.
@@ -295,43 +287,6 @@ impl Key {
     fn file_name(self) -> String {
         format!("{}{ENTRY_SUFFIX}", self.0)
     }
-
-    /// The key a file of this name is the entry of, if it is named like one.
-    fn of_file_name(name: &str) -> Option<Self> {
-        name.strip_suffix(ENTRY_SUFFIX).and_then(Sha256Digest::from_hex).map(Self)
-    }
-}
-
-/// The hash of a path that a scan searches, as an entry holds it.
-pub(crate) fn path_digest(path: &Path) -> Sha256Digest {
-    let mut hash = Sha256Stream::new();
-    hash.update(b"exposure cache path\0");
-    hash.update(path.as_os_str().as_encoded_bytes());
-    hash.finish()
-}
-
-/// The first line of an entry: what its result is valid for, the hash of
-/// what follows the line, and the hashes of the paths whose search finds the
-/// artifact.
-struct Head {
-    valid_for: Sha256Digest,
-    sum: Sha256Digest,
-    reached_from: Vec<Sha256Digest>,
-}
-
-impl Head {
-    /// The first line `line`, without its end, if it is one of this format.
-    fn parse(line: &[u8]) -> Option<Self> {
-        let mut words = std::str::from_utf8(line).ok()?.split(' ');
-        if words.next()? != MAGIC {
-            return None;
-        }
-        let valid_for = Sha256Digest::from_hex(words.next()?)?;
-        let sum = Sha256Digest::from_hex(words.next()?)?;
-        let reached_from =
-            words.next()?.split(',').map(Sha256Digest::from_hex).collect::<Option<Vec<_>>>()?;
-        words.next().is_none().then_some(Self { valid_for, sum, reached_from })
-    }
 }
 
 /// What reading one artifact produced: what an entry holds.
@@ -498,55 +453,20 @@ impl Cache {
         Ok(Self { dir: dir.to_path_buf(), context: context.finish(), owner: user, opened })
     }
 
-    /// The place in the cache of the artifact at `path` in `state`, which
-    /// a search of each of `reached_from` finds.
-    pub(crate) fn slot<'p>(
-        &self,
-        kind: Kind,
-        path: &Path,
-        reached_from: impl IntoIterator<Item = &'p Path>,
-        state: State,
-    ) -> Slot<'_> {
+    /// The place in the cache of the artifact at `path` in `state`.
+    pub(crate) fn slot(&self, kind: Kind, path: &Path, state: State) -> Slot<'_> {
         let key = Key::of(kind, path);
         let mut valid_for = Sha256Stream::new();
         valid_for.update(b"exposure cache state\0");
         valid_for.update(self.context.as_bytes());
         valid_for.update(key.0.as_bytes());
         valid_for.update(state.digest.as_bytes());
-        Slot {
-            cache: self,
-            key,
-            reached_from: reached_from.into_iter().map(path_digest).collect(),
-            valid_for: valid_for.finish(),
-            newest: state.newest,
-        }
+        Slot { cache: self, key, valid_for: valid_for.finish(), newest: state.newest }
     }
 
-    /// Removes the entry of every artifact that is not among `present` and
-    /// that the search of one of `searched` finds, and every entry whose first
-    /// line cannot be read. Only files named like an entry are looked at,
-    /// whatever else the folder holds.
-    pub(crate) fn evict(&self, searched: &BTreeSet<Sha256Digest>, present: &BTreeSet<Key>) {
-        let Ok(entries) = fs::read_dir(&self.dir) else { return };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let Some(key) = name.to_str().and_then(Key::of_file_name) else { continue };
-            if present.contains(&key) {
-                continue;
-            }
-            let path = entry.path();
-            let gone = self
-                .head(&path)
-                .is_none_or(|head| head.reached_from.iter().any(|from| searched.contains(from)));
-            if gone {
-                let _ = fs::remove_file(path);
-            }
-        }
-    }
-
-    /// The entry at `path`, opened, if it is one to read: trusted, and no
-    /// larger than any entry is.
-    fn open_entry(&self, path: &Path) -> Option<File> {
+    /// The bytes of the entry at `path`, if it is one to read: trusted, and
+    /// no larger than any entry is.
+    fn read(&self, path: &Path) -> Option<Vec<u8>> {
         // Looked at before it is opened: opening a pipe that somebody left
         // under this name would wait for its other end. And once more when
         // it is open, since what is at a name can be exchanged in between.
@@ -555,23 +475,13 @@ impl Cache {
         }
         let file = File::open(path).ok()?;
         let metadata = file.metadata().ok()?;
-        (self.trusts(&metadata) && metadata.len() <= MAX_ENTRY_BYTES).then_some(file)
-    }
-
-    /// The bytes of the entry at `path`, if it is one to read.
-    fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        if !self.trusts(&metadata) || metadata.len() > MAX_ENTRY_BYTES {
+            return None;
+        }
         let mut bytes = Vec::new();
         // One byte past the limit, so a file that grew since is noticed.
-        self.open_entry(path)?.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut bytes).ok()?;
+        file.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut bytes).ok()?;
         (bytes.len() as u64 <= MAX_ENTRY_BYTES).then_some(bytes)
-    }
-
-    /// The first line of the entry at `path`, if it is one to read. Nothing
-    /// after the line is read or checked.
-    fn head(&self, path: &Path) -> Option<Head> {
-        let mut bytes = Vec::new();
-        self.open_entry(path)?.take(MAX_HEAD_BYTES).read_to_end(&mut bytes).ok()?;
-        Head::parse(bytes.get(..bytes.iter().position(|byte| *byte == b'\n')?)?)
     }
 
     /// Whether an entry with this `metadata` is one to read: a regular file
@@ -615,8 +525,6 @@ fn probe(_: &Path) -> io::Result<i64> {
 pub(crate) struct Slot<'c> {
     cache: &'c Cache,
     key: Key,
-    /// The hashes of the paths whose search finds the artifact.
-    reached_from: Vec<Sha256Digest>,
     /// What a result kept here is valid for: the hash of the program, the
     /// rules, the artifact's path and its state.
     valid_for: Sha256Digest,
@@ -633,10 +541,16 @@ impl Slot<'_> {
     /// in this state. Anything else, a damaged file included, is no result.
     pub(crate) fn load(&self) -> Option<Collected> {
         let bytes = self.cache.read(&self.path())?;
-        let (line, body) = bytes.split_at_checked(bytes.iter().position(|byte| *byte == b'\n')?)?;
+        let (head, body) = bytes.split_at_checked(bytes.iter().position(|byte| *byte == b'\n')?)?;
         let body = body.get(1..)?;
-        let head = Head::parse(line)?;
-        let sound = head.valid_for == self.valid_for && head.sum == Sha256Digest::of(body);
+        let mut words = std::str::from_utf8(head).ok()?.split(' ');
+        let magic = words.next()?;
+        let valid_for = Sha256Digest::from_hex(words.next()?)?;
+        let sum = Sha256Digest::from_hex(words.next()?)?;
+        let sound = magic == MAGIC
+            && words.next().is_none()
+            && valid_for == self.valid_for
+            && sum == Sha256Digest::of(body);
         if !sound {
             return None;
         }
@@ -655,14 +569,7 @@ impl Slot<'_> {
             return false;
         }
         let Ok(body) = serde_json::to_vec(result) else { return false };
-        let reached_from: Vec<String> =
-            self.reached_from.iter().map(Sha256Digest::to_hex).collect();
-        let head = format!(
-            "{MAGIC} {} {} {}\n",
-            self.valid_for,
-            Sha256Digest::of(&body),
-            reached_from.join(",")
-        );
+        let head = format!("{MAGIC} {} {}\n", self.valid_for, Sha256Digest::of(&body));
         if (head.len() + body.len()) as u64 > MAX_ENTRY_BYTES {
             return false;
         }

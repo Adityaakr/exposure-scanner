@@ -202,7 +202,7 @@ fn the_cache_is_readable_by_its_owner_only_and_names_no_path() {
     for entry in entries(&cache) {
         assert_eq!(mode(&entry), 0o600);
         let kept = fs::read_to_string(&entry).unwrap();
-        assert!(kept.starts_with("exposure-cache/2 "), "{kept}");
+        assert!(kept.starts_with("exposure-cache/3 "), "{kept}");
         assert!(!kept.contains(text(&repository)), "{kept}");
         assert!(!kept.contains("fixtures"), "{kept}");
     }

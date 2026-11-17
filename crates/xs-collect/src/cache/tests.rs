@@ -12,7 +12,7 @@ use xs_model::{MatcherKind, Pack};
 
 use super::*;
 use crate::schedule::Pool;
-use crate::{ScanStats, collect, discover, forget_gone};
+use crate::{ScanStats, collect, discover};
 
 fn write(path: &Path, bytes: impl AsRef<[u8]>) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -179,7 +179,7 @@ fn a_second_scan_reads_nothing_and_gives_the_same_evidence() {
     // One file per app, and nothing left over from writing them.
     let kept = lab.kept();
     assert_eq!(kept.len() as u64, APPS);
-    assert!(kept.iter().all(|name| Key::of_file_name(name).is_some()), "{kept:?}");
+    assert!(kept.iter().all(|name| name.ends_with(".entry")), "{kept:?}");
     // A cache that is opened again holds what the last one stored.
     assert_same(&lab, &lab.cache(), APPS);
 }
@@ -301,7 +301,7 @@ fn a_file_put_in_the_place_of_another_is_seen() {
 fn with_sum(head: &str, body: &str) -> Vec<u8> {
     let words: Vec<&str> = head.split(' ').collect();
     let sum = Sha256Digest::of(body.as_bytes());
-    format!("{} {} {sum} {}\n{body}", words[0], words[1], words[3]).into_bytes()
+    format!("{} {} {sum}\n{body}", words[0], words[1]).into_bytes()
 }
 
 /// Build plan, task 12: a corrupt cache file falls back to a cold scan. So
@@ -332,7 +332,7 @@ fn a_damaged_or_edited_entry_is_passed_over_and_replaced() {
         ("a bit flipped in the state", flipped(MAGIC.len() + 5)),
         ("a bit flipped in the sum", flipped(MAGIC.len() + 1 + 64 + 1 + 5)),
         (
-            "no paths it is reached from",
+            "a word fewer",
             text.replacen(&format!(" {}\n", head.rsplit(' ').next().unwrap()), "\n", 1)
                 .into_bytes(),
         ),
@@ -513,136 +513,6 @@ fn a_result_with_a_part_that_could_not_be_read_is_not_stored() {
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
     assert_same(&lab, &cache, APPS - 1);
     assert_same(&lab, &cache, APPS);
-}
-
-/// Scans `path` as a scan does with `cache`, including what it removes
-/// from the cache afterwards.
-fn scan_paths(lab: &Lab, path: &Path, cache: &Cache) -> ScanStats {
-    let found = discover::artifacts(&[path.to_path_buf()]).unwrap();
-    let matchers = Matchers::build(&lab.pack).unwrap();
-    let (_, stats) = collect(&found, &matchers, &Pool::new(3).unwrap(), Some(cache)).unwrap();
-    forget_gone(cache, &found);
-    stats
-}
-
-/// A scan drops what the cache holds about an app that a path it searched
-/// would have found and that it did not find, whichever scan stored it, and
-/// what it cannot read the first line of. Nothing else: not the entries of
-/// apps that no path it searched finds, and not what else is in the folder.
-#[test]
-fn only_the_entries_of_apps_that_are_gone_from_a_path_searched_are_removed() {
-    let lab = Lab::new();
-    let cache = lab.cache();
-    let elsewhere = lab.dir.path().join("Elsewhere");
-    let given = bundle(&elsewhere.join("Given.app"), "org.example.given");
-    let left = bundle(&elsewhere.join("Left.app"), "org.example.left");
-    // Three levels below the folder of apps: a search of it does not go
-    // that deep.
-    let deep = bundle(&lab.app("Utilities/Deep/Four.app"), "org.example.four");
-    let entry_of =
-        |path: &Path| Key::of(Kind::Bundle, &fs::canonicalize(path).unwrap()).file_name();
-
-    // Some apps are stored by scans of their own path first.
-    for path in [&given, &lab.app("One.app"), &deep] {
-        assert_eq!(scan_paths(&lab, path, &cache).reused, 0);
-    }
-    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, 1);
-    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
-    assert_eq!(lab.kept().len() as u64, APPS + 3);
-
-    // Things that are not entries, some of them named almost like one.
-    let key = "0".repeat(64);
-    let others =
-        ["notes.txt", "CACHEDIR.TAG", &format!("{key}.entry.tmp"), &format!("{key}.ENTRY")];
-    for name in others {
-        fs::write(lab.cache_dir().join(name), "not an entry").unwrap();
-    }
-    let folder = format!("{}.entry", "1".repeat(64));
-    fs::create_dir(lab.cache_dir().join(&folder)).unwrap();
-    let kept_before = lab.kept();
-    // An entry of no format this program reads, of an app nobody knows.
-    let unreadable = format!("{}.entry", "2".repeat(64));
-    fs::write(lab.cache_dir().join(&unreadable), "exposure-cache/0 ???\n{}").unwrap();
-
-    // Any scan removes the entry it cannot read, and a scan of one path
-    // leaves the entries of apps it does not reach alone.
-    assert_eq!(scan_paths(&lab, &given, &cache).reused, 1);
-    let mut kept = lab.kept();
-    assert_eq!(kept, kept_before);
-    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS);
-    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 2);
-    assert_eq!(scan_paths(&lab, &deep, &cache).reused, 1);
-    assert_eq!(lab.kept(), kept);
-
-    // An app scanned by its own path and then removed is dropped by a scan
-    // of the folder it was in.
-    let given_entry = entry_of(&given);
-    fs::remove_dir_all(&given).unwrap();
-    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS);
-    assert_eq!(lab.kept(), kept, "a scan of another folder removed an entry");
-    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
-    kept.retain(|name| *name != given_entry);
-    assert_eq!(lab.kept(), kept);
-
-    // So is an app of the folder of apps, whichever scan stored it. The app
-    // too deep for its search stays.
-    let gone = [lab.entry(Kind::Bundle, "One.app"), lab.entry(Kind::Package, "one.apk")];
-    fs::remove_dir_all(lab.app("One.app")).unwrap();
-    fs::remove_file(lab.app("one.apk")).unwrap();
-    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
-    assert_eq!(lab.kept(), kept, "a scan of another folder removed an entry");
-    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS - 2);
-    kept.retain(|name| !gone.iter().any(|entry| entry.ends_with(name)));
-    assert_eq!(lab.kept(), kept);
-    for name in others.iter().map(ToString::to_string).chain([folder, entry_of(&deep)]) {
-        assert!(kept.contains(&name), "{name} was removed");
-    }
-
-    // A folder whose search does reach the deep app drops it once it is
-    // gone.
-    let deep_entry = entry_of(&deep);
-    fs::remove_dir_all(&deep).unwrap();
-    assert_eq!(scan_paths(&lab, &lab.app("Utilities"), &cache).reused, 1);
-    kept.retain(|name| *name != deep_entry);
-    assert_eq!(lab.kept(), kept);
-    assert!(fs::exists(&left).unwrap());
-    // What is left still answers.
-    assert_same(&lab, &cache, APPS - 2);
-}
-
-/// An app installed as a link in a folder of apps, as Nix installs them:
-/// the folder's scan drops the entry of what the link pointed to once the
-/// link points elsewhere, and once it is gone, although no path searched
-/// is above where the app itself is.
-#[test]
-fn an_app_found_through_a_link_is_dropped_once_the_link_no_longer_finds_it() {
-    let lab = Lab::new();
-    let cache = lab.cache();
-    let store = lab.dir.path().join("store");
-    let old = bundle(&store.join("v1-example/Applications/Example.app"), "org.example.nix");
-    let new = bundle(&store.join("v2-example/Applications/Example.app"), "org.example.nix");
-    let apps = lab.dir.path().join("Linked");
-    let link = apps.join("Nix Apps/Example.app");
-    fs::create_dir_all(link.parent().unwrap()).unwrap();
-    std::os::unix::fs::symlink(&old, &link).unwrap();
-    let entry_of =
-        |path: &Path| Key::of(Kind::Bundle, &fs::canonicalize(path).unwrap()).file_name();
-
-    assert_eq!(scan_paths(&lab, &apps, &cache).reused, 0);
-    assert_eq!(scan_paths(&lab, &apps, &cache).reused, 1);
-    assert_eq!(lab.kept(), [entry_of(&old)]);
-
-    // An upgrade points the link at another build.
-    fs::remove_file(&link).unwrap();
-    std::os::unix::fs::symlink(&new, &link).unwrap();
-    assert_eq!(scan_paths(&lab, &apps, &cache).reused, 0);
-    assert_eq!(lab.kept(), [entry_of(&new)]);
-
-    // Removing the app removes the link.
-    fs::remove_file(&link).unwrap();
-    assert_eq!(scan_paths(&lab, &apps, &cache).reused, 0);
-    assert!(lab.kept().is_empty(), "{:?}", lab.kept());
-    assert!(old.exists() && new.exists());
 }
 
 /// A scan run as root keeps no cache: it would leave files in the user's
