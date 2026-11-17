@@ -25,6 +25,14 @@
 //!   lists the host's domain under. A host under no listed domain is
 //!   unmapped: it is shown as itself, names no company and is counted
 //!   nowhere. No generic table of host owners is consulted.
+//! * **Access.** An edge to a permission the app asks for becomes a claim of
+//!   its own type, apart from every channel: what the app may access, under
+//!   the permission's name and category from the fixed list in
+//!   [`xs_model::access`]. It names no company and counts in no headline
+//!   number. Asking in two places, a usage description and an entitlement,
+//!   is two witnesses of one claim. The two ladders are never joined here:
+//!   that an app may access the camera and ships an analytics SDK does not
+//!   say the SDK receives pictures.
 //! * **Vendor and party.** Who publishes the app is read from its signature
 //!   first and its app id second, and the claim says whether the company is
 //!   that vendor: first party, third party, or unknown. The rules are
@@ -49,6 +57,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 
+use xs_model::access::{self, Permission};
 use xs_model::canon::CanonError;
 use xs_model::claim::{Claim, ClaimId, ClaimKey, ClaimObject, Confidence};
 use xs_model::matcher::MatcherKind;
@@ -126,7 +135,10 @@ pub const fn confidence(matcher: MatcherKind, scope: Scope) -> Confidence {
         | MatcherKind::MachoDylib
         | MatcherKind::MachoObjcClass
         | MatcherKind::PrivacyManifest
-        | MatcherKind::UpdateFeed => Confidence::High,
+        | MatcherKind::UpdateFeed
+        | MatcherKind::UsageDescription
+        | MatcherKind::Entitlement
+        | MatcherKind::AndroidPermission => Confidence::High,
         // Literals in a binary's data.
         MatcherKind::DexString | MatcherKind::MachoToken => Confidence::Medium,
         // Literals in script text: medium in the app's own code, low anywhere
@@ -145,6 +157,8 @@ enum Origin<'a> {
     Rule(&'a Rule),
     /// A host the app declares, with the category id of the declaration.
     Declared(&'a str),
+    /// A permission the app asks for.
+    Permission(&'static Permission),
 }
 
 /// Everything known about one claim while its evidence is gathered.
@@ -170,8 +184,9 @@ struct Group<'a> {
 ///
 /// # Errors
 ///
-/// Fails if an edge names a rule that `pack` does not contain, or is to a
-/// declared host whose category `pack` does not define.
+/// Fails if an edge names a rule that `pack` does not contain, is to a
+/// declared host whose category `pack` does not define, or is to a
+/// permission this build does not list.
 pub fn derive(evidence: &EvidenceSet, pack: &Pack) -> Result<Vec<Claim>, DeriveError> {
     let mut groups: BTreeMap<ClaimId, Group<'_>> = BTreeMap::new();
     // Who signed each build, by the digest that identifies the build.
@@ -242,6 +257,11 @@ fn origin<'a>(
             })?;
             Ok(Origin::Declared(category.id.as_str()))
         }
+        // A record is checked against the list of permissions when it enters
+        // the set, so this lookup only fails for evidence built by hand.
+        ObjectKind::Permission => {
+            access::permission(&edge.object.id).map(Origin::Permission).ok_or_else(unknown_rule)
+        }
     }
 }
 
@@ -282,6 +302,11 @@ fn finish(
             category,
             Vec::new(),
         ),
+        // A permission is the platform's, not a company's: the claim says
+        // what the app may reach and names nobody as receiving it.
+        Origin::Permission(permission) => {
+            (permission.name.to_string(), None, permission.category, Vec::new())
+        }
     };
     let headline = group.edge == EdgeType::Channel
         && company.is_some()
@@ -475,6 +500,7 @@ mod tests {
             facts: Facts {
                 name: Some("Example".into()),
                 team_id: team_id.map(Into::into),
+                sandbox: None,
                 files_scanned: 1,
                 bytes_scanned: 1,
             },
@@ -497,6 +523,42 @@ mod tests {
         host_edge(app, seed, host, declared::UPDATE_FEED, MatcherKind::UpdateFeed)
     }
 
+    /// Ways an app asks for a permission: the permission, the kind of
+    /// declaration and its key.
+    const ASKED: [(&str, MatcherKind, &str); 5] = [
+        ("camera", MatcherKind::UsageDescription, "NSCameraUsageDescription"),
+        ("camera", MatcherKind::Entitlement, "com.apple.security.device.camera"),
+        ("microphone", MatcherKind::Entitlement, "com.apple.security.device.audio-input"),
+        ("microphone", MatcherKind::Entitlement, "com.apple.security.device.microphone"),
+        ("contacts", MatcherKind::AndroidPermission, "android.permission.READ_CONTACTS"),
+    ];
+
+    /// An access edge: the app asks for `permission` with `key`.
+    fn asks(
+        app: &str,
+        seed: u8,
+        permission: &str,
+        matcher: MatcherKind,
+        key: &str,
+        count: u32,
+    ) -> Record {
+        let Record::Edge(mut edge) = edge(
+            subject(app, seed),
+            "sdk/sparkle",
+            Grade::Requested,
+            matcher,
+            Scope::AppCode,
+            count,
+        ) else {
+            unreachable!()
+        };
+        edge.edge = EdgeType::Access;
+        edge.object = ObjectRef { kind: ObjectKind::Permission, id: permission.into() };
+        edge.rule = access::rule_of(matcher).unwrap().into();
+        edge.proof.token = key.into();
+        Record::Edge(edge)
+    }
+
     /// The claims of one build: the app `app`, signed by `team_id`, with an
     /// edge of each of `rules` and an update feed on each of `hosts`.
     fn claims_of(app: &str, team_id: Option<&str>, rules: &[&str], hosts: &[&str]) -> Vec<Claim> {
@@ -514,6 +576,67 @@ mod tests {
     /// The vendor of a build no listed company publishes.
     fn unlisted(domain: &str) -> Option<Vendor> {
         Some(Vendor { company: None, by: None, domain: Some(domain.into()), evidence: vec![] })
+    }
+
+    /// What an app asks for becomes a claim of its own type: the permission
+    /// under its name and category, with every place the app asks in as a
+    /// witness, and nobody named as receiving anything.
+    #[test]
+    fn what_an_app_asks_for_is_an_access_claim_that_names_no_company() {
+        let app = "com.acme.Dashboard";
+        let [usage, entitlement, audio_input, microphone, _] = ASKED;
+        let asked = [usage, entitlement, audio_input, microphone]
+            .map(|(permission, matcher, key)| asks(app, 1, permission, matcher, key, 1));
+        let records = [artifact(app, 1, None), framework_edge(app, 1, "sdk/acme-analytics")]
+            .into_iter()
+            .chain(asked);
+        let claims = derive(&set(records), &pack()).unwrap();
+        let shown: Vec<&str> = claims.iter().map(|claim| claim.object.id.as_str()).collect();
+        assert_eq!(shown, ["sdk/acme-analytics", "camera", "microphone"], "channels, then access");
+
+        let camera = claim(&claims, "camera");
+        assert_eq!(camera.edge, EdgeType::Access);
+        assert_eq!(camera.object.kind, ObjectKind::Permission);
+        assert_eq!(camera.object.name, "Camera");
+        assert_eq!(camera.category, "capture");
+        assert_eq!(
+            (camera.grade, camera.rungs.as_slice()),
+            (Grade::Requested, &[Grade::Requested][..])
+        );
+        assert_eq!(camera.confidence, Confidence::High);
+        // A usage description and an entitlement are two kinds of witness.
+        assert_eq!((camera.witnesses, camera.evidence.len()), (2, 2));
+        // Two entitlements are one kind, twice.
+        let microphone = claim(&claims, "microphone");
+        assert_eq!((microphone.witnesses, microphone.evidence.len()), (1, 2));
+        for access in [camera, microphone] {
+            assert_eq!(access.company, None);
+            assert_eq!(access.party, Party::Unknown);
+            assert!(!access.headline);
+            assert!(access.notes.is_empty());
+            // Who publishes the app is the same whatever the claim is about.
+            assert_eq!(access.vendor, claim(&claims, "sdk/acme-analytics").vendor);
+        }
+
+        // The app's own analytics is still its own, and the headline counts
+        // channels alone.
+        assert_eq!(claim(&claims, "sdk/acme-analytics").party, Party::First);
+        let channels: Vec<Claim> =
+            claims.iter().filter(|claim| claim.edge == EdgeType::Channel).cloned().collect();
+        assert_eq!(Headline::of(&claims), Headline::of(&channels));
+    }
+
+    /// Two builds of one app that ask for the same thing are two claims with
+    /// one key, like any other claim.
+    #[test]
+    fn an_access_claim_is_followed_across_builds_by_its_key() {
+        let (permission, matcher, key) = ASKED[0];
+        let builds =
+            [1, 2].map(|seed| asks("com.acme.Dashboard", seed, permission, matcher, key, 1));
+        let claims = derive(&set(builds), &pack()).unwrap();
+        assert_eq!(claims.len(), 2);
+        assert_ne!(claims[0].id, claims[1].id);
+        assert_eq!(claims[0].key, claims[1].key);
     }
 
     #[test]
@@ -1038,7 +1161,10 @@ mod tests {
             Just(Grade::Contacts),
             Just(Grade::Confirmed)
         ];
-        let matchers = prop::sample::select(MatcherKind::ALL.to_vec());
+        // A declaration of access is no witness of a channel.
+        let channel: Vec<MatcherKind> =
+            MatcherKind::ALL.into_iter().filter(|kind| !kind.is_access()).collect();
+        let matchers = prop::sample::select(channel);
         let scopes = prop_oneof![
             Just(Scope::AppCode),
             Just(Scope::Dependency),
@@ -1058,7 +1184,13 @@ mod tests {
         let teams = prop_oneof![Just(None), Just(Some(GOOGLE_TEAM)), Just(Some(OTHER_TEAM))];
         let artifacts =
             (arb_app(), teams).prop_map(|((app, seed), team)| artifact(app, seed, team));
-        prop_oneof![5 => sdks, 2 => feeds, 2 => artifacts]
+        let asked = prop::sample::select(ASKED.to_vec());
+        let permissions = (arb_app(), asked, 1u32..3).prop_map(
+            |((app, seed), (permission, matcher, key), count)| {
+                asks(app, seed, permission, matcher, key, count)
+            },
+        );
+        prop_oneof![5 => sdks, 2 => feeds, 2 => artifacts, 3 => permissions]
     }
 
     proptest! {
@@ -1096,6 +1228,35 @@ mod tests {
                 prop_assert_eq!(&new.company, &old.company);
                 prop_assert_eq!(&new.category, &old.category);
                 prop_assert_eq!(new.headline, old.headline);
+            }
+        }
+
+        /// The two ladders are never joined: what an app may access changes
+        /// nothing about its channels, and no claim about access names a
+        /// company, a party or a place in the headline.
+        #[test]
+        fn access_claims_stand_apart_from_channels(
+            records in prop::collection::vec(arb_record(), 0..24)
+        ) {
+            let is_access = |record: &Record| {
+                matches!(record, Record::Edge(edge) if edge.edge == EdgeType::Access)
+            };
+            let all = derive(&set(records.clone()), &pack()).unwrap();
+            let channels_only = records.into_iter().filter(|record| !is_access(record));
+            let channels = derive(&set(channels_only), &pack()).unwrap();
+            let (access, rest): (Vec<Claim>, Vec<Claim>) =
+                all.into_iter().partition(|claim| claim.edge == EdgeType::Access);
+            prop_assert_eq!(rest, channels);
+            for claim in access {
+                prop_assert_eq!(claim.object.kind, ObjectKind::Permission);
+                prop_assert_eq!(claim.company, None);
+                prop_assert_eq!(claim.party, Party::Unknown);
+                prop_assert!(!claim.headline);
+                prop_assert_eq!(claim.grade, Grade::Requested);
+                prop_assert_eq!(claim.confidence, Confidence::High);
+                let permission = access::permission(&claim.object.id).unwrap();
+                prop_assert_eq!(&claim.category, permission.category);
+                prop_assert_eq!(&claim.object.name, permission.name);
             }
         }
 

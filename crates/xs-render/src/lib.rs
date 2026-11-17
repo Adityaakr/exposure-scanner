@@ -245,6 +245,7 @@ mod tests {
             facts: Facts {
                 name: Some("Example".into()),
                 team_id: None,
+                sandbox: None,
                 files_scanned: 2,
                 bytes_scanned: 64,
             },

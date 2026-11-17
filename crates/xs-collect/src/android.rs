@@ -83,6 +83,7 @@ use xs_model::record::{
 };
 use xs_model::{MatcherKind, RelPath, Sha256Digest, Sha256Stream, SubjectDigest, text};
 
+use crate::access::Asked;
 use crate::read::WINDOW;
 
 /// Most DEX files read from one package. Android loads `classes.dex`,
@@ -727,6 +728,7 @@ fn records(
         facts: Facts {
             name: declared(parsed.and_then(|m| m.label.as_ref()), text::MAX_NAME_BYTES),
             team_id: None,
+            sandbox: None,
             files_scanned: 1,
             bytes_scanned: bytes,
         },
@@ -799,6 +801,25 @@ fn records(
             };
             edge(Collector::AndroidDex, finding, location, region);
         }
+    }
+
+    // What the app asks for: the permissions of its manifest that reach the
+    // user's data or devices, each name once. The others are no finding and
+    // no gap: most of what a manifest asks for is plumbing.
+    if let Some((location, parsed)) = &manifest {
+        let asked: BTreeSet<&str> = parsed.permissions.iter().map(String::as_str).collect();
+        records.extend(asked.into_iter().filter_map(|key| {
+            Asked {
+                collector: Collector::AndroidManifest,
+                matcher: MatcherKind::AndroidPermission,
+                key,
+                count: 1,
+                purpose: None,
+                location,
+                region: Region::Permissions,
+            }
+            .edge(&subject)
+        }));
     }
 
     let coverage = |status, reason, location, bytes, count| {

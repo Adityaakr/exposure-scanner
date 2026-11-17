@@ -40,11 +40,21 @@ pub enum MatcherKind {
     /// collector reports that host as itself; a rule has no tokens of this
     /// kind.
     UpdateFeed,
+    /// A usage description in the `Info.plist` of a macOS bundle: the app
+    /// asks for a permission, and says why. Like the two kinds after it,
+    /// this is a declaration of access (see [`access`](crate::access)): the
+    /// keys are the platform's own, and a rule has no tokens of these kinds.
+    UsageDescription,
+    /// An entitlement in the code signature of a macOS bundle's main
+    /// executable.
+    Entitlement,
+    /// A `uses-permission` element in an Android manifest.
+    AndroidPermission,
 }
 
 impl MatcherKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 15] = [
         Self::ManifestComponent,
         Self::AndroidClassPrefix,
         Self::ApkFile,
@@ -57,6 +67,9 @@ impl MatcherKind {
         Self::MachoToken,
         Self::PrivacyManifest,
         Self::UpdateFeed,
+        Self::UsageDescription,
+        Self::Entitlement,
+        Self::AndroidPermission,
     ];
 
     /// The name used in rule files and records.
@@ -75,6 +88,9 @@ impl MatcherKind {
             Self::MachoToken => "macho_token",
             Self::PrivacyManifest => "privacy_manifest",
             Self::UpdateFeed => "update_feed",
+            Self::UsageDescription => "usage_description",
+            Self::Entitlement => "entitlement",
+            Self::AndroidPermission => "android_permission",
         }
     }
 
@@ -99,7 +115,10 @@ impl MatcherKind {
             }
             Self::ManifestComponent | Self::MachoObjcClass => &[Boundary::Exact, Boundary::Prefix],
             Self::PrivacyManifest => &[Boundary::Exact, Boundary::Host],
-            Self::UpdateFeed => &[],
+            Self::UpdateFeed
+            | Self::UsageDescription
+            | Self::Entitlement
+            | Self::AndroidPermission => &[],
             Self::DexString => &[Boundary::Host, Boundary::Word, Boundary::Exact, Boundary::None],
             Self::ContentLiteral | Self::MachoToken => {
                 &[Boundary::Host, Boundary::Word, Boundary::None]
@@ -121,13 +140,26 @@ impl MatcherKind {
         }
     }
 
+    /// Whether this kind is a declaration of access: the app asks for a
+    /// permission. Such a hit supports an access edge, every other kind a
+    /// channel edge.
+    #[must_use]
+    pub const fn is_access(self) -> bool {
+        matches!(self, Self::UsageDescription | Self::Entitlement | Self::AndroidPermission)
+    }
+
     /// The grade a hit of this kind supports. A privacy manifest and an
-    /// update feed are the app's own declarations; everything else shows
-    /// that code is shipped.
+    /// update feed are the app's own declarations of a channel. A
+    /// declaration of access shows that the app asks for a permission, which
+    /// a report words as "may access". Everything else shows that code is
+    /// shipped.
     #[must_use]
     pub const fn grade(self) -> Grade {
         match self {
             Self::PrivacyManifest | Self::UpdateFeed => Grade::Declares,
+            Self::UsageDescription | Self::Entitlement | Self::AndroidPermission => {
+                Grade::Requested
+            }
             _ => Grade::Contains,
         }
     }
@@ -207,7 +239,7 @@ mod tests {
     #[test]
     fn content_matchers_have_no_default_boundary() {
         for kind in MatcherKind::ALL {
-            if kind == MatcherKind::UpdateFeed {
+            if kind == MatcherKind::UpdateFeed || kind.is_access() {
                 continue;
             }
             assert!(!kind.boundaries().is_empty(), "{kind}");
@@ -223,11 +255,23 @@ mod tests {
     }
 
     /// The update feed is reported as its host and mapped to nothing by a
-    /// rule, so the kind offers a token no boundary at all.
+    /// rule, so the kind offers a token no boundary at all. A declaration of
+    /// access is read by the platform's own key, which no rule holds either.
     #[test]
-    fn the_update_feed_takes_no_tokens() {
-        assert_eq!(MatcherKind::UpdateFeed.boundaries(), []);
-        assert_eq!(MatcherKind::UpdateFeed.default_boundary(), None);
+    fn the_app_s_own_declarations_that_no_rule_names_take_no_tokens() {
+        let declarations = [
+            MatcherKind::UpdateFeed,
+            MatcherKind::UsageDescription,
+            MatcherKind::Entitlement,
+            MatcherKind::AndroidPermission,
+        ];
+        for kind in MatcherKind::ALL {
+            let takes_none = declarations.contains(&kind);
+            assert_eq!(kind.boundaries().is_empty(), takes_none, "{kind}");
+            if takes_none {
+                assert_eq!(kind.default_boundary(), None, "{kind}");
+            }
+        }
     }
 
     #[test]
@@ -235,10 +279,28 @@ mod tests {
         for kind in MatcherKind::ALL {
             let declaration =
                 matches!(kind, MatcherKind::PrivacyManifest | MatcherKind::UpdateFeed);
-            let expected = if declaration { Grade::Declares } else { Grade::Contains };
+            let expected = if declaration {
+                Grade::Declares
+            } else if kind.is_access() {
+                Grade::Requested
+            } else {
+                Grade::Contains
+            };
             assert_eq!(kind.grade(), expected, "{kind}");
-            // A declared host is a whole value: it is matched, not searched.
-            assert!(!(declaration && kind.is_content()), "{kind}");
+            // A declared value is a whole value: it is matched, not searched.
+            assert!(!((declaration || kind.is_access()) && kind.is_content()), "{kind}");
+        }
+    }
+
+    /// A kind of witness supports edges of one type: a declaration of access
+    /// an access edge, and nothing else does.
+    #[test]
+    fn the_grade_of_a_kind_is_on_the_ladder_of_its_edge_type() {
+        use crate::record::EdgeType;
+        for kind in MatcherKind::ALL {
+            let ladder = if kind.is_access() { EdgeType::Access } else { EdgeType::Channel };
+            assert_eq!(kind.grade().ladder(), ladder, "{kind}");
+            assert_eq!(crate::access::rule_of(kind).is_some(), kind.is_access(), "{kind}");
         }
     }
 }

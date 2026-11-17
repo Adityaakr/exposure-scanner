@@ -8,7 +8,9 @@
 //!
 //! * the package name and version, which identify the app;
 //! * the name of every component (`activity`, `activity-alias`, `service`,
-//!   `receiver`, `provider`) and of every `meta-data` entry.
+//!   `receiver`, `provider`) and of every `meta-data` entry;
+//! * the name of every permission the app asks for (`uses-permission` and
+//!   `uses-permission-sdk-23`).
 //!
 //! Component names are the witness that survives full obfuscation. The
 //! build tool keeps every class the manifest names, because the system
@@ -24,7 +26,7 @@
 //!   still means the same to Android, and to this reader.
 //! * A component counts where Android looks for one: directly inside
 //!   `<application>`. A `meta-data` entry counts inside `<application>` or
-//!   inside a component.
+//!   inside a component. A permission counts directly inside `<manifest>`.
 //! * A class name that starts with a dot, or has none, is relative to the
 //!   package.
 //!
@@ -85,6 +87,10 @@ pub struct Manifest {
     pub label: Option<String>,
     /// The components and `meta-data` entries, in document order.
     pub components: Vec<Component>,
+    /// The `android:name` of every `uses-permission` and
+    /// `uses-permission-sdk-23` element, as written and in document order,
+    /// such as `android.permission.CAMERA`. A name may appear twice.
+    pub permissions: Vec<String>,
 }
 
 /// One component or `meta-data` entry of a manifest.
@@ -369,7 +375,12 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                         .ok()
                         .and_then(|index| u32_at(resource_ids, index.checked_mul(4)?))
                 };
+                let asks = parent == Some(Tag::Manifest)
+                    && ["uses-permission", "uses-permission-sdk-23"]
+                        .iter()
+                        .any(|element| pool.is(name, element));
                 let mut android_name = None;
+                let mut permission = None;
                 for attribute in attributes(&chunk)? {
                     // The package is the one attribute read by its name: it
                     // has no namespace and no resource id.
@@ -404,6 +415,9 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                         (Some(Tag::Application | Tag::Component), Some(ATTR_NAME)) => {
                             android_name = attribute.typed_string();
                         }
+                        (Some(Tag::Manifest), Some(ATTR_NAME)) if asks => {
+                            permission = attribute.typed_string();
+                        }
                         _ => {}
                     }
                 }
@@ -426,6 +440,12 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                     Some(_) => (Tag::Other, None),
                 };
                 open.push(tag);
+                if let Some(index) = permission
+                    && let Some(name) = pool.text(index, &mut text_budget)?
+                    && !name.is_empty()
+                {
+                    manifest.permissions.push(name);
+                }
                 if let (Some(named), Some(index)) = (named, android_name)
                     && let Some(name) = pool.text(index, &mut text_budget)?
                     && !name.is_empty()
@@ -475,6 +495,7 @@ mod tests {
             .into_iter()
             .flatten()
             .chain(manifest.components.iter().map(|component| &component.name))
+            .chain(&manifest.permissions)
             .map(String::len)
             .sum()
     }
@@ -556,6 +577,7 @@ mod tests {
             ]
             .map(|name| Component { name: name.into() })
             .into(),
+            permissions: vec!["android.permission.INTERNET".into()],
         }
     }
 
@@ -583,6 +605,49 @@ mod tests {
 
     /// Android finds a component directly inside `<application>` and
     /// nowhere else, so nowhere else counts here.
+    /// A permission is asked for directly inside `<manifest>`, by either of
+    /// the two elements Android reads, under the attribute with the resource
+    /// id of `android:name`.
+    #[test]
+    fn permissions_are_collected_where_android_looks_for_them() {
+        let name = |value| [Attr::android(ATTR_NAME, "name", value)];
+        let bytes = AxmlBuilder::new()
+            .start("manifest", &[Attr::plain("package", "com.example.app")])
+            .start("uses-permission", &name("android.permission.CAMERA"))
+            .end()
+            .start("uses-permission-sdk-23", &name("android.permission.RECORD_AUDIO"))
+            .end()
+            .start("uses-permission", &name("android.permission.CAMERA"))
+            .end()
+            // What the app defines or merely mentions is not what it asks for.
+            .start("permission", &name("com.example.app.permission.OWN"))
+            .end()
+            .start("uses-feature", &name("android.hardware.camera"))
+            .end()
+            .start("uses-permission", &[Attr::plain("name", "android.permission.READ_SMS")])
+            .end()
+            .start("uses-permission", &name(""))
+            .end()
+            .start("application", &[])
+            .start("uses-permission", &name("android.permission.READ_CONTACTS"))
+            .end()
+            .start("activity", &name(".Main"))
+            .end()
+            .end()
+            .end()
+            .finish();
+        let manifest = parse(&bytes).unwrap();
+        assert_eq!(
+            manifest.permissions,
+            [
+                "android.permission.CAMERA",
+                "android.permission.RECORD_AUDIO",
+                "android.permission.CAMERA"
+            ]
+        );
+        assert_eq!(names(&manifest), ["com.example.app.Main"]);
+    }
+
     #[test]
     fn a_component_outside_the_application_does_not_count() {
         let service = [Attr::android(ATTR_NAME, "name", "com.example.Misplaced")];

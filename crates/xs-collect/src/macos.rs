@@ -17,7 +17,15 @@
 //! * The code of an Electron app, its asar archives and loose scripts, is
 //!   read by the `electron` module (build plan, task 7), which says what it
 //!   draws from them. Its findings are records about the same bundle.
-//! * The code signature of the main executable names the Apple Team ID.
+//! * The code signature of the main executable names the Apple Team ID,
+//!   says whether the app asks for the App Sandbox, and holds its
+//!   entitlements.
+//! * What the app may access is what it asks for in two places: the usage
+//!   descriptions of `Contents/Info.plist`, each with the purpose it states
+//!   (`usage_description`), and the entitlements of the main executable
+//!   (`entitlement`). These are access edges, graded `requested`. Whether
+//!   the user allowed any of it is in the system's permission store, which
+//!   is not part of the bundle and is not read.
 //! * Every `PrivacyInfo.xcprivacy` file declares tracking domains
 //!   (`privacy_manifest`).
 //!
@@ -58,6 +66,7 @@ use xs_model::record::{
 use xs_model::{MatcherKind, RelPath, Sha256Digest, canon, text};
 
 use self::binary::{Binary, BinaryFindings};
+use crate::access::Asked;
 use crate::electron;
 use crate::read::{self, OnePass, Sink, WINDOW};
 
@@ -810,11 +819,19 @@ pub(crate) fn finish(
 
     // The Team ID is the one the main executable's signature names. A
     // universal file whose images name different teams names none.
-    let main = info
-        .executable
-        .as_deref()
-        .and_then(|name| rel(MAIN_FOLDER)?.join(name).ok())
-        .and_then(|path| binaries.iter().find(|(binary, _)| *binary == path));
+    let declared_main =
+        info.executable.as_deref().and_then(|name| rel(MAIN_FOLDER)?.join(name).ok());
+    let main =
+        declared_main.as_ref().and_then(|path| binaries.iter().find(|(binary, _)| binary == path));
+    // The main executable the property list names was not read as a Mach-O
+    // file: it is a link, which is never followed, a script, or not there.
+    // Then its signature was not looked at, and what it asks for is not
+    // known. A file that was set aside already has its record.
+    if let (None, Some(path)) = (main, declared_main)
+        && !plan.gaps.located.keys().any(|(place, ..)| *place == path)
+    {
+        plan.gaps.skipped(CoverageReason::UnsupportedFormat, Some(path));
+    }
     let team_id = match main {
         Some((path, found)) if found.team_ids.len() > 1 => {
             plan.gaps.unrecognized(CoverageReason::ParseError, Some(path.clone()));
@@ -823,6 +840,51 @@ pub(crate) fn finish(
         Some((_, found)) => found.team_ids.first().cloned(),
         None => None,
     };
+    // What the main executable's signature asks for. The entitlements of a
+    // helper or a library are its own and say nothing about the app.
+    let sandbox = main.and_then(|(_, found)| found.sandbox());
+    if let Some((location, found)) = main {
+        records.extend(found.entitlements.iter().filter_map(|(key, &count)| {
+            Asked {
+                collector: Collector::MacosBundle,
+                matcher: MatcherKind::Entitlement,
+                key,
+                count,
+                purpose: None,
+                location,
+                region: Region::Entitlements,
+            }
+            .edge(&subject)
+        }));
+    }
+    // What the property list asks for, each with the purpose it states. A
+    // usage description under a key this build has no permission for was
+    // read and not understood.
+    if let Some(location) = rel(INFO_PLIST) {
+        let mut unknown: u32 = 0;
+        for (key, purpose) in &info.usage_descriptions {
+            let asked = Asked {
+                collector: Collector::MacosBundle,
+                matcher: MatcherKind::UsageDescription,
+                key,
+                count: 1,
+                purpose: Some(purpose),
+                location: &location,
+                region: Region::PropertyList,
+            };
+            match asked.edge(&subject) {
+                Some(record) => records.push(record),
+                None => unknown = unknown.saturating_add(1),
+            }
+        }
+        let gaps = [
+            (CoverageStatus::Unrecognized, CoverageReason::UnrecognizedRecord, unknown),
+            (CoverageStatus::Skipped, CoverageReason::OverBudget, info.usage_descriptions_dropped),
+        ];
+        for (status, reason, count) in gaps {
+            plan.gaps.add(status, reason, Some(location.clone()), None, count);
+        }
+    }
     let name = stated(info.display_name, text::MAX_NAME_BYTES)
         .or_else(|| stated(info.name, text::MAX_NAME_BYTES));
     records.push(Record::Artifact(ArtifactRecord {
@@ -832,6 +894,7 @@ pub(crate) fn finish(
         facts: Facts {
             name,
             team_id,
+            sandbox,
             files_scanned: plan.files_read,
             bytes_scanned: plan.bytes_read,
         },
@@ -870,6 +933,7 @@ pub(crate) fn finish(
             (CoverageStatus::Skipped, CoverageReason::EncryptedBinary, found.encrypted),
             (CoverageStatus::Unrecognized, CoverageReason::ParseError, found.malformed),
             (CoverageStatus::Skipped, CoverageReason::OverBudget, found.over_budget),
+            (CoverageStatus::Skipped, CoverageReason::UnsupportedFormat, found.unsupported),
         ];
         for (status, reason, count) in gaps {
             plan.gaps.add(status, reason, Some(path.clone()), None, count);
@@ -1082,7 +1146,9 @@ mod tests {
         assert!(matches!(
             read(file.path(), 100),
             FileResult::Binary { sha256, bytes: 100, found }
-                if sha256 == whole && found == BinaryFindings::default()
+                // One image, with nothing in it.
+                if sha256 == whole
+                    && found == BinaryFindings { images: 1, ..BinaryFindings::default() }
         ));
         for budget in [99, 50, 16] {
             assert!(

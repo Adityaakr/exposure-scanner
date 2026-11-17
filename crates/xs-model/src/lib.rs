@@ -5,6 +5,8 @@
 //! * the versioned **evidence record** ([`record`]) and the set that holds
 //!   records keyed by content hash ([`evidence`]);
 //! * the **claim** derived from evidence ([`claim`]);
+//! * the fixed list of **permissions** an access edge can point at
+//!   ([`access`]);
 //! * the compiled **rule pack** ([`pack`]);
 //! * the **report** document that carries claims together with the evidence
 //!   they cite ([`report`]);
@@ -21,6 +23,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod access;
 pub mod canon;
 pub mod claim;
 pub mod digest;

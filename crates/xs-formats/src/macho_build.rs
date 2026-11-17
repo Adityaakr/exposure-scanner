@@ -371,6 +371,47 @@ pub fn fat(images: &[&[u8]], wide: bool) -> Vec<u8> {
 /// if given, `team_id`. It holds no hashes and signs nothing.
 #[must_use]
 pub fn signature(identifier: &str, team_id: Option<&str>) -> Vec<u8> {
+    signature_with(identifier, team_id, &[])
+}
+
+/// The slot of the entitlements, as a property list, in a signature.
+pub const SLOT_ENTITLEMENTS: u32 = 5;
+/// The slot of the entitlements in their DER form.
+pub const SLOT_DER_ENTITLEMENTS: u32 = 7;
+
+/// A signature part that holds entitlements as the XML property list
+/// `plist`, for [`signature_with`].
+#[must_use]
+pub fn entitlements_part(plist: &str) -> (u32, Vec<u8>) {
+    let mut part = Vec::new();
+    part.extend(0xfade_7171u32.to_be_bytes());
+    part.extend((8 + plist.len() as u32).to_be_bytes());
+    part.extend(plist.as_bytes());
+    (SLOT_ENTITLEMENTS, part)
+}
+
+/// An XML property list that sets each of `keys` to true, as the
+/// entitlements of a signature are written.
+#[must_use]
+pub fn entitlements_plist(keys: &[&str]) -> String {
+    let mut plist =
+        String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>");
+    for key in keys {
+        plist.push_str(&format!("<key>{key}</key><true/>"));
+    }
+    plist.push_str("</dict></plist>");
+    plist
+}
+
+/// A signature like [`signature`] that carries further parts after its code
+/// directory, each a slot number and the bytes of the part, in the order
+/// given.
+#[must_use]
+pub fn signature_with(
+    identifier: &str,
+    team_id: Option<&str>,
+    parts: &[(u32, Vec<u8>)],
+) -> Vec<u8> {
     // The fixed part of a version 0x20400 code directory is 88 bytes long.
     const FIXED: u32 = 88;
     let ident_offset = FIXED;
@@ -405,13 +446,26 @@ pub fn signature(identifier: &str, team_id: Option<&str>) -> Vec<u8> {
         directory.push(0);
     }
 
-    // A super blob with one entry: the code directory, in slot zero.
+    // A super blob whose first entry is the code directory, in slot zero.
+    let header = 12 + 8 * (1 + parts.len() as u32);
+    let total = header
+        + directory.len() as u32
+        + parts.iter().map(|(_, part)| part.len() as u32).sum::<u32>();
     let mut blob = Vec::new();
     put(&mut blob, 0xfade_0cc0);
-    put(&mut blob, 20 + directory.len() as u32);
-    put(&mut blob, 1);
+    put(&mut blob, total);
+    put(&mut blob, 1 + parts.len() as u32);
     put(&mut blob, 0); // slot: code directory
-    put(&mut blob, 20); // its offset
+    put(&mut blob, header); // its offset
+    let mut offset = header + directory.len() as u32;
+    for (slot, part) in parts {
+        put(&mut blob, *slot);
+        put(&mut blob, offset);
+        offset += part.len() as u32;
+    }
     blob.extend(directory);
+    for (_, part) in parts {
+        blob.extend(part);
+    }
     blob
 }

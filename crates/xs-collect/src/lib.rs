@@ -13,6 +13,12 @@
 //! read by a part of its own. Another reads an Android package, a single
 //! file, in a pass of its own ([`android`]).
 //!
+//! Besides what an app ships, both say what it may access: the permissions
+//! it asks for in its property list and its code signature, or in its
+//! Android manifest. Nothing here reads which of them the user allowed;
+//! that is in the system's own permission store, outside the artifact, and
+//! needs a privilege a scan of app files does not have.
+//!
 //! Everything here is read-only. Nothing is extracted, executed or written,
 //! and symbolic links inside an artifact are never followed, so a hostile
 //! bundle cannot point the scanner at files outside itself.
@@ -35,6 +41,7 @@
 //! can reach the output. Records hold paths relative to the artifact only;
 //! where the artifact sits on disk is not recorded anywhere.
 
+mod access;
 pub mod android;
 pub mod discover;
 mod electron;
