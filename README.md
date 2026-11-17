@@ -159,6 +159,7 @@ all that is known is the domain its app id spells.
 ```console
 $ target/release/exposure scan tests/fixtures/android/Skeleton.apk --json report.json
 exposure: scanned 1 app (1 file, 1818 bytes): 2 claims, 0 coverage notes
+exposure: headline: 0 companies at contacts or above, 1 company at contains, 1 app with a third-party channel
 ```
 
 An `.apk` file is read once, from start to end, for its SHA-256, which is its
