@@ -131,6 +131,40 @@ token is compared with one value at a time.
 | `dex_string` | One string constant of a `classes*.dex` file | An endpoint host with the `host` boundary |
 | `apk_file` | The full name of one entry of the archive | The whole name, one token for each place it can be: `billing.properties`, `lib/arm64-v8a/libsentry.so` |
 
+## Choosing tokens
+
+A token has to be something only the SDK puts in an app. These are the
+mistakes made while the pack was written, each found on a real app.
+
+- **A Swift class** is listed in `__objc_classname` under its mangled name:
+  `_TtC`, the length of the module name, the module name, then the class,
+  as in `_TtC7PostHog12BundleFinder`. A `prefix` token `_TtC7PostHog` finds
+  every class of the module. Use it only when the module name is the
+  vendor's own: Dia names a module of its own `TelemetryClient`, the name of
+  an older TelemetryDeck module, and `Segment` is a word any app may use.
+  The same holds for a framework folder name.
+- **An endpoint that is a bare registrable domain** is refused by the
+  compiler. Write it with the path of the API below it and the `word`
+  boundary, as Statsig's rule does with `featureassets.org/v1`.
+- **An exact class name that is a plain word or a bare brand word**, such
+  as `Intercom`, can be an app's own class: a doorbell app may define an
+  `Intercom` class. Use the vendor-prefixed classes, such as
+  `ICMUserAttributes`.
+- **The hosts of an ad network** are data in apps that block or skip ads:
+  NewPipe, which shows no ads, holds `googleads.g.doubleclick.net` among its
+  DEX strings. Prefer the table witnesses (manifest entries, classes, file
+  names), and ask for two different endpoint strings with `min_distinct`.
+- **A name an app writes into its own code for the SDK** is not a token.
+  Apps label their pages with `data-dd-action-name` for Datadog's SDK
+  whether or not they ship it; the SDK's own name for itself,
+  `browser-rum-sdk`, is the token.
+- **A short storage key** proves little alone. Countly's rule asks for both
+  of its keys in one file.
+
+The table test in `crates/xs-cli/tests/rule_pack.rs` hands every token to the
+engine in the shape its matcher reads and requires it to find its own rule
+and no other; the look-alikes above are kept there as tests.
+
 ## What the compiler refuses
 
 These lints exist because of failures seen on real apps (design report,

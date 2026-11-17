@@ -1,0 +1,24 @@
+id = "sdk/heap"
+name = "Heap"
+entity = "heap"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/heap/heap-swift-core-sdk/HEAD/HeapSwiftCore.podspec",
+    "https://registry.npmjs.org/heap-api/-/heap-api-1.0.1.tgz",
+    "https://repo1.maven.org/maven2/com/heapanalytics/android/heap-android-client/1.10.6/heap-android-client-1.10.6.aar",
+    "https://repo1.maven.org/maven2/io/heap/core/heap-android-core/0.9.7/heap-android-core-0.9.7.aar",
+]
+
+# Heap is part of Contentsquare. The Android SDK exists in two generations:
+# the classic client under com.heapanalytics.android and Heap Core under
+# io.heap.core. Both register a content provider that starts the SDK.
+[match]
+manifest_component = [
+    "com.heapanalytics.android.internal.HeapContentProvider",
+    "io.heap.core.HeapContentProvider",
+]
+android_class_prefix = ["com.heapanalytics.android.", "io.heap.core."]
+npm_package = ["heap-api"]
+content_literal = [{ lit = "heapanalytics.com/api", at = "word" }]
+apple_framework = ["HeapSwiftCore.framework"]
+macho_objc_class = [{ lit = "_TtC13HeapSwiftCore", at = "prefix" }]

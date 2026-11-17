@@ -1,0 +1,19 @@
+id = "sdk/facebook-sdk"
+name = "Facebook SDK"
+entity = "meta"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/facebook/facebook-ios-sdk/HEAD/FBSDKCoreKit.podspec",
+    "https://raw.githubusercontent.com/facebook/facebook-ios-sdk/HEAD/FBSDKCoreKit/FBSDKCoreKit/AppEvents/FBSDKAppEvents.m",
+    "https://raw.githubusercontent.com/facebook/facebook-ios-sdk/HEAD/FBSDKCoreKit/FBSDKCoreKit/AppEvents/Internal/FBSDKAppEventsUtility.m",
+    "https://repo1.maven.org/maven2/com/facebook/android/facebook-core/19.0.1/facebook-core-19.0.1.aar",
+]
+
+# The core of Meta's SDK. It logs app events (installs, launches, purchases)
+# to Meta, which uses them to measure and target ads; Facebook Login and
+# sharing are built on the same core.
+[match]
+manifest_component = ["com.facebook.internal.FacebookInitProvider"]
+android_class_prefix = ["com.facebook.appevents."]
+apple_framework = ["FBSDKCoreKit.framework"]
+macho_objc_class = ["FBSDKAppEvents", "FBSDKAppEventsUtility"]

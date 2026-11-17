@@ -74,3 +74,326 @@ name = "Functional Software, Inc. (Sentry)"
 website = "https://sentry.io/"
 domains = ["sentry.io"]
 sources = ["https://sentry.io/terms/"]
+
+# Companies the SDK rules name, from the companies' own pages. A domain that the
+# first page's site does not show is cited from an SDK the company publishes,
+# where it is a host that SDK talks to.
+#
+# Adjust is not given AppLovin as its parent: no page of either company could
+# be read to confirm it, so the claim names Adjust itself.
+
+[[entity]]
+id = "adjust"
+name = "Adjust GmbH"
+website = "https://www.adjust.com/"
+domains = ["adjust.com", "adjust.io"]
+sources = [
+    "https://raw.githubusercontent.com/adjust/ios_sdk/HEAD/Adjust/Adjust.h",
+    "https://repo1.maven.org/maven2/com/adjust/sdk/adjust-android/5.8.1/adjust-android-5.8.1.aar",
+]
+
+[[entity]]
+id = "amplitude"
+name = "Amplitude, Inc."
+website = "https://amplitude.com/"
+domains = ["amplitude.com"]
+sources = ["https://amplitude.com/terms"]
+
+[[entity]]
+id = "applovin"
+name = "AppLovin Corporation"
+website = "https://www.applovin.com/"
+domains = ["applovin.com", "applvn.com"]
+sources = [
+    "https://repo1.maven.org/maven2/com/applovin/applovin-sdk/13.7.0/applovin-sdk-13.7.0.aar",
+    "https://www.applovin.com/terms/",
+]
+
+[[entity]]
+id = "appsflyer"
+name = "AppsFlyer Ltd."
+website = "https://www.appsflyer.com/"
+domains = ["appsflyer.com", "appsflyersdk.com"]
+sources = [
+    "https://github.com/AppsFlyerSDK/AppsFlyerFramework/releases/download/7.0.4/AppsFlyerLib-Static-SPM.xcframework.zip",
+    "https://www.appsflyer.com/legal/terms-of-use/",
+]
+
+[[entity]]
+id = "aptabase"
+name = "Aptabase"
+website = "https://aptabase.com/"
+domains = ["aptabase.com"]
+sources = ["https://aptabase.com/legal/terms"]
+
+[[entity]]
+id = "branch"
+name = "Branch Metrics, Inc."
+website = "https://www.branch.io/"
+domains = ["app.link", "bnc.lt", "branch.io"]
+sources = [
+    "https://registry.npmjs.org/branch-sdk/-/branch-sdk-2.90.2.tgz",
+    "https://www.branch.io/policies/privacy-policy/",
+]
+
+[[entity]]
+id = "braze"
+name = "Braze, Inc."
+website = "https://www.braze.com/"
+domains = ["braze.com"]
+sources = ["https://www.braze.com/company/legal/privacy"]
+
+[[entity]]
+id = "bugsnag"
+name = "Bugsnag (SmartBear)"
+parent = "smartbear"
+website = "https://www.bugsnag.com/"
+domains = ["bugsnag.com"]
+sources = ["https://www.bugsnag.com/"]
+
+[[entity]]
+id = "cisco"
+name = "Cisco"
+website = "https://www.cisco.com/"
+domains = ["cisco.com"]
+sources = ["https://www.smartlook.com/terms-of-service/"]
+
+[[entity]]
+id = "contentsquare"
+name = "Contentsquare"
+website = "https://contentsquare.com/"
+domains = ["contentsquare.com", "contentsquare.net"]
+sources = [
+    "https://contentsquare.com/legal/",
+    "https://repo1.maven.org/maven2/io/heap/core/heap-android-core/0.9.7/heap-android-core-0.9.7.aar",
+]
+
+[[entity]]
+id = "countly"
+name = "Countly Ltd"
+website = "https://countly.com/"
+domains = ["count.ly", "countly.com"]
+sources = [
+    "https://countly.com/legal/terms-of-service",
+    "https://registry.npmjs.org/countly-sdk-web/-/countly-sdk-web-26.8.1.tgz",
+]
+
+[[entity]]
+id = "customerio"
+name = "Peaberry Software, Inc. (Customer.io)"
+website = "https://customer.io/"
+domains = ["customer.io"]
+sources = ["https://customer.io/legal/terms-of-service"]
+
+[[entity]]
+id = "datadog"
+name = "Datadog, Inc."
+website = "https://www.datadoghq.com/"
+domains = ["datadoghq.com", "datadoghq.eu"]
+sources = [
+    "https://registry.npmjs.org/@datadog/browser-core/-/browser-core-7.18.0.tgz",
+    "https://www.datadoghq.com/legal/terms/",
+]
+
+[[entity]]
+id = "fullstory"
+name = "FullStory, Inc."
+website = "https://www.fullstory.com/"
+domains = ["fullstory.com"]
+sources = ["https://www.fullstory.com/legal/terms-and-conditions/"]
+
+[[entity]]
+id = "heap"
+name = "Heap Inc."
+parent = "contentsquare"
+website = "https://www.heap.io/"
+domains = ["heap.io", "heapanalytics.com"]
+sources = [
+    "https://contentsquare.com/press/contentsquare-completes-acquisition-of-heap/",
+    "https://registry.npmjs.org/heap-api/-/heap-api-1.0.1.tgz",
+    "https://www.heap.io/terms",
+]
+
+[[entity]]
+id = "hotjar"
+name = "Hotjar"
+parent = "contentsquare"
+website = "https://www.hotjar.com/"
+domains = ["hotjar.com"]
+sources = ["https://www.hotjar.com/legal/policies/terms-of-service/"]
+
+[[entity]]
+id = "intercom"
+name = "Intercom, Inc."
+website = "https://www.intercom.com/"
+domains = ["intercom.com", "intercom.io", "intercomcdn.com"]
+sources = [
+    "https://registry.npmjs.org/@intercom/messenger-js-sdk/-/messenger-js-sdk-0.0.20.tgz",
+    "https://repo1.maven.org/maven2/io/intercom/android/intercom-sdk-base/18.13.0/intercom-sdk-base-18.13.0.aar",
+    "https://www.intercom.com/legal/terms-and-policies",
+]
+
+[[entity]]
+id = "ironsource"
+name = "ironSource"
+parent = "unity"
+website = "https://www.is.com/"
+domains = ["is.com"]
+sources = [
+    "https://unity.com/legal/privacy-policy",
+    "https://www.is.com/terms-and-conditions/",
+]
+
+[[entity]]
+id = "kochava"
+name = "Kochava Inc."
+website = "https://www.kochava.com/"
+domains = ["kochava.com"]
+sources = ["https://www.kochava.com/terms-of-service/"]
+
+[[entity]]
+id = "logrocket"
+name = "LogRocket, Inc."
+website = "https://logrocket.com/"
+domains = ["logrocket.com", "logrocket.io", "lr-in-prod.com", "lr-in.com", "lr-ingest.com", "lr-ingest.io", "lr-intake.com"]
+sources = [
+    "https://logrocket.com/privacy",
+    "https://registry.npmjs.org/logrocket/-/logrocket-12.4.0.tgz",
+]
+
+[[entity]]
+id = "meta"
+name = "Meta Platforms, Inc."
+website = "https://about.meta.com/"
+domains = ["facebook.com"]
+sources = ["https://developers.facebook.com/terms/"]
+
+[[entity]]
+id = "mixpanel"
+name = "Mixpanel, Inc."
+website = "https://mixpanel.com/"
+domains = ["mixpanel.com", "mxpnl.com"]
+sources = [
+    "https://mixpanel.com/legal/terms-of-use/",
+    "https://registry.npmjs.org/mixpanel-browser/-/mixpanel-browser-2.86.0.tgz",
+]
+
+[[entity]]
+id = "newrelic"
+name = "New Relic, Inc."
+website = "https://newrelic.com/"
+domains = ["newrelic.com", "nr-data.net"]
+sources = [
+    "https://newrelic.com/termsandconditions/terms",
+    "https://registry.npmjs.org/@newrelic/browser-agent/-/browser-agent-1.324.1.tgz",
+]
+
+[[entity]]
+id = "onesignal"
+name = "OneSignal, Inc."
+website = "https://onesignal.com/"
+domains = ["onesignal.com"]
+sources = ["https://onesignal.com/tos"]
+
+[[entity]]
+id = "openai"
+name = "OpenAI OpCo"
+website = "https://openai.com/"
+domains = ["openai.com"]
+sources = ["https://openai.com/policies/terms-of-use/"]
+
+[[entity]]
+id = "raygun"
+name = "Raygun Limited"
+website = "https://raygun.com/"
+domains = ["raygun.com", "raygun.io"]
+sources = [
+    "https://raygun.com/terms",
+    "https://registry.npmjs.org/raygun4js/-/raygun4js-3.1.4.tgz",
+]
+
+[[entity]]
+id = "rollbar"
+name = "Rollbar, Inc."
+website = "https://rollbar.com/"
+domains = ["rollbar.com"]
+sources = ["https://rollbar.com/terms/"]
+
+[[entity]]
+id = "segment"
+name = "Twilio Segment"
+parent = "twilio"
+website = "https://segment.com/"
+domains = ["segment.com", "segment.io"]
+sources = [
+    "https://registry.npmjs.org/@segment/analytics-next/-/analytics-next-1.84.4.tgz",
+    "https://segment.com/legal/terms/",
+]
+
+[[entity]]
+id = "singular"
+name = "Singular Labs, Inc."
+website = "https://www.singular.net/"
+domains = ["singular.net", "sng.link"]
+sources = [
+    "https://maven.singular.net/com/singular/sdk/singular_sdk/12.17.0/singular_sdk-12.17.0.aar",
+    "https://www.singular.net/privacy-policy/",
+]
+
+[[entity]]
+id = "smartbear"
+name = "SmartBear Software Inc."
+website = "https://smartbear.com/"
+domains = ["smartbear.com"]
+sources = ["https://smartbear.com/terms-of-use/"]
+
+[[entity]]
+id = "smartlook"
+name = "Smartlook.com, s.r.o."
+parent = "cisco"
+website = "https://www.smartlook.com/"
+domains = ["smartlook.com"]
+sources = ["https://www.smartlook.com/terms-of-service/"]
+
+[[entity]]
+id = "statsig"
+name = "Statsig, Inc."
+parent = "openai"
+website = "https://www.statsig.com/"
+domains = ["featureassets.org", "prodregistryv2.org", "statsig.com", "statsigapi.net", "statsigcdn.com"]
+sources = [
+    "https://openai.com/index/vijaye-raji-to-become-cto-of-applications-with-acquisition-of-statsig/",
+    "https://registry.npmjs.org/@statsig/js-client/-/js-client-3.33.8.tgz",
+]
+
+[[entity]]
+id = "telemetrydeck"
+name = "TelemetryDeck GmbH"
+website = "https://telemetrydeck.com/"
+domains = ["telemetrydeck.com"]
+sources = ["https://telemetrydeck.com/terms/"]
+
+[[entity]]
+id = "twilio"
+name = "Twilio Inc."
+website = "https://www.twilio.com/"
+domains = ["twilio.com"]
+sources = ["https://www.twilio.com/en-us/legal/tos"]
+
+[[entity]]
+id = "unity"
+name = "Unity Software Inc."
+website = "https://unity.com/"
+domains = ["unity.com", "unity3d.com"]
+sources = [
+    "https://repo1.maven.org/maven2/com/unity3d/ads/unity-ads/4.22.0/unity-ads-4.22.0.aar",
+    "https://unity.com/legal/terms-of-service",
+    "https://www.is.com/terms-and-conditions/",
+]
+
+[[entity]]
+id = "uxcam"
+name = "UXCam Inc."
+website = "https://uxcam.com/"
+domains = ["uxcam.com"]
+sources = ["https://uxcam.com/privacy-policy"]

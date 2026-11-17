@@ -1,0 +1,23 @@
+id = "sdk/rollbar"
+name = "Rollbar"
+entity = "rollbar"
+category = "crash_reporting"
+sources = [
+    "https://raw.githubusercontent.com/rollbar/rollbar-apple/HEAD/Package.swift",
+    "https://raw.githubusercontent.com/rollbar/rollbar-apple/HEAD/RollbarDeploys/Sources/RollbarDeploys/RollbarDeploysManager.m",
+    "https://raw.githubusercontent.com/rollbar/rollbar-apple/HEAD/RollbarNotifier/Sources/RollbarNotifier/DTOs/RollbarConfig.m",
+    "https://raw.githubusercontent.com/rollbar/rollbar-apple/HEAD/RollbarNotifier/Sources/RollbarNotifier/DTOs/RollbarPayload.m",
+    "https://raw.githubusercontent.com/rollbar/rollbar-apple/HEAD/RollbarNotifier/Sources/RollbarNotifier/RollbarCrashCollector.m",
+    "https://registry.npmjs.org/rollbar/-/rollbar-4.2.1.tgz",
+    "https://repo1.maven.org/maven2/com/rollbar/rollbar-android/2.4.0/rollbar-android-2.4.0.aar",
+    "https://repo1.maven.org/maven2/com/rollbar/rollbar-java/2.4.0/rollbar-java-2.4.0.jar",
+]
+
+[match]
+android_class_prefix = ["com.rollbar.android.", "com.rollbar.notifier."]
+dex_string = [{ lit = "api.rollbar.com", at = "host" }]
+npm_package = ["rollbar"]
+content_literal = [{ lit = "api.rollbar.com", at = "host" }]
+apple_framework = ["RollbarNotifier.framework"]
+macho_objc_class = ["RollbarConfig", "RollbarCrashCollector", "RollbarPayload"]
+macho_token = [{ lit = "api.rollbar.com", at = "host" }]

@@ -1,0 +1,39 @@
+id = "sdk/customerio"
+name = "Customer.io"
+entity = "customerio"
+category = "profiling"
+sources = [
+    "https://raw.githubusercontent.com/customerio/customerio-ios/HEAD/CustomerIOCommon.podspec",
+    "https://raw.githubusercontent.com/customerio/customerio-ios/HEAD/CustomerIODataPipelines.podspec",
+    "https://raw.githubusercontent.com/customerio/customerio-ios/HEAD/Sources/Common/Service/BackgroundDeliveryHttpHelpers.swift",
+    "https://raw.githubusercontent.com/customerio/customerio-ios/HEAD/Sources/DataPipeline/Type/Region.swift",
+    "https://registry.npmjs.org/@customerio/cdp-analytics-browser/-/cdp-analytics-browser-0.8.2.tgz",
+    "https://registry.npmjs.org/customerio-node/-/customerio-node-5.5.0.tgz",
+    "https://repo1.maven.org/maven2/io/customer/android/datapipelines/5.1.1/datapipelines-5.1.1.aar",
+    "https://repo1.maven.org/maven2/io/customer/android/tracking/3.11.2/tracking-3.11.2.aar",
+]
+
+# A customer-data platform: the SDK reports who the user is and what they do,
+# so that messages can be triggered. Tracking user events tied to identity is
+# profiling.
+[match]
+android_class_prefix = ["io.customer.datapipelines.", "io.customer.sdk."]
+dex_string = [
+    { lit = "cdp-eu.customer.io", at = "host" },
+    { lit = "cdp.customer.io", at = "host" },
+    { lit = "track-sdk-eu.customer.io", at = "host" },
+    { lit = "track-sdk.customer.io", at = "host" },
+]
+npm_package = ["@customerio/cdp-analytics-browser", "customerio-node"]
+content_literal = [
+    { lit = "cdp-eu.customer.io", at = "host" },
+    { lit = "cdp.customer.io", at = "host" },
+    { lit = "track-eu.customer.io", at = "host" },
+    { lit = "track.customer.io", at = "host" },
+]
+apple_framework = ["CioDataPipelines.framework", "CioInternalCommon.framework"]
+macho_objc_class = [{ lit = "_TtC16CioDataPipelines", at = "prefix" }]
+macho_token = [
+    { lit = "cdp-eu.customer.io", at = "host" },
+    { lit = "cdp.customer.io", at = "host" },
+]

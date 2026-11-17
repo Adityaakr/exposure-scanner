@@ -1,0 +1,12 @@
+id = "sdk/smartlook"
+name = "Smartlook"
+entity = "smartlook"
+category = "session_replay"
+sources = [
+    "https://registry.npmjs.org/smartlook-client/-/smartlook-client-10.0.0.tgz",
+]
+
+# Smartlook is part of Cisco.
+[match]
+npm_package = ["smartlook-client"]
+content_literal = [{ lit = "web-sdk.smartlook.com", at = "host" }]

@@ -1,0 +1,21 @@
+id = "sdk/braze"
+name = "Braze"
+entity = "braze"
+category = "profiling"
+sources = [
+    "https://github.com/braze-inc/braze-swift-sdk/releases/download/19.2.0/BrazeKit.zip",
+    "https://registry.npmjs.org/@braze/web-sdk/-/web-sdk-7.1.0.tgz",
+    "https://repo1.maven.org/maven2/com/braze/android-sdk-base/45.0.1/android-sdk-base-45.0.1.aar",
+]
+
+# A customer-data platform: the SDK tracks what the user does, tied to who the
+# user is, so it is profiling.
+# Braze gives each customer its own endpoint, so there is no host to name. The
+# script literal is the key the web SDK stores its device id under.
+[match]
+manifest_component = ["com.braze.BrazeFlushPushDeliveryReceiver"]
+android_class_prefix = ["com.braze."]
+npm_package = ["@braze/web-sdk"]
+content_literal = [{ lit = "ab.storage.deviceId", at = "word" }]
+apple_framework = ["BrazeKit.framework"]
+macho_objc_class = ["BRZConfiguration", "BRZContentCards", { lit = "_TtC8BrazeKit", at = "prefix" }]

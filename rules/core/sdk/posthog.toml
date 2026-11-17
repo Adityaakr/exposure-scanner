@@ -3,14 +3,19 @@ name = "PostHog"
 entity = "posthog"
 category = "analytics"
 sources = [
-    "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/browser/package.json",
-    "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/node/package.json",
-    "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/browser/src/posthog-core.ts",
-    "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/browser/src/utils/request-router.ts",
-    "https://raw.githubusercontent.com/PostHog/posthog-js/v1.10.0/src/posthog-core.js",
     "https://raw.githubusercontent.com/PostHog/posthog-android/main/posthog-android/build.gradle.kts",
     "https://raw.githubusercontent.com/PostHog/posthog-android/main/posthog/src/main/java/com/posthog/PostHogConfig.kt",
-    "https://raw.githubusercontent.com/PostHog/posthog-ios/main/PostHog.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/PostHog/posthog-ios/HEAD/PostHog.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/PostHog/posthog-ios/HEAD/PostHog/PostHogApi.swift",
+    "https://raw.githubusercontent.com/PostHog/posthog-ios/HEAD/PostHog/PostHogConfig.swift",
+    "https://raw.githubusercontent.com/PostHog/posthog-ios/HEAD/PostHog/PostHogPropertiesSanitizer.swift",
+    "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/browser/package.json",
+    "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/browser/src/posthog-core.ts",
+    "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/browser/src/utils/request-router.ts",
+    "https://raw.githubusercontent.com/PostHog/posthog-js/main/packages/node/package.json",
+    "https://raw.githubusercontent.com/PostHog/posthog-js/v1.10.0/src/posthog-core.js",
+    "https://registry.npmjs.org/posthog-js/-/posthog-js-1.450.1.tgz",
+    "https://registry.npmjs.org/posthog-node/-/posthog-node-6.0.0.tgz",
 ]
 
 # The Android prefix is com.posthog.android. and not com.posthog., because the
@@ -19,19 +24,27 @@ sources = [
 # app.posthog.com was the JavaScript SDK's default host until the ingestion
 # hosts under i.posthog.com replaced it, and apps that bundle an old release
 # still carry it: Logseq 2.0.2 ships posthog-js 1.10.0.
+#
+# The Apple SDK is written in Swift and is usually linked statically, so it
+# leaves no framework folder. Its classes are listed by the Objective-C runtime
+# as _TtC7PostHog and the class name, and its default hosts are constants in
+# the binary.
 [match]
 android_class_prefix = ["com.posthog.android."]
-dex_string = [
-    { lit = "eu.i.posthog.com", at = "host" },
-    { lit = "us.i.posthog.com", at = "host" },
-]
+dex_string = [{ lit = "eu.i.posthog.com", at = "host" }, { lit = "us.i.posthog.com", at = "host" }]
 npm_package = ["posthog-js", "posthog-node"]
-apple_framework = ["PostHog.framework"]
 content_literal = [
     { lit = "app.posthog.com", at = "host" },
     { lit = "i.posthog.com", at = "host" },
     { lit = "us.i.posthog.com", at = "host" },
 ]
+apple_framework = ["PostHog.framework"]
+macho_objc_class = [
+    "PostHogConfig",
+    "PostHogPropertiesSanitizer",
+    { lit = "_TtC7PostHog", at = "prefix" },
+]
+macho_token = [{ lit = "eu.i.posthog.com", at = "host" }, { lit = "us.i.posthog.com", at = "host" }]
 
 # Logseq 2.0.2 for macOS on Apple silicon bundles this SDK into `js/main.js`
 # of its `app.asar` (project spec, spike results).

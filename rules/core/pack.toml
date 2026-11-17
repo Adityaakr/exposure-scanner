@@ -1,7 +1,7 @@
 # The project's own rule layer. Data in this directory is licensed CC BY 4.0
 # (see ../README.md).
 layer = "core"
-version = 4
+version = 5
 license = "CC-BY-4.0"
 
 # The fixed list of categories. Only the five marked `headline` count in a
@@ -34,6 +34,7 @@ id = "session_replay"
 name = "Session replay"
 headline = true
 
+
 [[category]]
 id = "crash_reporting"
 name = "Crash reporting"
@@ -42,6 +43,16 @@ headline = false
 [[category]]
 id = "push_messaging"
 name = "Push messaging"
+headline = false
+
+# Messaging platforms whose main job is to deliver messages (in-app chat,
+# push) to a user the app already knows. Not in the headline: delivering to
+# a known user is not collecting about them, and the five counted categories
+# are a fixed list (design report, section 3, A7). An SDK whose main job is
+# tracking what the user does goes under profiling instead.
+[[category]]
+id = "customer_messaging"
+name = "Customer messaging"
 headline = false
 
 [[category]]

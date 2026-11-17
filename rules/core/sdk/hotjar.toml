@@ -1,0 +1,12 @@
+id = "sdk/hotjar"
+name = "Hotjar"
+entity = "hotjar"
+category = "session_replay"
+sources = [
+    "https://registry.npmjs.org/@hotjar/browser/-/browser-1.0.9.tgz",
+]
+
+# Hotjar is part of Contentsquare. It is a web product: there is no mobile SDK.
+[match]
+npm_package = ["@hotjar/browser"]
+content_literal = [{ lit = "static.hotjar.com", at = "host" }]

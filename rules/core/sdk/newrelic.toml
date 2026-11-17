@@ -1,0 +1,31 @@
+id = "sdk/newrelic"
+name = "New Relic agent"
+entity = "newrelic"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/newrelic/newrelic-ios-agent/HEAD/Agent.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/newrelic/newrelic-ios-agent/HEAD/Agent/ActivityTracing/NRMAActivityTrace.m",
+    "https://raw.githubusercontent.com/newrelic/newrelic-ios-agent/HEAD/Agent/Analytics/NRMAAnalytics.mm",
+    "https://raw.githubusercontent.com/newrelic/newrelic-ios-agent/HEAD/Agent/Harvester/DataStore/NRMAAgentConfiguration.h",
+    "https://raw.githubusercontent.com/newrelic/newrelic-ios-agent/HEAD/Agent/Harvester/DataStore/NRMAAgentConfiguration.m",
+    "https://registry.npmjs.org/@newrelic/browser-agent/-/browser-agent-1.324.1.tgz",
+    "https://registry.npmjs.org/newrelic/-/newrelic-14.13.0.tgz",
+    "https://repo1.maven.org/maven2/com/newrelic/agent/android/android-agent/7.8.5/android-agent-7.8.5.aar",
+]
+
+# The browser, mobile and Node.js agents. They report sessions, interactions,
+# network requests and crashes.
+[match]
+android_class_prefix = ["com.newrelic.agent.android."]
+dex_string = [
+    { lit = "mobile-collector.newrelic.com", at = "host" },
+    { lit = "mobile-crash.newrelic.com", at = "host" },
+]
+npm_package = ["@newrelic/browser-agent", "newrelic"]
+content_literal = [
+    { lit = "bam.nr-data.net", at = "host" },
+    { lit = "collector.newrelic.com", at = "host" },
+]
+apple_framework = ["NewRelic.framework"]
+macho_objc_class = ["NRMAActivityTrace", "NRMAAgentConfiguration", "NRMAAnalytics"]
+macho_token = [{ lit = "mobile-collector.newrelic.com", at = "host" }]

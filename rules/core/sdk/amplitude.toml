@@ -1,0 +1,44 @@
+id = "sdk/amplitude"
+name = "Amplitude"
+entity = "amplitude"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/amplitude/Amplitude-Swift/HEAD/Amplitude-Swift.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/amplitude/Amplitude-iOS/HEAD/Amplitude.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/amplitude/Amplitude-iOS/HEAD/Sources/Amplitude/AMPConstants.m",
+    "https://raw.githubusercontent.com/amplitude/Amplitude-iOS/HEAD/Sources/Amplitude/AMPIdentify.m",
+    "https://raw.githubusercontent.com/amplitude/Amplitude-iOS/HEAD/Sources/Amplitude/AMPRevenue.m",
+    "https://raw.githubusercontent.com/amplitude/Amplitude-iOS/HEAD/Sources/Amplitude/AMPTrackingOptions.m",
+    "https://registry.npmjs.org/@amplitude/analytics-browser/-/analytics-browser-2.49.3.tgz",
+    "https://registry.npmjs.org/@amplitude/analytics-node/-/analytics-node-1.5.84.tgz",
+    "https://registry.npmjs.org/amplitude-js/-/amplitude-js-8.21.12.tgz",
+    "https://repo1.maven.org/maven2/com/amplitude/analytics-android/1.37.1/analytics-android-1.37.1.aar",
+    "https://repo1.maven.org/maven2/com/amplitude/analytics-core/1.37.1/analytics-core-1.37.1.jar",
+    "https://repo1.maven.org/maven2/com/amplitude/android-sdk/3.35.1/android-sdk-3.35.1.aar",
+]
+
+# api.amplitude.com is the host of the legacy JavaScript SDK (amplitude-js);
+# api2.amplitude.com and api.eu.amplitude.com are the current ones.
+[match]
+android_class_prefix = ["com.amplitude.android.", "com.amplitude.api.", "com.amplitude.core."]
+dex_string = [
+    { lit = "api.eu.amplitude.com", at = "host" },
+    { lit = "api2.amplitude.com", at = "host" },
+]
+npm_package = ["@amplitude/analytics-browser", "@amplitude/analytics-node", "amplitude-js"]
+content_literal = [
+    { lit = "api.amplitude.com", at = "host" },
+    { lit = "api.eu.amplitude.com", at = "host" },
+    { lit = "api2.amplitude.com", at = "host" },
+]
+apple_framework = ["Amplitude.framework", "AmplitudeSwift.framework"]
+macho_objc_class = [
+    "AMPIdentify",
+    "AMPRevenue",
+    "AMPTrackingOptions",
+    { lit = "_TtC14AmplitudeSwift", at = "prefix" },
+]
+macho_token = [
+    { lit = "api.eu.amplitude.com", at = "host" },
+    { lit = "api2.amplitude.com", at = "host" },
+]

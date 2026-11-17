@@ -18,7 +18,7 @@ the scan scheduler:
 | Part | State |
 |---|---|
 | Evidence format v1, canonical JSON, record ids, evidence set | Done |
-| Rule pack: source format, compiler and lints, signature check, built-in signed pack, 12 seed rules | Done |
+| Rule pack: source format, compiler and lints, signature check, built-in signed pack, 48 rules (below) | Done |
 | `exposure scan` on a macOS app bundle, through derivation, to a JSON report | Done |
 | Match engine: literal search with boundary rules, exact and prefix tables, and the controls against false positives | Done |
 | macOS collector: Mach-O load commands, Objective-C class names, data and embedded-script sections, Team ID, privacy manifests, update feed | Done (below) |
@@ -54,14 +54,38 @@ Its scripts are read as well: an SDK is found when it is installed as an npm
 package, or bundled into the app's own code.
 
 So today a scan covers macOS bundles, Electron apps among them, and Android
-packages. A scan of an Android package looks for the Android SDKs the seed
-pack has rules for, and for nothing else. A clean report from this build
-does not mean an app is clean.
+packages. It looks for the SDKs the built-in pack has rules for, and for
+nothing else. A clean report from this build does not mean an app is clean.
 
-Measured on the three Electron apps this part is tested against: Logseq
+### What the built-in pack recognises
+
+| Category | SDKs |
+|---|---|
+| Analytics | Google Analytics (Firebase), Mixpanel, Amplitude, Twilio Segment, PostHog, Heap, Datadog RUM, New Relic, Microsoft App Center Analytics, Countly, TelemetryDeck, Aptabase, Statsig, Facebook SDK (app events) |
+| Advertising | Google Mobile Ads (AdMob), Meta Audience Network, AppLovin MAX, Unity Ads, Unity LevelPlay (ironSource) |
+| Attribution | AppsFlyer, Adjust, Branch, Kochava, Singular |
+| Profiling | Braze, Customer.io |
+| Session replay | LogRocket, Fullstory, Hotjar, Smartlook, UXCam |
+| Crash reporting | Sentry, Bugsnag, Firebase Crashlytics, Rollbar, Raygun, App Center Crashes |
+| Customer messaging | Intercom, OneSignal |
+| Other, not counted | Firebase Cloud Messaging, Firebase Installations, Google DataTransport, Google Play Billing, App Center |
+| Components (no company) | Sparkle, Squirrel, electron-updater, PLCrashReporter |
+
+Each rule looks for an SDK in every place it can leave a mark, as far as the
+SDK exists for that platform: its Android manifest entries, classes and
+endpoint strings; its npm package and the literals that survive bundling;
+its framework folder, Objective-C or Swift class names and endpoint strings
+in a Mac binary; the tracking domains its privacy manifest declares. Every
+token is taken from the SDK as its vendor publishes it, and the source is
+cited in the rule (`rules/core/sdk/`).
+
+Measured on the three Electron apps the collector is tested against: Logseq
 2.0.2 reports Sentry and PostHog, both from `js/main.js` inside its archive
 and neither among the 280 npm packages the archive lists. Bitwarden desktop
-2026.10.4 and Obsidian 1.15.1 report nothing.
+2026.10.4 and Obsidian 1.15.1 name no company. What they report is the
+updaters they ship, which are components: Squirrel, which is part of
+Electron on macOS and so in every Electron app, and in Bitwarden also
+electron-updater.
 
 ### Whose it is, and what counts
 
@@ -93,8 +117,12 @@ Only claims in the categories advertising, analytics, attribution, profiling
 and session replay are counted, and only when they name a company. Hosting is
 not receiving: crash reporting, push delivery, payments, an update feed and a
 declared tracking domain that no rule names are in the report and in none of
-the three numbers. Each claim says whether it counts, in `headline`, so the
-numbers can be recounted from the claims.
+the three numbers. Customer messaging (Intercom, OneSignal) is in
+the report under its company and is not counted either: the five counted
+categories are a fixed list (design report, section 3, A7). Braze and
+Customer.io track what the user does and so are counted, under profiling.
+Each claim says whether it counts, in `headline`, so the numbers can be
+recounted from the claims.
 
 Measured on the real apps the macOS collector is tested against:
 NetNewsWire 7.2.1's update feed, on `ranchero.com`, is first party. Maccy
@@ -302,8 +330,7 @@ Limits, each reported in the output where it bites: only the DEX files
 Android loads from a package are read (`classes.dex`, `classes2.dex`, ...);
 an entry over 256 MiB, or past 1 GiB in total, is set aside with its size;
 archives with the 64-bit zip extension and DEX container files (version 041)
-are reported as unsupported. The seed pack has no `apk_file` tokens yet, and
-split packages are scanned one file at a time. A package that cannot be
+are reported as unsupported. Split packages are scanned one file at a time. A package that cannot be
 read to its end, or that changes while it is read, has no hash to report
 its content under: it is reported as skipped (see "What is scanned").
 

@@ -1,0 +1,40 @@
+id = "sdk/statsig"
+name = "Statsig"
+entity = "statsig"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/statsig-io/statsig-kit/HEAD/Package.swift",
+    "https://raw.githubusercontent.com/statsig-io/statsig-kit/HEAD/Sources/Statsig/ObjectiveC/StatsigOptionsObjC.swift",
+    "https://raw.githubusercontent.com/statsig-io/statsig-kit/HEAD/Sources/Statsig/ObjectiveC/StatsigUserObjC.swift",
+    "https://registry.npmjs.org/@statsig/client-core/-/client-core-3.33.8.tgz",
+    "https://registry.npmjs.org/@statsig/js-client/-/js-client-3.33.8.tgz",
+    "https://registry.npmjs.org/@statsig/react-bindings/-/react-bindings-3.33.8.tgz",
+    "https://registry.npmjs.org/statsig-js/-/statsig-js-5.1.0.tgz",
+    "https://registry.npmjs.org/statsig-node/-/statsig-node-6.5.2.tgz",
+    "https://registry.npmjs.org/statsig-react/-/statsig-react-2.1.0.tgz",
+    "https://repo1.maven.org/maven2/com/statsig/android-sdk/5.1.6/android-sdk-5.1.6.aar",
+]
+
+# Feature gates and experiments. The SDK fetches the gates for a user and logs
+# which ones the user was exposed to, with the events the app adds.
+#
+# Three of its hosts are bare registrable domains, which the compiler refuses
+# as tokens, so each is written with the path of the API below it.
+[match]
+android_class_prefix = ["com.statsig.androidsdk."]
+npm_package = [
+    "@statsig/client-core",
+    "@statsig/js-client",
+    "@statsig/react-bindings",
+    "statsig-js",
+    "statsig-node",
+    "statsig-react",
+]
+content_literal = [
+    { lit = "api.statsigcdn.com", at = "host" },
+    { lit = "featureassets.org/v1", at = "word" },
+    { lit = "prodregistryv2.org/v1", at = "word" },
+    { lit = "statsigapi.net/v1", at = "word" },
+]
+apple_framework = ["Statsig.framework"]
+macho_objc_class = ["StatsigOptions", "StatsigUser", { lit = "_TtC7Statsig", at = "prefix" }]

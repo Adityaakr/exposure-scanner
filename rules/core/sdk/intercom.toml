@@ -1,0 +1,26 @@
+id = "sdk/intercom"
+name = "Intercom"
+entity = "intercom"
+category = "customer_messaging"
+sources = [
+    "https://raw.githubusercontent.com/intercom/intercom-ios/HEAD/Intercom.xcframework/ios-arm64/Intercom.framework/Headers/ICMCompany.h",
+    "https://raw.githubusercontent.com/intercom/intercom-ios/HEAD/Intercom.xcframework/ios-arm64/Intercom.framework/Headers/ICMUserAttributes.h",
+    "https://raw.githubusercontent.com/intercom/intercom-ios/HEAD/Intercom.xcframework/ios-arm64/Intercom.framework/Headers/Intercom.h",
+    "https://registry.npmjs.org/@intercom/messenger-js-sdk/-/messenger-js-sdk-0.0.20.tgz",
+    "https://repo1.maven.org/maven2/io/intercom/android/intercom-sdk-base/18.13.0/intercom-sdk-base-18.13.0.aar",
+]
+
+# The in-app messenger. It identifies the user to Intercom to show a conversation.
+[match]
+manifest_component = [
+    "io.intercom.android.sdk.IntercomInitializeContentProvider",
+    "io.intercom.android.sdk.m5.IntercomRootActivity",
+]
+android_class_prefix = ["io.intercom.android.sdk."]
+npm_package = ["@intercom/messenger-js-sdk"]
+content_literal = [
+    { lit = "api-iam.intercom.io", at = "host" },
+    { lit = "widget.intercom.io", at = "host" },
+]
+apple_framework = ["Intercom.framework"]
+macho_objc_class = ["ICMUserAttributes"]

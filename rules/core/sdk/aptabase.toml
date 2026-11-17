@@ -1,0 +1,24 @@
+id = "sdk/aptabase"
+name = "Aptabase"
+entity = "aptabase"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/aptabase/aptabase-swift/HEAD/Aptabase.podspec",
+    "https://raw.githubusercontent.com/aptabase/aptabase-swift/HEAD/Sources/Aptabase/Aptabase.swift",
+    "https://registry.npmjs.org/@aptabase/electron/-/electron-0.3.1.tgz",
+    "https://registry.npmjs.org/@aptabase/web/-/web-0.5.0.tgz",
+    "https://repo1.maven.org/maven2/com/aptabase/aptabase/0.0.6/aptabase-0.0.6.aar",
+]
+
+# The two hosts are the regions an app key selects between.
+[match]
+android_class_prefix = ["com.aptabase."]
+dex_string = [{ lit = "eu.aptabase.com", at = "host" }, { lit = "us.aptabase.com", at = "host" }]
+npm_package = ["@aptabase/electron", "@aptabase/web"]
+content_literal = [
+    { lit = "eu.aptabase.com", at = "host" },
+    { lit = "us.aptabase.com", at = "host" },
+]
+apple_framework = ["Aptabase.framework"]
+macho_objc_class = [{ lit = "_TtC8Aptabase", at = "prefix" }]
+macho_token = [{ lit = "eu.aptabase.com", at = "host" }, { lit = "us.aptabase.com", at = "host" }]

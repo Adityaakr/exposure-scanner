@@ -1,0 +1,23 @@
+id = "sdk/telemetrydeck"
+name = "TelemetryDeck"
+entity = "telemetrydeck"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/TelemetryDeck/SwiftSDK/HEAD/Package.swift",
+    "https://raw.githubusercontent.com/TelemetryDeck/SwiftSDK/HEAD/Sources/TelemetryDeck/TelemetryClient.swift",
+    "https://registry.npmjs.org/@telemetrydeck/sdk/-/sdk-2.0.4.tgz",
+    "https://repo1.maven.org/maven2/com/telemetrydeck/kotlin-sdk/7.3.1/kotlin-sdk-7.3.1.aar",
+]
+
+# The Swift SDK also ships an older module named TelemetryClient. That name is
+# not a token: Dia names a module of its own TelemetryClient, so a class or a
+# framework of that name is no proof of this SDK.
+[match]
+manifest_component = ["com.telemetrydeck.sdk.TelemetryDeckInitProvider"]
+android_class_prefix = ["com.telemetrydeck.sdk."]
+dex_string = [{ lit = "nom.telemetrydeck.com", at = "host" }]
+npm_package = ["@telemetrydeck/sdk"]
+content_literal = [{ lit = "nom.telemetrydeck.com", at = "host" }]
+apple_framework = ["TelemetryDeck.framework"]
+macho_objc_class = [{ lit = "_TtC13TelemetryDeck", at = "prefix" }]
+macho_token = [{ lit = "nom.telemetrydeck.com", at = "host" }]

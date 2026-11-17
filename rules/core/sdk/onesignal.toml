@@ -1,0 +1,27 @@
+id = "sdk/onesignal"
+name = "OneSignal"
+entity = "onesignal"
+category = "customer_messaging"
+sources = [
+    "https://raw.githubusercontent.com/OneSignal/OneSignal-iOS-SDK/HEAD/iOS_SDK/OneSignalSDK/OneSignalCore/Source/API/OneSignalClient.m",
+    "https://raw.githubusercontent.com/OneSignal/OneSignal-iOS-SDK/HEAD/iOS_SDK/OneSignalSDK/OneSignalCore/Source/OSNotification.m",
+    "https://raw.githubusercontent.com/OneSignal/OneSignal-iOS-SDK/HEAD/iOS_SDK/OneSignalSDK/OneSignalCore/Source/OneSignalUserDefaults.m",
+    "https://raw.githubusercontent.com/OneSignal/OneSignal-iOS-SDK/HEAD/iOS_SDK/OneSignalSDK/OneSignal_Core/OneSignalCore.xcframework/ios-arm64/OneSignalCore.framework/Headers/NSDateFormatter+OneSignal.h",
+    "https://raw.githubusercontent.com/OneSignal/OneSignal-iOS-SDK/HEAD/iOS_SDK/OneSignalSDK/OneSignal_XCFramework/OneSignalFramework.xcframework/ios-arm64/OneSignalFramework.framework/Headers/OneSignalFramework-Swift.h",
+    "https://registry.npmjs.org/react-onesignal/-/react-onesignal-3.5.6.tgz",
+    "https://repo1.maven.org/maven2/com/onesignal/core/5.11.0/core-5.11.0.aar",
+    "https://repo1.maven.org/maven2/com/onesignal/notifications/5.11.0/notifications-5.11.0.aar",
+]
+
+[match]
+manifest_component = [
+    "com.onesignal.core.services.SyncJobService",
+    "com.onesignal.notifications.activities.NotificationOpenedActivity",
+    "com.onesignal.notifications.receivers.FCMBroadcastReceiver",
+]
+android_class_prefix = ["com.onesignal."]
+dex_string = [{ lit = "api.onesignal.com", at = "host" }]
+npm_package = ["react-onesignal"]
+content_literal = [{ lit = "cdn.onesignal.com", at = "host" }]
+apple_framework = ["OneSignalCore.framework", "OneSignalFramework.framework"]
+macho_objc_class = ["OneSignalClient", "OneSignalUserDefaults"]

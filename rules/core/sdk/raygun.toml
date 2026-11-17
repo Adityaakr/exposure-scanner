@@ -1,0 +1,23 @@
+id = "sdk/raygun"
+name = "Raygun"
+entity = "raygun"
+category = "crash_reporting"
+sources = [
+    "https://raw.githubusercontent.com/MindscapeHQ/raygun4apple/HEAD/Sources/Raygun/RaygunClient.m",
+    "https://raw.githubusercontent.com/MindscapeHQ/raygun4apple/HEAD/Sources/Raygun/RaygunCrashReportConverter.m",
+    "https://raw.githubusercontent.com/MindscapeHQ/raygun4apple/HEAD/Sources/Raygun/RaygunNetworkPerformanceMonitor.m",
+    "https://raw.githubusercontent.com/MindscapeHQ/raygun4apple/HEAD/raygun4apple.xcodeproj/project.pbxproj",
+    "https://registry.npmjs.org/raygun/-/raygun-2.2.10.tgz",
+    "https://registry.npmjs.org/raygun4js/-/raygun4js-3.1.4.tgz",
+    "https://repo1.maven.org/maven2/com/raygun/raygun4android/7.0.0-beta1/raygun4android-7.0.0-beta1.aar",
+]
+
+# The JavaScript and Android SDKs send to api.raygun.io, the Apple SDK to api.raygun.com.
+[match]
+android_class_prefix = ["com.raygun.raygun4android."]
+dex_string = [{ lit = "api.raygun.io", at = "host" }]
+npm_package = ["raygun", "raygun4js"]
+content_literal = [{ lit = "api.raygun.io", at = "host" }, { lit = "cdn.raygun.io", at = "host" }]
+apple_framework = ["raygun4apple.framework"]
+macho_objc_class = ["RaygunClient", "RaygunCrashReportConverter"]
+macho_token = [{ lit = "api.raygun.com", at = "host" }]

@@ -1,0 +1,24 @@
+id = "sdk/datadog-rum"
+name = "Datadog RUM"
+entity = "datadog"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/DataDog/dd-sdk-ios/HEAD/Datadog/Datadog.xcodeproj/project.pbxproj",
+    "https://registry.npmjs.org/@datadog/browser-rum-slim/-/browser-rum-slim-7.18.0.tgz",
+    "https://registry.npmjs.org/@datadog/browser-rum/-/browser-rum-7.18.0.tgz",
+    "https://repo1.maven.org/maven2/com/datadoghq/dd-sdk-android-rum/3.16.0/dd-sdk-android-rum-3.16.0.aar",
+]
+
+# Real User Monitoring: sessions, views, user actions and errors.
+#
+# The script literal is the name the browser SDK reports itself under. The
+# attribute names data-dd-action-name and data-dd-privacy are deliberately not
+# tokens: an app writes them into its own pages to label elements, so they are
+# in apps that do not ship the SDK. Datadog's log collection SDK is a separate
+# product and has no rule here.
+[match]
+android_class_prefix = ["com.datadog.android.rum."]
+npm_package = ["@datadog/browser-rum", "@datadog/browser-rum-slim"]
+content_literal = [{ lit = "browser-rum-sdk", at = "word" }]
+apple_framework = ["DatadogRUM.framework"]
+macho_objc_class = [{ lit = "_TtC10DatadogRUM", at = "prefix" }]

@@ -1,0 +1,31 @@
+id = "sdk/google-mobile-ads"
+name = "Google Mobile Ads (AdMob)"
+entity = "google"
+category = "advertising"
+sources = [
+    "https://dl.google.com/android/maven2/com/google/android/gms/play-services-ads-api/25.5.0/play-services-ads-api-25.5.0.aar",
+    "https://dl.google.com/android/maven2/com/google/android/gms/play-services-ads-lite/25.3.0/play-services-ads-lite-25.3.0.aar",
+    "https://dl.google.com/android/maven2/com/google/android/gms/play-services-ads/25.5.0/play-services-ads-25.5.0.aar",
+    "https://dl.google.com/googleadmobadssdk/9721b8258709181c/googlemobileadsios-spm-13.13.0.zip",
+]
+
+# The SDK that shows AdMob and Ad Manager ads.
+#
+# Its ad hosts, such as googleads.g.doubleclick.net, are not tokens. Apps that
+# block or skip ads hold them as data: NewPipe 0.29.3, which shows no ads, has
+# that host in its DEX strings. The three table witnesses below do not occur
+# without the SDK.
+[match]
+manifest_component = [
+    "com.google.android.gms.ads.AdActivity",
+    "com.google.android.gms.ads.AdService",
+    "com.google.android.gms.ads.MobileAdsInitProvider",
+]
+android_class_prefix = ["com.google.android.gms.ads."]
+apk_file = [
+    "play-services-ads-api.properties",
+    "play-services-ads-lite.properties",
+    "play-services-ads.properties",
+]
+apple_framework = ["GoogleMobileAds.framework"]
+macho_objc_class = ["GADBannerView", "GADMobileAds", "GADRequest"]

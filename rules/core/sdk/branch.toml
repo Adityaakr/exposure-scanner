@@ -1,0 +1,32 @@
+id = "sdk/branch"
+name = "Branch"
+entity = "branch"
+category = "attribution"
+sources = [
+    "https://raw.githubusercontent.com/BranchMetrics/ios-branch-deep-linking-attribution/HEAD/BranchSDK.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/BranchMetrics/ios-branch-deep-linking-attribution/HEAD/Framework/PrivacyInfo.xcprivacy",
+    "https://raw.githubusercontent.com/BranchMetrics/ios-branch-deep-linking-attribution/HEAD/Sources/BranchSDK/BNCConfig.m",
+    "https://raw.githubusercontent.com/BranchMetrics/ios-branch-deep-linking-attribution/HEAD/Sources/BranchSDK/BNCDeviceInfo.m",
+    "https://raw.githubusercontent.com/BranchMetrics/ios-branch-deep-linking-attribution/HEAD/Sources/BranchSDK/BNCLinkCache.m",
+    "https://raw.githubusercontent.com/BranchMetrics/ios-branch-deep-linking-attribution/HEAD/Sources/BranchSDK/BranchUniversalObject.m",
+    "https://registry.npmjs.org/branch-sdk/-/branch-sdk-2.90.2.tgz",
+    "https://repo1.maven.org/maven2/io/branch/sdk/android/library/6.0.0-beta.3/library-6.0.0-beta.3.aar",
+]
+
+# Deep links and install attribution.
+#
+# Its endpoint hosts are strings an app that filters ad or tracking traffic can
+# hold as data, so two different ones must be in one file, a DEX file or a
+# binary, to count.
+[match]
+android_class_prefix = ["io.branch.referral."]
+dex_string = [{ lit = "api2.branch.io", at = "host" }, { lit = "cdn.branch.io", at = "host" }]
+npm_package = ["branch-sdk"]
+apple_framework = ["BranchSDK.framework"]
+macho_objc_class = ["BNCDeviceInfo", "BNCLinkCache", "BranchUniversalObject"]
+macho_token = [{ lit = "api3.branch.io", at = "host" }, { lit = "cdn.branch.io", at = "host" }]
+privacy_manifest = [
+    { lit = "api-safetrack-eu.branch.io", at = "host" },
+    { lit = "api-safetrack.branch.io", at = "host" },
+]
+min_distinct = { dex_string = 2, macho_token = 2 }

@@ -6,6 +6,9 @@ sources = [
     "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-crashlytics/src/main/AndroidManifest.xml",
     "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-crashlytics/src/main/java/com/google/firebase/crashlytics/CrashlyticsRegistrar.java",
     "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-crashlytics/src/main/java/com/google/firebase/crashlytics/internal/settings/SettingsController.java",
+    "https://raw.githubusercontent.com/firebase/firebase-ios-sdk/main/Crashlytics/Crashlytics/Controllers/FIRCLSReportManager.m",
+    "https://raw.githubusercontent.com/firebase/firebase-ios-sdk/main/Crashlytics/Crashlytics/FIRCrashlytics.m",
+    "https://raw.githubusercontent.com/firebase/firebase-ios-sdk/main/Package.swift",
 ]
 
 # The report endpoint crashlyticsreports-pa.googleapis.com is deliberately
@@ -16,3 +19,5 @@ sources = [
 manifest_component = ["com.google.firebase.components:com.google.firebase.crashlytics.CrashlyticsRegistrar"]
 android_class_prefix = ["com.google.firebase.crashlytics."]
 dex_string = [{ lit = "firebase-settings.crashlytics.com", at = "host" }]
+apple_framework = ["FirebaseCrashlytics.framework"]
+macho_objc_class = ["FIRCLSReportManager", "FIRCrashlytics"]
