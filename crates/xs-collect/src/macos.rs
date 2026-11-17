@@ -225,7 +225,7 @@ fn plan(root: &Path) -> Plan {
         read_info_plist(&mut plan);
         list_frameworks(&mut plan);
     }
-    walk(&mut plan);
+    walk(&mut plan, MAX_FILES);
     plan
 }
 
@@ -311,21 +311,32 @@ fn list_frameworks(plan: &mut Plan) {
     plan.manifest.listing(location, plan.frameworks.iter().map(String::as_str));
 }
 
-/// Lists every regular file in the bundle, without following symbolic links.
-fn walk(plan: &mut Plan) {
+/// Lists the regular files in the bundle, at most `max_files` of them,
+/// without following symbolic links.
+///
+/// The order of the visit is fixed: a folder's own files in name order, then
+/// its sub-folders in name order, each to its full depth. So when the file
+/// budget cuts the listing short, it cuts at the same place whatever order
+/// the file system returns entries in.
+fn walk(plan: &mut Plan, max_files: usize) {
     // Depth-first with an explicit stack: nesting is bounded by the budget,
     // not by the call stack.
     let mut pending: Vec<(PathBuf, Option<RelPath>, u32)> = vec![(plan.root.clone(), None, 0)];
-    while let Some((dir, dir_rel, depth)) = pending.pop() {
+    'folders: while let Some((dir, dir_rel, depth)) = pending.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
             plan.gaps.skipped(CoverageReason::Unreadable, dir_rel);
             continue;
         };
+        let mut listed = Vec::new();
         for entry in entries {
-            let Ok(entry) = entry else {
-                plan.gaps.skipped(CoverageReason::Unreadable, dir_rel.clone());
-                continue;
-            };
+            match entry {
+                Ok(entry) => listed.push(entry),
+                Err(_) => plan.gaps.skipped(CoverageReason::Unreadable, dir_rel.clone()),
+            }
+        }
+        listed.sort_by_cached_key(fs::DirEntry::file_name);
+        let mut folders = Vec::new();
+        for entry in listed {
             let name = entry.file_name();
             let path = name.to_str().and_then(|name| match &dir_rel {
                 Some(parent) => parent.join(name).ok(),
@@ -348,17 +359,16 @@ fn walk(plan: &mut Plan) {
                 if depth + 1 >= MAX_DEPTH {
                     plan.gaps.skipped(CoverageReason::OverBudget, Some(path));
                 } else {
-                    pending.push((entry.path(), Some(path), depth + 1));
+                    folders.push((entry.path(), Some(path), depth + 1));
                 }
             } else if kind.is_file() {
                 if path.as_str() == INFO_PLIST {
                     continue; // Already read.
                 }
-                if plan.files.len() >= MAX_FILES {
+                if plan.files.len() >= max_files {
                     // Stop listing. What was listed so far is still scanned.
                     plan.gaps.skipped(CoverageReason::OverBudget, None);
-                    pending.clear();
-                    break;
+                    break 'folders;
                 }
                 match entry.metadata() {
                     Ok(metadata) => plan.files.push((path, metadata.len())),
@@ -369,8 +379,10 @@ fn walk(plan: &mut Plan) {
                 plan.gaps.skipped(CoverageReason::UnsupportedFormat, Some(path));
             }
         }
+        // The stack gives back the last folder first.
+        pending.extend(folders.into_iter().rev());
     }
-    // Directory order is whatever the file system returns; fix it.
+    // The visit goes folder by folder, which is not path order.
     plan.files.sort_unstable();
 }
 
@@ -556,6 +568,53 @@ mod tests {
         let mut other = tempfile::NamedTempFile::new().unwrap();
         other.write_all(&[b'x'; 100]).unwrap();
         assert!(matches!(read_file(other.path(), &NoContent, 50), FileResult::NotCandidate));
+    }
+
+    /// Every limit is a deterministic budget (design report, C3): the same
+    /// bundle must lose the same files to the file budget on every file
+    /// system. The expected list follows from the documented visiting order
+    /// alone: a folder's files by name, then its sub-folders by name.
+    #[test]
+    fn the_file_budget_cuts_at_the_same_place_whatever_order_files_were_made_in() {
+        let names = ["a/1", "a/2", "a/sub/1", "b/1", "b/2", "c/1", "c/2", "top"];
+        let listed = |order: &[usize], max_files: usize| {
+            let dir = tempfile::tempdir().unwrap();
+            for &index in order {
+                let path = dir.path().join(names[index]);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, b"x").unwrap();
+            }
+            let mut plan = plan(dir.path());
+            plan.files.clear();
+            plan.gaps = Gaps::default();
+            walk(&mut plan, max_files);
+            let files: Vec<String> =
+                plan.files.iter().map(|(path, _)| path.as_str().to_string()).collect();
+            (files, plan.gaps.0.len())
+        };
+        let forward: Vec<usize> = (0..names.len()).collect();
+        let backward: Vec<usize> = forward.iter().rev().copied().collect();
+        let shuffled = [5, 2, 7, 0, 4, 1, 6, 3];
+        for order in [&forward[..], &backward, &shuffled] {
+            assert_eq!(
+                listed(order, 5),
+                (
+                    vec!["a/1", "a/2", "a/sub/1", "b/1", "top"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    1
+                ),
+                "{order:?}"
+            );
+            assert_eq!(
+                listed(order, 2),
+                (vec!["a/1", "top"].into_iter().map(String::from).collect(), 1),
+                "{order:?}"
+            );
+            assert_eq!(listed(order, 8).0, names, "{order:?}");
+            assert_eq!(listed(order, 8).1, 0, "{order:?}");
+        }
     }
 
     /// A problem inside a bundle never fails the scan, so every record the

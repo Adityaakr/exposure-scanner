@@ -325,7 +325,20 @@ impl Pack {
                 }
             }
             if current.parent.is_some() {
-                return Err(PackError::ParentCycle(entity.id.clone()));
+                // `current` is on the cycle; `entity` may only lead into it.
+                // Name the member with the least id, so the same pack gives
+                // the same message however many entities it holds.
+                let mut least = current;
+                let mut member = current;
+                while let Some(parent) = member.parent.as_deref().and_then(|id| self.entity(id))
+                    && parent.id != current.id
+                {
+                    member = parent;
+                    if member.id < least.id {
+                        least = member;
+                    }
+                }
+                return Err(PackError::ParentCycle(least.id.clone()));
             }
         }
         for rule in self.layers.iter().flat_map(|loaded| &loaded.layer.rules) {
@@ -632,9 +645,11 @@ pub(crate) mod tests {
             broken(|l| l.entities[1].parent = Some("firebase".into())),
             PackError::ParentCycle("firebase".into())
         );
+        // firebase's parent is google, which here is its own parent. Only
+        // google is its own ancestor; firebase merely leads to it.
         assert_eq!(
             broken(|l| l.entities[1].parent = Some("google".into())),
-            PackError::ParentCycle("firebase".into())
+            PackError::ParentCycle("google".into())
         );
     }
 
