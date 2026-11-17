@@ -212,16 +212,21 @@ in a folder created for its owner only:
 | elsewhere | `$XDG_CACHE_HOME/exposure`, or `~/.cache/exposure` without that variable |
 
 A file holds the records about one app, the same records the report shows,
-and three hashes: of the four things above, of the file's own content, and
-of the root the app was found in (a PATH given, or a folder of installed
-apps). It holds no path and no list of the app's files. The folder can be
-deleted at any time; the next scan reads everything and fills it again.
+and hashes: of the four things above, of the file's own content, and of the
+app's path and each folder above it whose search finds the app (its parent,
+and the folder above that unless the parent is a bundle). It holds no path
+and no list of the app's files. The folder can be deleted at any time; the
+next scan reads everything and fills it again.
 
-A scan also removes what is kept about an app that was found in a root it
-searched and is no longer there, so the cache does not go on holding an app
-you removed. What was found in any other root is left alone: a scan of the
-installed apps does not remove what scans of given paths kept, and the other
-way round.
+A scan also removes what is kept about an app that it did not find although
+it searched the app's path or a folder whose search finds the app, so the
+cache does not go on holding an app you removed. That holds however the app
+was first scanned: an app scanned by its own path and then deleted is
+removed by any later scan of a folder above it that reaches it, such as a
+scan of the installed apps for an app that was in `/Applications`. Nothing
+else is removed: a scan of the installed apps leaves what scans of paths
+elsewhere kept, and the other way round. A file in the cache whose first line
+cannot be read, such as one left by another version, is removed by any scan.
 
 `--no-cache` reads every app, uses nothing that is kept and keeps nothing.
 A scan run as root, with `sudo` for example, uses no cache either and

@@ -198,7 +198,7 @@ fn the_cache_is_private_and_holds_no_path() {
         let path = lab.cache_dir().join(name);
         assert_eq!(mode(&path), 0o600);
         let entry = String::from_utf8(fs::read(&path).unwrap()).unwrap();
-        assert!(entry.starts_with("exposure-cache/1 "), "{entry}");
+        assert!(entry.starts_with(&format!("{MAGIC} ")), "{entry}");
         assert!(!entry.contains(here.to_str().unwrap()), "{entry}");
         assert!(!entry.contains("Apps"), "{entry}");
     }
@@ -332,13 +332,13 @@ fn a_damaged_or_edited_entry_is_passed_over_and_replaced() {
         ("a bit flipped in the state", flipped(MAGIC.len() + 5)),
         ("a bit flipped in the sum", flipped(MAGIC.len() + 1 + 64 + 1 + 5)),
         (
-            "no root",
+            "no paths it is reached from",
             text.replacen(&format!(" {}\n", head.rsplit(' ').next().unwrap()), "\n", 1)
                 .into_bytes(),
         ),
         ("not an entry", b"not an entry\n{}".to_vec()),
         ("no records", format!("{head}\n").into_bytes()),
-        ("another format", text.replacen("exposure-cache/1", "exposure-cache/2", 1).into_bytes()),
+        ("another format", text.replacen(MAGIC, "exposure-cache/1", 1).into_bytes()),
         ("a word more", text.replacen('\n', " more\n", 1).into_bytes()),
         // Edited, with the file's sum set right: the record no longer has
         // the id it is stored under.
@@ -525,22 +525,30 @@ fn scan_paths(lab: &Lab, path: &Path, cache: &Cache) -> ScanStats {
     stats
 }
 
-/// A scan drops what the cache holds about an app that was found in a root
-/// it searched and is not there any more, and nothing else: not the entries
-/// of apps found in another root, whatever the scan was, and not what else
-/// may be in the folder.
+/// A scan drops what the cache holds about an app that a path it searched
+/// would have found and that it did not find, whichever scan stored it, and
+/// what it cannot read the first line of. Nothing else: not the entries of
+/// apps that no path it searched finds, and not what else is in the folder.
 #[test]
-fn only_the_entries_of_apps_that_are_gone_from_a_root_searched_are_removed() {
+fn only_the_entries_of_apps_that_are_gone_from_a_path_searched_are_removed() {
     let lab = Lab::new();
     let cache = lab.cache();
     let elsewhere = lab.dir.path().join("Elsewhere");
     let given = bundle(&elsewhere.join("Given.app"), "org.example.given");
     let left = bundle(&elsewhere.join("Left.app"), "org.example.left");
+    // Three levels below the folder of apps: a search of it does not go
+    // that deep.
+    let deep = bundle(&lab.app("Utilities/Deep/Four.app"), "org.example.four");
+    let entry_of =
+        |path: &Path| Key::of(Kind::Bundle, &fs::canonicalize(path).unwrap()).file_name();
 
-    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, 0);
-    assert_eq!(scan_paths(&lab, &given, &cache).reused, 0);
+    // Some apps are stored by scans of their own path first.
+    for path in [&given, &lab.app("One.app"), &deep] {
+        assert_eq!(scan_paths(&lab, path, &cache).reused, 0);
+    }
+    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, 1);
     assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
-    assert_eq!(lab.kept().len() as u64, APPS + 2);
+    assert_eq!(lab.kept().len() as u64, APPS + 3);
 
     // Things that are not entries, some of them named almost like one.
     let key = "0".repeat(64);
@@ -551,34 +559,53 @@ fn only_the_entries_of_apps_that_are_gone_from_a_root_searched_are_removed() {
     }
     let folder = format!("{}.entry", "1".repeat(64));
     fs::create_dir(lab.cache_dir().join(&folder)).unwrap();
-    let mut kept = lab.kept();
+    let kept_before = lab.kept();
+    // An entry of no format this program reads, of an app nobody knows.
+    let unreadable = format!("{}.entry", "2".repeat(64));
+    fs::write(lab.cache_dir().join(&unreadable), "exposure-cache/0 ???\n{}").unwrap();
 
-    // Scans of one root leave the entries of apps found in another alone.
-    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS);
+    // Any scan removes the entry it cannot read, and a scan of one path
+    // leaves the entries of apps it does not reach alone.
     assert_eq!(scan_paths(&lab, &given, &cache).reused, 1);
+    let mut kept = lab.kept();
+    assert_eq!(kept, kept_before);
     assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS);
+    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 2);
+    assert_eq!(scan_paths(&lab, &deep, &cache).reused, 1);
     assert_eq!(lab.kept(), kept);
 
-    // An app removed from a root is dropped by the next scan of that root.
-    let gone = [lab.entry(Kind::Bundle, "Two.app"), lab.entry(Kind::Package, "one.apk")];
-    fs::remove_dir_all(lab.app("Two.app")).unwrap();
+    // An app scanned by its own path and then removed is dropped by a scan
+    // of the folder it was in.
+    let given_entry = entry_of(&given);
+    fs::remove_dir_all(&given).unwrap();
+    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS);
+    assert_eq!(lab.kept(), kept, "a scan of another folder removed an entry");
+    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
+    kept.retain(|name| *name != given_entry);
+    assert_eq!(lab.kept(), kept);
+
+    // So is an app of the folder of apps, whichever scan stored it. The app
+    // too deep for its search stays.
+    let gone = [lab.entry(Kind::Bundle, "One.app"), lab.entry(Kind::Package, "one.apk")];
+    fs::remove_dir_all(lab.app("One.app")).unwrap();
     fs::remove_file(lab.app("one.apk")).unwrap();
-    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 2);
-    assert_eq!(lab.kept(), kept, "a scan of another root removed an entry");
+    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
+    assert_eq!(lab.kept(), kept, "a scan of another folder removed an entry");
     assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS - 2);
     kept.retain(|name| !gone.iter().any(|entry| entry.ends_with(name)));
     assert_eq!(lab.kept(), kept);
-    for name in others.iter().map(ToString::to_string).chain([folder]) {
+    for name in others.iter().map(ToString::to_string).chain([folder, entry_of(&deep)]) {
         assert!(kept.contains(&name), "{name} was removed");
     }
 
-    // A folder given is a root like any other.
-    let left_entry = Key::of(Kind::Bundle, &fs::canonicalize(&left).unwrap()).file_name();
-    fs::remove_dir_all(&left).unwrap();
-    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
-    kept.retain(|name| *name != left_entry);
+    // A folder whose search does reach the deep app drops it once it is
+    // gone.
+    let deep_entry = entry_of(&deep);
+    fs::remove_dir_all(&deep).unwrap();
+    assert_eq!(scan_paths(&lab, &lab.app("Utilities"), &cache).reused, 1);
+    kept.retain(|name| *name != deep_entry);
     assert_eq!(lab.kept(), kept);
-    assert_eq!(scan_paths(&lab, &given, &cache).reused, 1);
+    assert!(fs::exists(&left).unwrap());
     // What is left still answers.
     assert_same(&lab, &cache, APPS - 2);
 }
