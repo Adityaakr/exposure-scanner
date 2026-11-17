@@ -1,0 +1,28 @@
+# The companies rules may name. Every entry needs a `source`: the page on the
+# company's own site that states the legal entity. Do not copy entries from
+# Tracker Radar, TrackerDB, Disconnect, the IAB vendor list or suss.json;
+# their licences do not allow it (see ../README.md).
+
+[[entity]]
+id = "google"
+name = "Google LLC"
+website = "https://about.google/"
+source = "https://policies.google.com/terms"
+
+[[entity]]
+id = "microsoft"
+name = "Microsoft Corporation"
+website = "https://www.microsoft.com/"
+source = "https://www.microsoft.com/en-us/servicesagreement"
+
+[[entity]]
+id = "posthog"
+name = "PostHog Inc."
+website = "https://posthog.com/"
+source = "https://posthog.com/terms"
+
+[[entity]]
+id = "sentry"
+name = "Functional Software, Inc. (Sentry)"
+website = "https://sentry.io/"
+source = "https://sentry.io/terms/"

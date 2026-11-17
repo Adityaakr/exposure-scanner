@@ -1,0 +1,14 @@
+id = "sdk/plcrashreporter"
+name = "PLCrashReporter"
+# Captures crash reports on the device. It has no network side of its own;
+# whatever uploads the reports is a separate SDK with its own rule.
+component = true
+category = "component"
+sources = [
+    "https://raw.githubusercontent.com/microsoft/plcrashreporter/master/CrashReporter.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/microsoft/plcrashreporter/master/Source/PLCrashReporter.h",
+]
+
+[match]
+apple_framework = ["CrashReporter.framework"]
+macho_objc_class = ["PLCrashReporter"]

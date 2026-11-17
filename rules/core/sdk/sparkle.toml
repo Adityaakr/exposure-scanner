@@ -1,0 +1,16 @@
+id = "sdk/sparkle"
+name = "Sparkle"
+# The update framework. It fetches the feed the app's own developer names,
+# which is reported separately as a declared update feed.
+component = true
+category = "component"
+sources = [
+    "https://raw.githubusercontent.com/sparkle-project/Sparkle/2.x/Sparkle.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/sparkle-project/Sparkle/2.x/Sparkle/SUUpdater.h",
+    "https://raw.githubusercontent.com/sparkle-project/Sparkle/2.x/Sparkle/SPUUpdater.h",
+    "https://raw.githubusercontent.com/sparkle-project/Sparkle/2.x/Sparkle/SPUStandardUpdaterController.h",
+]
+
+[match]
+apple_framework = ["Sparkle.framework"]
+macho_objc_class = ["SPUStandardUpdaterController", "SPUUpdater", "SUUpdater"]

@@ -1,0 +1,33 @@
+id = "sdk/sentry"
+name = "Sentry"
+entity = "sentry"
+category = "crash_reporting"
+sources = [
+    "https://raw.githubusercontent.com/getsentry/sentry-java/main/sentry/src/main/java/io/sentry/Sentry.java",
+    "https://raw.githubusercontent.com/getsentry/sentry-java/main/sentry-android-core/src/main/AndroidManifest.xml",
+    "https://raw.githubusercontent.com/getsentry/sentry-java/main/sentry-android-core/build.gradle.kts",
+    "https://raw.githubusercontent.com/getsentry/sentry-electron/master/package.json",
+    "https://raw.githubusercontent.com/getsentry/sentry-javascript/develop/packages/browser/package.json",
+    "https://raw.githubusercontent.com/getsentry/sentry-javascript/develop/packages/node/package.json",
+    "https://raw.githubusercontent.com/getsentry/sentry-javascript/develop/packages/react/package.json",
+    "https://raw.githubusercontent.com/getsentry/sentry-javascript/develop/packages/core/src/utils/sdkMetadata.ts",
+    "https://raw.githubusercontent.com/getsentry/sentry-cocoa/main/Sentry.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/getsentry/sentry-cocoa/8.36.0/Sources/Sentry/Public/SentrySDK.h",
+    "https://raw.githubusercontent.com/getsentry/sentry-cocoa/8.36.0/Sources/Sentry/Public/SentryHub.h",
+    "https://raw.githubusercontent.com/getsentry/sentry-cocoa/main/Sources/Sentry/include/SentrySDKInternal.h",
+    "https://raw.githubusercontent.com/getsentry/sentry-cocoa/main/Sources/Sentry/include/SentryHub.h",
+]
+
+# Objective-C classes: SentrySDK and SentryHub are the 8.x names. In 9.x those
+# became Swift classes and the Objective-C implementations are
+# SentrySDKInternal and SentryHubInternal.
+#
+# The JavaScript SDK builds its name from the template `sentry.javascript.${name}`,
+# so the prefix survives bundling and minification as a string literal.
+[match]
+manifest_component = ["io.sentry.android.core.SentryInitProvider"]
+android_class_prefix = ["io.sentry."]
+npm_package = ["@sentry/browser", "@sentry/electron", "@sentry/node", "@sentry/react"]
+apple_framework = ["Sentry.framework"]
+macho_objc_class = ["SentryHub", "SentryHubInternal", "SentrySDK", "SentrySDKInternal"]
+content_literal = [{ lit = "sentry.javascript.", at = "word" }]

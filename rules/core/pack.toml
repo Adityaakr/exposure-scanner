@@ -1,0 +1,66 @@
+# The project's own rule layer. Data in this directory is licensed CC BY 4.0
+# (see ../README.md).
+layer = "core"
+version = 1
+license = "CC-BY-4.0"
+
+# The fixed list of categories. Only the five marked `headline` count in a
+# report's headline numbers: hosting is not receiving, so crash reporting,
+# push delivery and payment plumbing are kept apart from analytics and
+# advertising.
+
+[[category]]
+id = "advertising"
+name = "Advertising"
+headline = true
+
+[[category]]
+id = "analytics"
+name = "Analytics"
+headline = true
+
+[[category]]
+id = "attribution"
+name = "Attribution"
+headline = true
+
+[[category]]
+id = "profiling"
+name = "Profiling"
+headline = true
+
+[[category]]
+id = "session_replay"
+name = "Session replay"
+headline = true
+
+[[category]]
+id = "crash_reporting"
+name = "Crash reporting"
+headline = false
+
+[[category]]
+id = "push_messaging"
+name = "Push messaging"
+headline = false
+
+[[category]]
+id = "payments"
+name = "Payments"
+headline = false
+
+[[category]]
+id = "identifiers"
+name = "Installation identifiers"
+headline = false
+
+[[category]]
+id = "telemetry"
+name = "Telemetry transport"
+headline = false
+
+# A library with no network side of its own. Never a company edge.
+[[category]]
+id = "component"
+name = "Component"
+headline = false

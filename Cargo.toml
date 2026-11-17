@@ -1,0 +1,84 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+repository = "https://github.com/Adityaakr/exposure-scanner"
+publish = false
+
+# Every dependency is declared once here so that versions and feature sets are
+# reviewed in one place. Adding a crate that can open a socket fails
+# `cargo deny check bans` (see deny.toml).
+[workspace.dependencies]
+xs-model = { path = "crates/xs-model" }
+xs-formats = { path = "crates/xs-formats" }
+xs-match = { path = "crates/xs-match" }
+xs-rules = { path = "crates/xs-rules" }
+xs-derive = { path = "crates/xs-derive" }
+xs-render = { path = "crates/xs-render" }
+xs-collect = { path = "crates/xs-collect" }
+
+serde = { version = "1.0.229", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["alloc"] }
+# 0.11 or later: 0.10 silently falls back to a software SHA-256 at one seventh
+# of the speed (design report, section 6.2 decision 4).
+sha2 = { version = "0.11.1", default-features = false }
+minisign-verify = "0.3.0"
+# The event stream is what lets the Info.plist reader enforce its own depth and
+# item budgets without building a tree from a hostile file. plist only exposes
+# it behind this feature, which may change in a minor release, hence the tilde
+# requirement its documentation asks for.
+plist = { version = "~1.10.4", default-features = false, features = [
+    "enable_unstable_features_that_may_break_with_minor_version_bumps",
+] }
+rayon = "1.12.0"
+lexopt = "0.3.2"
+
+# Developer tooling and tests only. None of these reach the `exposure` binary.
+toml = { version = "1.2.1", default-features = false, features = ["parse", "serde"] }
+psl = "2.1.256"
+minisign = "0.10.0"
+object = { version = "0.41.0", default-features = false, features = ["read_core", "elf", "macho", "std"] }
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+serde_json_canonicalizer = "0.4.1"
+tempfile = "3.27.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+# Determinism (design report, section 6.4 rule 5): no randomly seeded maps, no
+# clock, no environment. The banned paths are listed in clippy.toml.
+disallowed_types = "deny"
+disallowed_methods = "deny"
+disallowed_macros = "deny"
+float_arithmetic = "deny"
+float_cmp = "deny"
+# Hostile inputs must never abort the scan.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+# Output goes through the CLI's own writers, never stray prints.
+print_stdout = "deny"
+print_stderr = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
+
+[profile.dev.package."*"]
+# Hashing in debug builds is otherwise slow enough to distort test timings.
+opt-level = 2

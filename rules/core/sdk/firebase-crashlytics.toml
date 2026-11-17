@@ -1,0 +1,18 @@
+id = "sdk/firebase-crashlytics"
+name = "Firebase Crashlytics"
+entity = "google"
+category = "crash_reporting"
+sources = [
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-crashlytics/src/main/AndroidManifest.xml",
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-crashlytics/src/main/java/com/google/firebase/crashlytics/CrashlyticsRegistrar.java",
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-crashlytics/src/main/java/com/google/firebase/crashlytics/internal/settings/SettingsController.java",
+]
+
+# The report endpoint crashlyticsreports-pa.googleapis.com is deliberately
+# absent: the SDK stores it as two interleaved halves, so it never occurs as
+# contiguous bytes. The spike's firebase-crashlytics.properties file is absent
+# too: it exists in Crashlytics 17 and not in 21.
+[match]
+manifest_component = ["com.google.firebase.components:com.google.firebase.crashlytics.CrashlyticsRegistrar"]
+android_class_prefix = ["com.google.firebase.crashlytics."]
+dex_string = [{ lit = "firebase-settings.crashlytics.com", at = "host" }]

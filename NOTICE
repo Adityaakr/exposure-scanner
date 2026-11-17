@@ -1,0 +1,20 @@
+exposure-scanner
+Copyright 2026 the exposure-scanner authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Data in this repository is licensed separately from the code:
+
+  rules/core/ and rules/dist/core.pack.json
+      The project's own detection rules and company table.
+      Creative Commons Attribution 4.0 International (LICENSES/CC-BY-4.0.txt).
+
+  rules/exodus/ (reserved; holds no data yet)
+      Signatures converted from the Exodus Privacy tracker list
+      (https://reports.exodus-privacy.eu.org/), when added, are a derivative
+      database under the Open Database License 1.0 (LICENSES/ODbL-1.0.txt),
+      kept in their own file and never merged with other layers.
+
+A report produced by the scanner is not a derivative database of either
+layer. A report that draws on the Exodus layer carries a notice of that
+source.

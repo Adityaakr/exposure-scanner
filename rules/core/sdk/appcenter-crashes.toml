@@ -1,0 +1,16 @@
+id = "sdk/appcenter-crashes"
+name = "Microsoft App Center Crashes"
+entity = "microsoft"
+category = "crash_reporting"
+sources = [
+    "https://raw.githubusercontent.com/microsoft/appcenter-sdk-apple/develop/AppCenterCrashes/AppCenterCrashes.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/microsoft/appcenter-sdk-apple/develop/AppCenterCrashes/AppCenterCrashes/MSACCrashes.h",
+    "https://raw.githubusercontent.com/microsoft/appcenter-sdk-android/develop/sdk/appcenter-crashes/src/main/java/com/microsoft/appcenter/crashes/Crashes.java",
+    "https://learn.microsoft.com/en-us/appcenter/retirement",
+]
+notes = ["retired:2025-03-31"]
+
+[match]
+android_class_prefix = ["com.microsoft.appcenter.crashes."]
+apple_framework = ["AppCenterCrashes.framework"]
+macho_objc_class = ["MSACCrashes"]

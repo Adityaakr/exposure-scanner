@@ -1,0 +1,22 @@
+id = "sdk/google-datatransport"
+name = "Google DataTransport"
+entity = "google"
+category = "telemetry"
+sources = [
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/transport/transport-backend-cct/src/main/AndroidManifest.xml",
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/transport/transport-runtime/src/main/AndroidManifest.xml",
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/transport/transport-runtime/transport-runtime.gradle",
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/transport/transport-api/src/main/java/com/google/android/datatransport/Transport.java",
+]
+
+# The runtime manifest names its services relative to the namespace
+# com.google.android.datatransport.runtime; the names below are the fully
+# qualified forms a merged app manifest holds. The upload hosts are stored as
+# interleaved halves, so there is no endpoint literal to match.
+[match]
+manifest_component = [
+    "backend:com.google.android.datatransport.cct.CctBackendFactory",
+    "com.google.android.datatransport.runtime.backends.TransportBackendDiscovery",
+    "com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService",
+]
+android_class_prefix = ["com.google.android.datatransport."]

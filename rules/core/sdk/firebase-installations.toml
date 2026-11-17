@@ -1,0 +1,14 @@
+id = "sdk/firebase-installations"
+name = "Firebase Installations"
+entity = "google"
+category = "identifiers"
+sources = [
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-installations/src/main/AndroidManifest.xml",
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-installations/src/main/java/com/google/firebase/installations/FirebaseInstallationsRegistrar.java",
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-installations/src/main/java/com/google/firebase/installations/remote/FirebaseInstallationServiceClient.java",
+]
+
+[match]
+manifest_component = ["com.google.firebase.components:com.google.firebase.installations.FirebaseInstallationsRegistrar"]
+android_class_prefix = ["com.google.firebase.installations."]
+dex_string = [{ lit = "firebaseinstallations.googleapis.com", at = "host" }]

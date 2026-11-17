@@ -1,0 +1,8 @@
+# Developer tooling runs cargo, reads the repository and probes the network
+# sandbox on purpose, so the scanner's API bans do not apply here. xtask is
+# never linked into the `exposure` binary.
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-print-in-tests = true

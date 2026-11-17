@@ -1,0 +1,29 @@
+[package]
+name = "xs-cli"
+description = "The exposure command-line scanner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "exposure"
+path = "src/main.rs"
+
+[dependencies]
+xs-model.workspace = true
+xs-match.workspace = true
+xs-rules.workspace = true
+xs-derive.workspace = true
+xs-render.workspace = true
+xs-collect.workspace = true
+serde_json.workspace = true
+lexopt.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

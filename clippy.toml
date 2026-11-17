@@ -1,0 +1,35 @@
+# Lint configuration for every crate that has no clippy.toml of its own.
+# Clippy stops at the first clippy.toml it finds walking up from a crate, so
+# xs-formats and xs-rules (which add file-system bans) repeat this list.
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-print-in-tests = true
+allow-dbg-in-tests = true
+allow-indexing-slicing-in-tests = true
+
+# Determinism (design report, section 6.4 rule 5): nothing whose behaviour
+# depends on a random seed, the clock or the environment.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order is randomly seeded; use BTreeMap" },
+    { path = "std::collections::HashSet", reason = "iteration order is randomly seeded; use BTreeSet" },
+    { path = "std::time::Instant", reason = "limits are counts, never durations" },
+    { path = "std::time::SystemTime", reason = "a report holds no timestamp" },
+    { path = "std::net::TcpStream", reason = "the scanner opens no sockets" },
+    { path = "std::net::TcpListener", reason = "the scanner opens no sockets" },
+    { path = "std::net::UdpSocket", reason = "the scanner opens no sockets" },
+    { path = "std::os::unix::net::UnixStream", reason = "the scanner opens no sockets" },
+    { path = "std::os::unix::net::UnixDatagram", reason = "the scanner opens no sockets" },
+    { path = "std::os::unix::net::UnixListener", reason = "the scanner opens no sockets" },
+    { path = "std::process::Command", reason = "the scanner executes nothing" },
+]
+disallowed-methods = [
+    { path = "std::env::var", reason = "output must not depend on the environment" },
+    { path = "std::env::var_os", reason = "output must not depend on the environment" },
+    { path = "std::env::vars", reason = "output must not depend on the environment" },
+    { path = "std::env::vars_os", reason = "output must not depend on the environment" },
+    { path = "std::env::current_dir", reason = "output must not depend on where the scanner runs" },
+    { path = "std::env::temp_dir", reason = "output must not depend on the environment" },
+    { path = "std::thread::sleep", reason = "limits are counts, never durations" },
+]

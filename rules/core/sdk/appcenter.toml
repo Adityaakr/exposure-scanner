@@ -1,0 +1,17 @@
+id = "sdk/appcenter"
+name = "Microsoft App Center"
+entity = "microsoft"
+category = "telemetry"
+sources = [
+    "https://raw.githubusercontent.com/microsoft/appcenter-sdk-apple/develop/AppCenter/AppCenter.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/microsoft/appcenter-sdk-apple/develop/AppCenter/AppCenter/MSACAppCenter.h",
+    "https://learn.microsoft.com/en-us/appcenter/retirement",
+]
+# Visual Studio App Center was retired on March 31, 2025. An app can still
+# ship its code; only a `contacts` grade would show a live flow.
+notes = ["retired:2025-03-31"]
+
+# The core module every App Center service links against.
+[match]
+apple_framework = ["AppCenter.framework"]
+macho_objc_class = ["MSACAppCenter"]

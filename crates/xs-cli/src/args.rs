@@ -1,0 +1,234 @@
+//! The command line.
+
+use std::ffi::OsString;
+use std::path::PathBuf;
+
+use lexopt::prelude::*;
+
+/// Shown by `--help` and after a usage error.
+pub(crate) const USAGE: &str = "\
+usage:
+  exposure scan PATH... [--json FILE] [--threads N]
+  exposure report FILE [--json FILE]
+  exposure rules show
+  exposure rules verify PACK --sig SIGNATURE
+  exposure --help | --version
+
+commands:
+  scan     Read the app bundles at each PATH (a macOS .app, or a folder of
+           them) and report which SDKs they ship. Nothing is changed,
+           executed or sent anywhere.
+  report   Derive the report again from the evidence saved in FILE.
+  rules    Show the built-in rule pack, or verify a signed pack file.
+
+options:
+  --json FILE   Write the JSON report to FILE (owner-readable only) instead
+                of standard output.
+  --threads N   Worker threads for scan. Default: one per core. The report
+                does not depend on it.
+";
+
+/// What the user asked for.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Command {
+    Help,
+    Version,
+    Scan(Scan),
+    Report(Report),
+    RulesShow,
+    RulesVerify(RulesVerify),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Scan {
+    pub(crate) paths: Vec<PathBuf>,
+    pub(crate) json: Option<PathBuf>,
+    pub(crate) threads: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Report {
+    pub(crate) file: PathBuf,
+    pub(crate) json: Option<PathBuf>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct RulesVerify {
+    pub(crate) pack: PathBuf,
+    pub(crate) signature: PathBuf,
+}
+
+/// Parses a command line. The error is a message for the user.
+pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
+    let mut words: Vec<OsString> = Vec::new();
+    let mut json: Option<PathBuf> = None;
+    let mut threads: Option<usize> = None;
+    let mut signature: Option<PathBuf> = None;
+
+    while let Some(arg) = parser.next().map_err(|error| error.to_string())? {
+        match arg {
+            Short('h') | Long("help") => return Ok(Command::Help),
+            Short('V') | Long("version") => return Ok(Command::Version),
+            Long("json") => json = Some(value(&mut parser, "--json")?.into()),
+            Long("sig") => signature = Some(value(&mut parser, "--sig")?.into()),
+            Long("threads") => {
+                let text = value(&mut parser, "--threads")?;
+                let count = text.to_str().and_then(|text| text.parse::<usize>().ok());
+                match count {
+                    Some(count) if (1..=1024).contains(&count) => threads = Some(count),
+                    _ => return Err(String::from("--threads takes a whole number from 1 to 1024")),
+                }
+            }
+            Value(word) => words.push(word),
+            other => return Err(other.unexpected().to_string()),
+        }
+    }
+
+    let mut words = words.into_iter();
+    let command = words.next().ok_or("no command given")?;
+    let rest: Vec<PathBuf> = words.map(PathBuf::from).collect();
+    let reject = |option: &str, present: bool, command: &str| {
+        if present { Err(format!("{option} does not apply to `{command}`")) } else { Ok(()) }
+    };
+
+    match command.to_str() {
+        Some("scan") => {
+            reject("--sig", signature.is_some(), "scan")?;
+            if rest.is_empty() {
+                return Err(String::from("scan needs at least one PATH"));
+            }
+            Ok(Command::Scan(Scan { paths: rest, json, threads: threads.unwrap_or(0) }))
+        }
+        Some("report") => {
+            reject("--sig", signature.is_some(), "report")?;
+            reject("--threads", threads.is_some(), "report")?;
+            match <[PathBuf; 1]>::try_from(rest) {
+                Ok([file]) => Ok(Command::Report(Report { file, json })),
+                Err(_) => Err(String::from("report takes exactly one FILE")),
+            }
+        }
+        Some("rules") => {
+            reject("--json", json.is_some(), "rules")?;
+            reject("--threads", threads.is_some(), "rules")?;
+            let mut rest = rest.into_iter();
+            let action = rest.next();
+            let pack = rest.next();
+            if rest.next().is_some() {
+                return Err(String::from("too many arguments for `rules`"));
+            }
+            match (action.as_deref().and_then(|action| action.to_str()), pack, signature) {
+                (Some("show"), None, None) => Ok(Command::RulesShow),
+                (Some("verify"), Some(pack), Some(signature)) => {
+                    Ok(Command::RulesVerify(RulesVerify { pack, signature }))
+                }
+                (Some("verify"), _, _) => {
+                    Err(String::from("rules verify takes PACK and --sig SIGNATURE"))
+                }
+                _ => Err(String::from("rules takes `show` or `verify`")),
+            }
+        }
+        _ => Err(format!("unknown command `{}`", command.to_string_lossy())),
+    }
+}
+
+fn value(parser: &mut lexopt::Parser, option: &str) -> Result<OsString, String> {
+    parser.value().map_err(|_| format!("{option} needs a value"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_words(words: &[&str]) -> Result<Command, String> {
+        parse(lexopt::Parser::from_args(words.iter().copied()))
+    }
+
+    #[test]
+    fn scan_takes_paths_and_options_in_any_order() {
+        let expected = Command::Scan(Scan {
+            paths: vec!["/Applications".into(), "My App.app".into()],
+            json: Some("out.json".into()),
+            threads: 4,
+        });
+        assert_eq!(
+            parse_words(&[
+                "scan",
+                "/Applications",
+                "My App.app",
+                "--json",
+                "out.json",
+                "--threads",
+                "4"
+            ]),
+            Ok(expected)
+        );
+        assert_eq!(
+            parse_words(&["--threads=4", "scan", "--json=out.json", "/Applications", "My App.app"]),
+            parse_words(&[
+                "scan",
+                "/Applications",
+                "My App.app",
+                "--json",
+                "out.json",
+                "--threads",
+                "4"
+            ])
+        );
+        assert_eq!(
+            parse_words(&["scan", "x.app"]),
+            Ok(Command::Scan(Scan { paths: vec!["x.app".into()], json: None, threads: 0 }))
+        );
+    }
+
+    #[test]
+    fn a_path_that_looks_like_an_option_can_follow_a_double_dash() {
+        assert_eq!(
+            parse_words(&["scan", "--", "--odd.app"]),
+            Ok(Command::Scan(Scan { paths: vec!["--odd.app".into()], json: None, threads: 0 }))
+        );
+    }
+
+    #[test]
+    fn the_other_commands_parse() {
+        assert_eq!(
+            parse_words(&["report", "saved.json"]),
+            Ok(Command::Report(Report { file: "saved.json".into(), json: None }))
+        );
+        assert_eq!(parse_words(&["rules", "show"]), Ok(Command::RulesShow));
+        assert_eq!(
+            parse_words(&["rules", "verify", "p.json", "--sig", "p.json.minisig"]),
+            Ok(Command::RulesVerify(RulesVerify {
+                pack: "p.json".into(),
+                signature: "p.json.minisig".into()
+            }))
+        );
+        assert_eq!(parse_words(&["--help"]), Ok(Command::Help));
+        assert_eq!(parse_words(&["scan", "-h"]), Ok(Command::Help));
+        assert_eq!(parse_words(&["-V"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn mistakes_are_usage_errors() {
+        for words in [
+            &[][..],
+            &["scan"],
+            &["scan", "x.app", "--threads", "0"],
+            &["scan", "x.app", "--threads", "many"],
+            &["scan", "x.app", "--threads"],
+            &["scan", "x.app", "--no-cache"],
+            &["scan", "x.app", "--sig", "s"],
+            &["report"],
+            &["report", "a.json", "b.json"],
+            &["report", "a.json", "--threads", "2"],
+            &["rules"],
+            &["rules", "install", "p.json"],
+            &["rules", "verify", "p.json"],
+            &["rules", "show", "extra"],
+            &["rules", "show", "--json", "x"],
+            &["update"],
+            &["diff", "a", "b"],
+        ] {
+            assert!(parse_words(words).is_err(), "{words:?} should be refused");
+        }
+    }
+}
