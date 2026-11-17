@@ -679,6 +679,16 @@ pub(crate) mod tests {
             }),
             PackError::BadText("sdk/sparkle".into(), "token")
         );
+        for at in [Boundary::Exact, Boundary::Host] {
+            assert_eq!(
+                broken(|l| {
+                    l.rules[1]
+                        .matchers
+                        .insert(MatcherKind::UpdateFeed, vec![token("updates.example.com", at)]);
+                }),
+                PackError::BadBoundary("sdk/sparkle".into(), MatcherKind::UpdateFeed, at)
+            );
+        }
         assert_eq!(
             broken(|l| {
                 let tokens = l.rules[1].matchers.get_mut(&MatcherKind::AppleFramework).unwrap();

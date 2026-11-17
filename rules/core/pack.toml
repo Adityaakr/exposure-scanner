@@ -1,7 +1,7 @@
 # The project's own rule layer. Data in this directory is licensed CC BY 4.0
 # (see ../README.md).
 layer = "core"
-version = 2
+version = 3
 license = "CC-BY-4.0"
 
 # The fixed list of categories. Only the five marked `headline` count in a
@@ -57,6 +57,22 @@ headline = false
 [[category]]
 id = "telemetry"
 name = "Telemetry transport"
+headline = false
+
+# Where an app fetches its own updates from, as its property list declares.
+# Hosting is not receiving.
+[[category]]
+id = "update_feed"
+name = "Update feed"
+headline = false
+
+# A domain a privacy manifest lists under NSPrivacyTrackingDomains. It is
+# shown as the app declares it. Whether it counts in the headline is decided
+# when the resolver maps hosts to companies; until then it names no company
+# and counts nowhere.
+[[category]]
+id = "tracking_domain"
+name = "Declared tracking domain"
 headline = false
 
 # A library with no network side of its own. Never a company edge.

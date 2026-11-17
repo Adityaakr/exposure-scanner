@@ -1,16 +1,29 @@
 //! The macOS application bundle collector.
 //!
-//! This is the walking skeleton of the collector (build plan, task 4). It
-//! establishes a bundle's identity and matches one kind of witness:
+//! It establishes a bundle's identity and gathers every kind of witness a
+//! bundle offers (design report, section 5.1):
 //!
-//! * `Contents/Info.plist` gives the app id, version and name.
+//! * `Contents/Info.plist` gives the app id, version and name, and the
+//!   address of the update feed, of which only the host is kept.
 //! * The folder names under `Contents/Frameworks` are matched against the
 //!   rule pack's `apple_framework` tokens.
-//! * Every Mach-O file in the bundle is hashed in one pass, so that two
-//!   builds which share an app id and version are still two subjects.
+//! * Every Mach-O file in the bundle is read in one pass that hashes it, so
+//!   that two builds which share an app id and version are still two
+//!   subjects, and searches it where the file itself says to look (the
+//!   `binary` module does this): the libraries its load commands name
+//!   (`macho_dylib`), its Objective-C class names (`macho_objc_class`),
+//!   literals in its data (`macho_token`) and in an embedded script
+//!   (`content_literal`).
 //! * The code of an Electron app, its asar archives and loose scripts, is
 //!   read by the `electron` module (build plan, task 7), which says what it
 //!   draws from them. Its findings are records about the same bundle.
+//! * The code signature of the main executable names the Apple Team ID.
+//! * Every `PrivacyInfo.xcprivacy` file declares tracking domains
+//!   (`privacy_manifest`).
+//!
+//! An SDK that is linked statically leaves no framework folder; its class
+//! names in the main executable are what finds it. An encrypted binary is
+//! reported as such instead of being searched as if it were readable.
 //!
 //! Every limit is a fixed budget, so a hostile bundle costs a bounded amount
 //! of work and memory and gives the same result on every run: [`MAX_DEPTH`]
@@ -18,9 +31,6 @@
 //! [`MAX_FILE_BYTES`] per file read, [`MAX_LOCATED_GAPS`] coverage records
 //! that name a place, and the property list parser's own budgets. What a
 //! budget cuts off becomes an `over_budget` coverage record.
-//!
-//! Mach-O sections, Objective-C class names, load commands, the code
-//! signature and privacy manifests are task 6.
 //!
 //! The work is split in three so that reading can be scheduled per file
 //! across all bundles at once (design report, section 6.2):
@@ -35,20 +45,25 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use xs_formats::{Budget, FormatError, info_plist, macho};
-use xs_match::{ContentMatcher, HitAcc, Matchers, NoContent};
+use std::collections::BTreeSet;
+
+use xs_formats::{Budget, FormatError, host, info_plist, macho, privacy_manifest};
+use xs_match::{ContentMatcher as _, Finding, HitAcc, Matchers};
 use xs_model::digest::BundleManifest;
 use xs_model::record::{
     ArtifactRecord, Collector, CoverageReason, CoverageRecord, CoverageStatus, EdgeRecord,
     EdgeType, Facts, ObjectKind, ObjectRef, Platform, Proof, Record, Region, Scope, Subject,
-    SubjectKind, V1,
+    SubjectKind, V1, declared,
 };
 use xs_model::{MatcherKind, RelPath, Sha256Digest, canon, text};
 
+use self::binary::{Binary, BinaryFindings};
 use crate::ScanStats;
 use crate::electron;
-use crate::read::{self, OnePass, WINDOW};
+use crate::read::{self, OnePass, Sink, WINDOW};
 use crate::schedule::Pool;
+
+mod binary;
 
 /// Deepest folder nesting the collector follows inside a bundle.
 pub const MAX_DEPTH: u32 = 64;
@@ -76,6 +91,50 @@ pub const MAX_FILE_BYTES: u64 = 2 << 30;
 const CONTENTS: &str = "Contents";
 const INFO_PLIST: &str = "Contents/Info.plist";
 const FRAMEWORKS: &str = "Contents/Frameworks";
+/// The folder that holds the main executable, which `CFBundleExecutable`
+/// names.
+const MAIN_FOLDER: &str = "Contents/MacOS";
+/// The file name Apple fixes for a privacy manifest, wherever it sits.
+const PRIVACY_MANIFEST: &str = "PrivacyInfo.xcprivacy";
+
+/// Frameworks that are an embedded browser engine. Their binaries hold the
+/// names of ad and analytics hosts as data, so they are `runtime` files and
+/// content matchers do not run on them (design report, section 5.2 control
+/// 1: 65 of 71 `doubleclick.net` hits on real bundles sat in a browser
+/// engine). Table matchers still do.
+pub const RUNTIME_FRAMEWORKS: [&str; 3] = [
+    "Chromium Embedded Framework.framework",
+    "Electron Framework.framework",
+    "QtWebEngineCore.framework",
+];
+
+/// What kind of code a Mach-O file is, and whose declaration a privacy
+/// manifest is, from where the file sits in the bundle.
+///
+/// A file inside a browser-engine framework is `runtime`. Any other file
+/// below a folder named `Frameworks` or `node_modules` is a `dependency`:
+/// that is where a bundle keeps the libraries and the packages it ships.
+/// Everything else, the main executable, helpers, plug-ins and extensions,
+/// is the app's own code.
+fn binary_scope(path: &RelPath) -> Scope {
+    let mut folders = path.as_str().split('/');
+    folders.next_back();
+    let mut scope = Scope::AppCode;
+    for folder in folders {
+        if RUNTIME_FRAMEWORKS.contains(&folder) {
+            return Scope::Runtime;
+        }
+        if folder == "Frameworks" || folder == electron::NODE_MODULES {
+            scope = Scope::Dependency;
+        }
+    }
+    scope
+}
+
+/// Whether `path` is a privacy manifest, going by its file name.
+fn is_privacy_manifest(path: &RelPath) -> bool {
+    path.as_str().rsplit('/').next() == Some(PRIVACY_MANIFEST)
+}
 
 /// A gap at a known place, keyed so that equal gaps add up and ordered by
 /// path. The last part is the size of a file over the byte budget.
@@ -93,32 +152,25 @@ struct Gaps {
 }
 
 impl Gaps {
+    /// Records `count` things that were not covered. Zero records nothing.
     fn add(
         &mut self,
         status: CoverageStatus,
         reason: CoverageReason,
         location: Option<RelPath>,
         bytes: Option<u64>,
+        count: u32,
     ) {
-        self.add_many(status, reason, location, bytes, 1);
-    }
-
-    /// Adds a gap that stands for `items` things at one place.
-    fn add_many(
-        &mut self,
-        status: CoverageStatus,
-        reason: CoverageReason,
-        location: Option<RelPath>,
-        bytes: Option<u64>,
-        items: u32,
-    ) {
+        if count == 0 {
+            return;
+        }
         let mut fold = |status, reason, count: u32| {
             let total = self.unlocated.entry((status, reason)).or_insert(0);
             *total = total.saturating_add(count);
         };
-        let Some(path) = location else { return fold(status, reason, items) };
-        let count = self.located.entry((path, status, reason, bytes)).or_insert(0);
-        *count = count.saturating_add(items);
+        let Some(path) = location else { return fold(status, reason, count) };
+        let total = self.located.entry((path, status, reason, bytes)).or_insert(0);
+        *total = total.saturating_add(count);
         if self.located.len() > MAX_LOCATED_GAPS
             && let Some(((_, status, reason, _), count)) = self.located.pop_last()
         {
@@ -127,11 +179,11 @@ impl Gaps {
     }
 
     fn skipped(&mut self, reason: CoverageReason, location: Option<RelPath>) {
-        self.add(CoverageStatus::Skipped, reason, location, None);
+        self.add(CoverageStatus::Skipped, reason, location, None, 1);
     }
 
     fn unrecognized(&mut self, reason: CoverageReason, location: Option<RelPath>) {
-        self.add(CoverageStatus::Unrecognized, reason, location, None);
+        self.add(CoverageStatus::Unrecognized, reason, location, None, 1);
     }
 }
 
@@ -165,6 +217,7 @@ impl Plan {
             CoverageReason::OverBudget,
             Some(path),
             Some(bytes.min(canon::MAX_SAFE_INTEGER)),
+            1,
         );
     }
 }
@@ -180,8 +233,26 @@ struct Job {
 enum FileResult {
     /// Not a kind of file the collector reads. It cost one small read.
     NotCandidate,
-    /// Read to the end.
-    Read(OnePass),
+    /// A Mach-O file, read to the end.
+    Binary {
+        /// SHA-256 of the whole file.
+        sha256: Sha256Digest,
+        /// Its length.
+        bytes: u64,
+        /// What was found in it.
+        found: BinaryFindings,
+    },
+    /// A privacy manifest, read whole.
+    Manifest {
+        /// SHA-256 of the whole file.
+        sha256: Sha256Digest,
+        /// Its length.
+        bytes: u64,
+        /// The tracking domains it declares, as written.
+        declared: Result<Vec<String>, FormatError>,
+    },
+    /// A loose script of an Electron app, read to the end and searched.
+    Script(OnePass),
     /// An asar archive, read to the end and searched.
     Archive(electron::ArchiveScan),
     /// A file the collector reads, but larger than the byte budget: its size.
@@ -222,7 +293,9 @@ pub fn collect(
     let results: Vec<FileResult> = pool.map(&jobs, |job| {
         let found = plans.get(job.bundle).and_then(|plan| Some((plan, plan.files.get(job.file)?)));
         match found {
-            Some((plan, (path, _))) => read_listed(&plan.root, path, matchers),
+            Some((plan, (path, _))) => {
+                read_file(&plan.root.join(path.as_str()), path, matchers, MAX_FILE_BYTES)
+            }
             None => FileResult::Failed,
         }
     });
@@ -462,14 +535,67 @@ thread_local! {
     static SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Reads one file the walk listed, the way its place in the bundle calls
-/// for: an asar archive and a loose script of an Electron app by their path
-/// (see [`electron`]), anything else by its first bytes.
-fn read_listed(root: &Path, path: &RelPath, matchers: &Matchers<'_>) -> FileResult {
-    let file = root.join(path.as_str());
-    match electron::classify(path.as_str()) {
+/// Reads a privacy manifest whole. It is a small property list; one over
+/// the property-list budget is set aside with its size, like a Mach-O file
+/// over its budget.
+fn read_manifest(path: &Path) -> FileResult {
+    let limit = privacy_manifest::MAX_BYTES as u64;
+    let Ok(file) = File::open(path) else { return FileResult::Failed };
+    let size = |read: u64| file.metadata().map_or(read, |metadata| metadata.len().max(read));
+    match file.metadata() {
+        Ok(metadata) if metadata.len() > limit => return FileResult::OverBudget(metadata.len()),
+        Ok(_) => {}
+        Err(_) => return FileResult::Failed,
+    }
+    let mut bytes = Vec::new();
+    // One byte past the limit, so a file that grew since the stat is noticed.
+    if (&file).take(limit + 1).read_to_end(&mut bytes).is_err() {
+        return FileResult::Failed;
+    }
+    if bytes.len() as u64 > limit {
+        return FileResult::OverBudget(size(bytes.len() as u64));
+    }
+    FileResult::Manifest {
+        sha256: Sha256Digest::of(&bytes),
+        bytes: bytes.len() as u64,
+        declared: privacy_manifest::parse(&bytes).map(|manifest| manifest.tracking_domains),
+    }
+}
+
+/// A [`Sink`] that searches a whole file as one stream of script text.
+struct ScriptSearch<'m> {
+    content: &'m xs_match::ContentEngine,
+    hits: HitAcc,
+}
+
+impl Sink for ScriptSearch<'_> {
+    fn overlap(&self) -> usize {
+        self.content.overlap()
+    }
+
+    fn window(&mut self, view: &[u8], carry: usize, last: bool) {
+        self.content.scan(view, carry, last, &mut self.hits);
+    }
+}
+
+/// Reads one file of a bundle, `location` being its path inside it, the way
+/// its place in the bundle calls for.
+///
+/// A privacy manifest is read whole. An asar archive and a loose script of
+/// an Electron app are read by their path (see [`electron`]). Any other
+/// file is read in a single pass if its first bytes say it is a Mach-O
+/// file, and given up on after one small read otherwise.
+///
+/// A Mach-O file larger than `budget` is set aside after that one small
+/// read. One that grows while it is being read stops one byte past `budget`
+/// and is reported the same way, so the read is bounded in every case.
+fn read_file(path: &Path, location: &RelPath, matchers: &Matchers<'_>, budget: u64) -> FileResult {
+    if is_privacy_manifest(location) {
+        return read_manifest(path);
+    }
+    match electron::classify(location.as_str()) {
         electron::FileKind::Archive { dependency } => {
-            match electron::read_archive(&file, dependency, matchers, MAX_FILE_BYTES) {
+            match electron::read_archive(path, dependency, matchers, budget) {
                 electron::ArchiveRead::Scanned(scan) => FileResult::Archive(scan),
                 electron::ArchiveRead::OverBudget(bytes) => FileResult::OverBudget(bytes),
                 electron::ArchiveRead::Failed => FileResult::Failed,
@@ -477,37 +603,42 @@ fn read_listed(root: &Path, path: &RelPath, matchers: &Matchers<'_>) -> FileResu
         }
         electron::FileKind::Script { scope, .. } => {
             let content = matchers.content(MatcherKind::ContentLiteral, scope);
-            read_matching(&file, content, MAX_FILE_BYTES, |_| true)
+            let search = ScriptSearch { content, hits: HitAcc::new() };
+            read_matching(
+                path,
+                search,
+                budget,
+                |_| true,
+                |search, sha256, bytes| {
+                    FileResult::Script(OnePass { sha256, bytes, hits: search.hits })
+                },
+            )
         }
-        // Which bytes of a Mach-O file are searched for which tokens is
-        // decided by the section table, which task 6 reads. Until then the
-        // pass hashes only.
-        electron::FileKind::Other => read_file(&file, &NoContent, MAX_FILE_BYTES),
+        electron::FileKind::Other => {
+            let binary = Binary::new(matchers, binary_scope(location));
+            let is_macho = |head: &[u8]| macho::sniff(head).is_some();
+            read_matching(path, binary, budget, is_macho, |binary, sha256, bytes| {
+                FileResult::Binary { sha256, bytes, found: binary.finish() }
+            })
+        }
     }
 }
 
-/// Reads one file in a single pass if its first bytes say it is a Mach-O
-/// file, and gives up after one small read otherwise.
-///
-/// A Mach-O file larger than `budget` is set aside after that one small
-/// read. One that grows while it is being read stops one byte past `budget`
-/// and is reported the same way, so the read is bounded in every case.
-fn read_file<M: ContentMatcher + ?Sized>(path: &Path, content: &M, budget: u64) -> FileResult {
-    read_matching(path, content, budget, |head| macho::sniff(head).is_some())
-}
-
-/// Reads one file in a single pass if `candidate` says so of its first
-/// bytes, within `budget` as [`read_file`] describes.
-fn read_matching<M: ContentMatcher + ?Sized>(
+/// Reads one file into `sink` in a single pass if `candidate` says so of
+/// its first bytes, within `budget` as [`read_file`] describes. A file read
+/// to the end is what `done` makes of the sink, the file's hash and its
+/// length.
+fn read_matching<S: Sink>(
     path: &Path,
-    content: &M,
+    mut sink: S,
     budget: u64,
     candidate: impl Fn(&[u8]) -> bool,
+    done: impl FnOnce(S, Sha256Digest, u64) -> FileResult,
 ) -> FileResult {
     let Ok(file) = File::open(path) else { return FileResult::Failed };
     let mut bounded = (&file).take(budget.saturating_add(1));
     SCRATCH.with_borrow_mut(|buf| {
-        let needed = read::buffer_len(content, WINDOW);
+        let needed = read::buffer_len_for(sink.overlap(), WINDOW);
         if buf.len() < needed {
             buf.resize(needed, 0);
         }
@@ -524,16 +655,93 @@ fn read_matching<M: ContentMatcher + ?Sized>(
                 _ => true,
             }
         };
-        match read::one_pass(&mut bounded, buf, WINDOW, content, wanted) {
-            Ok(Some(pass)) if pass.bytes > budget => match file.metadata() {
-                Ok(metadata) => FileResult::OverBudget(metadata.len().max(pass.bytes)),
+        match read::pass(&mut bounded, buf, WINDOW, &mut sink, wanted) {
+            Ok(Some((_, bytes))) if bytes > budget => match file.metadata() {
+                Ok(metadata) => FileResult::OverBudget(metadata.len().max(bytes)),
                 Err(_) => FileResult::Failed,
             },
-            Ok(Some(pass)) => FileResult::Read(pass),
+            Ok(Some((sha256, bytes))) => done(sink, sha256, bytes),
             Ok(None) => oversize.map_or(FileResult::NotCandidate, FileResult::OverBudget),
             Err(_) => FileResult::Failed,
         }
     })
+}
+
+/// An edge to the SDK of the rule whose token was found.
+fn sdk_edge(
+    subject: &Subject,
+    finding: Finding<'_>,
+    location: &RelPath,
+    region: Region,
+    scope: Scope,
+) -> Record {
+    Record::Edge(EdgeRecord {
+        v: V1,
+        collector: Collector::MacosBundle,
+        subject: subject.clone(),
+        edge: EdgeType::Channel,
+        grade: finding.matcher.grade(),
+        object: ObjectRef { kind: ObjectKind::Sdk, id: finding.rule.id.clone() },
+        rule: finding.rule.id.clone(),
+        proof: Proof {
+            matcher: finding.matcher,
+            token: finding.token.lit.clone(),
+            count: finding.count,
+            example: finding.example,
+            location: location.clone(),
+            region,
+            scope,
+        },
+    })
+}
+
+/// Hosts a property list declares under one key, and what they are
+/// evidence of.
+struct Declaration<'a> {
+    /// The kind of witness: which declaration this is.
+    matcher: MatcherKind,
+    /// The built-in rule the host edges name.
+    rule: &'static str,
+    /// The key of the property list that holds the hosts.
+    key: &'static str,
+    /// The property list.
+    location: &'a RelPath,
+    /// Whose declaration it is.
+    scope: Scope,
+}
+
+impl Declaration<'_> {
+    /// The records for `hosts`: an edge to each host as itself.
+    ///
+    /// A host is shown whether or not a rule knows it. Who owns it is not
+    /// decided here.
+    fn records(&self, hosts: &BTreeSet<String>, subject: &Subject, records: &mut Vec<Record>) {
+        for host in hosts {
+            records.push(Record::Edge(EdgeRecord {
+                v: V1,
+                collector: Collector::MacosBundle,
+                subject: subject.clone(),
+                edge: EdgeType::Channel,
+                grade: self.matcher.grade(),
+                object: ObjectRef { kind: ObjectKind::Host, id: host.clone() },
+                rule: self.rule.into(),
+                proof: Proof {
+                    matcher: self.matcher,
+                    token: self.key.into(),
+                    count: 1,
+                    example: None,
+                    location: self.location.clone(),
+                    region: Region::PropertyList,
+                    scope: self.scope,
+                },
+            }));
+        }
+    }
+}
+
+/// The host a declaration names, in the one spelling a record stores.
+fn declared_host(text: &str, reduce: impl Fn(&str) -> Option<String>) -> Option<String> {
+    reduce(text).filter(|host| text::is_host(host))
 }
 
 /// Turns a plan and what was read into records. Pure.
@@ -547,44 +755,60 @@ fn finish(
     for (path, _) in &plan.files {
         code.listed(path, matchers);
     }
+    let mut binaries: Vec<(RelPath, BinaryFindings)> = Vec::new();
+    let mut manifests: Vec<(RelPath, Result<Vec<String>, FormatError>)> = Vec::new();
     for (file, result) in results {
         let Some((path, _)) = plan.files.get(file) else { continue };
+        let path = path.clone();
         match result {
             FileResult::NotCandidate => {}
-            FileResult::Read(pass) => {
+            FileResult::Binary { sha256, bytes, found } => {
+                plan.manifest.file(path.clone(), sha256);
+                plan.files_read += 1;
+                plan.bytes_read += bytes;
+                binaries.push((path, found));
+            }
+            FileResult::Script(pass) => {
                 plan.manifest.file(path.clone(), pass.sha256);
                 plan.files_read += 1;
                 plan.bytes_read += pass.bytes;
-                code.script(path, &pass.hits, matchers);
+                code.script(&path, &pass.hits, matchers);
             }
             FileResult::Archive(scan) => {
                 plan.manifest.file(path.clone(), scan.sha256);
                 plan.files_read += 1;
                 plan.bytes_read += scan.bytes;
-                code.archive(path, scan);
+                code.archive(&path, scan);
             }
-            FileResult::OverBudget(bytes) => {
-                let path = path.clone();
-                plan.over_budget(path, bytes);
+            FileResult::Manifest { sha256, bytes, declared } => {
+                plan.manifest.file(path.clone(), sha256);
+                plan.files_read += 1;
+                plan.bytes_read += bytes;
+                manifests.push((path, declared));
             }
-            FileResult::Failed => plan.gaps.skipped(CoverageReason::Unreadable, Some(path.clone())),
+            FileResult::OverBudget(bytes) => plan.over_budget(path, bytes),
+            FileResult::Failed => plan.gaps.skipped(CoverageReason::Unreadable, Some(path)),
         }
     }
     // Before the digest is taken: the listings evidence is drawn from enter
     // the manifest here.
     let (code_edges, code_gaps) = code.finish(matchers, &mut plan.manifest);
     for (location, status, reason, items) in code_gaps {
-        plan.gaps.add_many(status, reason, location, None, items);
+        plan.gaps.add(status, reason, location, None, items);
     }
+    // Results arrive largest file first. Records are a set, but the lists
+    // below are walked in path order so that nothing depends on sizes.
+    binaries.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+    manifests.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
     // A value the property list declares but leaves empty is no value, so
     // each one is cleaned and checked before the next is considered.
-    let declared = |value: Option<String>, max_bytes: usize| {
+    let stated = |value: Option<String>, max_bytes: usize| {
         value.map(|value| text::clean(&value, max_bytes)).filter(|value| !value.is_empty())
     };
     let parsed = plan.info.is_some();
     let info = plan.info.unwrap_or_default();
-    let id = match declared(info.identifier, text::MAX_ID_BYTES) {
+    let id = match stated(info.identifier, text::MAX_ID_BYTES) {
         Some(id) => id,
         None => {
             // No usable app id: fall back to the folder's name so that the
@@ -598,8 +822,8 @@ fn finish(
             if name.is_empty() { String::from("unnamed.app") } else { name }
         }
     };
-    let version = declared(info.short_version, text::MAX_VERSION_BYTES)
-        .or_else(|| declared(info.build_version, text::MAX_VERSION_BYTES));
+    let version = stated(info.short_version, text::MAX_VERSION_BYTES)
+        .or_else(|| stated(info.build_version, text::MAX_VERSION_BYTES));
     let subject = Subject {
         kind: SubjectKind::App,
         platform: Platform::Macos,
@@ -609,13 +833,34 @@ fn finish(
     };
 
     let mut records = Vec::new();
-    let name = declared(info.display_name, text::MAX_NAME_BYTES)
-        .or_else(|| declared(info.name, text::MAX_NAME_BYTES));
+
+    // The Team ID is the one the main executable's signature names. A
+    // universal file whose images name different teams names none.
+    let main = info
+        .executable
+        .as_deref()
+        .and_then(|name| rel(MAIN_FOLDER)?.join(name).ok())
+        .and_then(|path| binaries.iter().find(|(binary, _)| *binary == path));
+    let team_id = match main {
+        Some((path, found)) if found.team_ids.len() > 1 => {
+            plan.gaps.unrecognized(CoverageReason::ParseError, Some(path.clone()));
+            None
+        }
+        Some((_, found)) => found.team_ids.first().cloned(),
+        None => None,
+    };
+    let name = stated(info.display_name, text::MAX_NAME_BYTES)
+        .or_else(|| stated(info.name, text::MAX_NAME_BYTES));
     records.push(Record::Artifact(ArtifactRecord {
         v: V1,
         collector: Collector::MacosBundle,
         subject: subject.clone(),
-        facts: Facts { name, files_scanned: plan.files_read, bytes_scanned: plan.bytes_read },
+        facts: Facts {
+            name,
+            team_id,
+            files_scanned: plan.files_read,
+            bytes_scanned: plan.bytes_read,
+        },
     }));
 
     if let Some(location) = rel(FRAMEWORKS) {
@@ -627,24 +872,100 @@ fn finish(
             matchers.match_value(MatcherKind::AppleFramework, scope, folder.as_bytes(), &mut hits);
         }
         for finding in matchers.judge(&hits).edges {
-            records.push(Record::Edge(EdgeRecord {
-                v: V1,
-                collector: Collector::MacosBundle,
-                subject: subject.clone(),
-                edge: EdgeType::Channel,
-                grade: finding.matcher.grade(),
-                object: ObjectRef { kind: ObjectKind::Sdk, id: finding.rule.id.clone() },
-                rule: finding.rule.id.clone(),
-                proof: Proof {
-                    matcher: finding.matcher,
-                    token: finding.token.lit.clone(),
-                    count: finding.count,
-                    example: finding.example,
-                    location: location.clone(),
-                    region: Region::DirEntries,
-                    scope,
-                },
-            }));
+            records.push(sdk_edge(&subject, finding, &location, Region::DirEntries, scope));
+        }
+    }
+
+    for (path, found) in binaries {
+        // What the file is by where it sits. That is also what a script it
+        // carries is; the file around a script is the script's runtime.
+        let placed = binary_scope(&path);
+        let file_scope = if found.has_script { Scope::Runtime } else { placed };
+        // The hits of one file are judged together, whatever part of the
+        // file each came from.
+        for finding in matchers.judge(&found.hits).edges {
+            let (region, scope) = match finding.matcher {
+                MatcherKind::MachoObjcClass => (Region::ObjcClassname, file_scope),
+                MatcherKind::MachoDylib => (Region::LoadCommands, file_scope),
+                MatcherKind::ContentLiteral => (Region::EmbeddedScript, placed),
+                _ => (Region::NonCode, file_scope),
+            };
+            records.push(sdk_edge(&subject, finding, &path, region, scope));
+        }
+        let gaps = [
+            (CoverageStatus::Skipped, CoverageReason::EncryptedBinary, found.encrypted),
+            (CoverageStatus::Unrecognized, CoverageReason::ParseError, found.malformed),
+            (CoverageStatus::Skipped, CoverageReason::OverBudget, found.over_budget),
+        ];
+        for (status, reason, count) in gaps {
+            plan.gaps.add(status, reason, Some(path.clone()), None, count);
+        }
+    }
+
+    for (path, listed) in manifests {
+        let listed = match listed {
+            Ok(listed) => listed,
+            Err(FormatError::OverBudget(Budget::Bytes | Budget::Items | Budget::Depth)) => {
+                plan.gaps.skipped(CoverageReason::OverBudget, Some(path));
+                continue;
+            }
+            Err(FormatError::Malformed) => {
+                plan.gaps.unrecognized(CoverageReason::ParseError, Some(path));
+                continue;
+            }
+        };
+        let mut hosts = BTreeSet::new();
+        let mut not_hosts: u32 = 0;
+        for entry in listed {
+            match declared_host(&entry, host::of_name) {
+                Some(host) => {
+                    hosts.insert(host);
+                }
+                None => not_hosts = not_hosts.saturating_add(1),
+            }
+        }
+        // An entry that is not a host name was read and not understood.
+        plan.gaps.add(
+            CoverageStatus::Unrecognized,
+            CoverageReason::ParseError,
+            Some(path.clone()),
+            None,
+            not_hosts,
+        );
+        let scope = binary_scope(&path);
+        // The listed hosts are one table: every one is matched, then the
+        // hits are judged together.
+        let mut hits = HitAcc::new();
+        for host in &hosts {
+            matchers.match_value(MatcherKind::PrivacyManifest, scope, host.as_bytes(), &mut hits);
+        }
+        for finding in matchers.judge(&hits).edges {
+            records.push(sdk_edge(&subject, finding, &path, Region::PropertyList, scope));
+        }
+        Declaration {
+            matcher: MatcherKind::PrivacyManifest,
+            rule: declared::TRACKING_DOMAIN,
+            key: privacy_manifest::TRACKING_DOMAINS_KEY,
+            location: &path,
+            scope,
+        }
+        .records(&hosts, &subject, &mut records);
+    }
+
+    // An address that is left empty declares nothing. One that is there and
+    // cannot be reduced to a host was read and not understood.
+    let feed = info.feed_url.filter(|address| !address.trim().is_empty());
+    if let (Some(address), Some(location)) = (feed, rel(INFO_PLIST)) {
+        match declared_host(&address, host::of_url) {
+            Some(host) => Declaration {
+                matcher: MatcherKind::UpdateFeed,
+                rule: declared::UPDATE_FEED,
+                key: info_plist::FEED_URL_KEY,
+                location: &location,
+                scope: Scope::AppCode,
+            }
+            .records(&BTreeSet::from([host]), &subject, &mut records),
+            None => plan.gaps.unrecognized(CoverageReason::ParseError, Some(location)),
         }
     }
 
@@ -695,10 +1016,89 @@ mod tests {
 
     use super::*;
 
+    /// A pack with one rule, `sdk/sample`, that holds `tokens`.
+    pub(super) fn pack_with(tokens: &[(MatcherKind, &str, Boundary)]) -> Pack {
+        let mut matchers: BTreeMap<MatcherKind, Vec<Token>> = BTreeMap::new();
+        for &(matcher, literal, at) in tokens {
+            matchers.entry(matcher).or_default().push(Token { lit: literal.into(), at });
+        }
+        pack(vec![Rule {
+            id: "sdk/sample".into(),
+            name: "Sample".into(),
+            entity: None,
+            category: "component".into(),
+            sources: vec![],
+            notes: vec![],
+            matchers,
+            min_distinct: BTreeMap::new(),
+        }])
+    }
+
+    fn location(path: &str) -> RelPath {
+        RelPath::new(path).unwrap()
+    }
+
+    /// Design report, section 5.2 control 1, for Mach-O files: the scope
+    /// follows from where a file sits and from nothing else.
+    #[test]
+    fn a_binary_s_scope_follows_from_where_it_sits() {
+        for (path, scope) in [
+            ("Contents/MacOS/Example", Scope::AppCode),
+            ("Contents/PlugIns/Share.appex/Contents/MacOS/Share", Scope::AppCode),
+            ("Contents/Library/LoginItems/Helper.app/Contents/MacOS/Helper", Scope::AppCode),
+            ("Contents/Resources/tool", Scope::AppCode),
+            ("Wrapper/Example.app/Example", Scope::AppCode),
+            ("Contents/Frameworks/Sentry.framework/Versions/A/Sentry", Scope::Dependency),
+            ("Contents/Frameworks/libswiftCore.dylib", Scope::Dependency),
+            (
+                "Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app/Contents/MacOS/Updater",
+                Scope::Dependency,
+            ),
+            ("Contents/PlugIns/Share.appex/Contents/Frameworks/X.framework/X", Scope::Dependency),
+            (
+                "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+                Scope::Runtime,
+            ),
+            (
+                "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib",
+                Scope::Runtime,
+            ),
+            (
+                "Contents/Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework",
+                Scope::Runtime,
+            ),
+            // A file that is merely named like one is not inside one.
+            ("Contents/MacOS/Electron Framework.framework", Scope::AppCode),
+            ("Contents/MacOS/Frameworks", Scope::AppCode),
+            (
+                "Contents/Resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node",
+                Scope::Dependency,
+            ),
+            ("Contents/Resources/app/node_modules/a/node_modules/b/b.node", Scope::Dependency),
+            (
+                "Contents/Frameworks/Electron Framework.framework/Resources/node_modules/x/x.node",
+                Scope::Runtime,
+            ),
+            ("Contents/Resources/my_node_modules/x.node", Scope::AppCode),
+            ("Contents/MacOS/node_modules", Scope::AppCode),
+        ] {
+            assert_eq!(binary_scope(&location(path)), scope, "{path}");
+        }
+        assert!(is_privacy_manifest(&location("Contents/Resources/PrivacyInfo.xcprivacy")));
+        assert!(is_privacy_manifest(&location("PrivacyInfo.xcprivacy")));
+        assert!(!is_privacy_manifest(&location("Contents/Resources/privacyinfo.xcprivacy")));
+        assert!(!is_privacy_manifest(&location("PrivacyInfo.xcprivacy/Info.plist")));
+    }
+
     /// The byte budget binds on the open file, whatever size the walk saw.
     /// The oracle is the file's length as written here.
     #[test]
     fn a_file_over_the_budget_when_read_is_set_aside_with_its_size() {
+        let pack = pack(Vec::new());
+        let matchers = Matchers::build(&pack).unwrap();
+        let at = location("Contents/MacOS/Example");
+        let read = |path: &Path, budget| read_file(path, &at, &matchers, budget);
+
         let mut file = tempfile::NamedTempFile::new().unwrap();
         let mut bytes = vec![0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01];
         bytes.resize(100, 0);
@@ -706,19 +1106,41 @@ mod tests {
 
         let whole = Sha256Digest::of(&bytes);
         assert!(matches!(
-            read_file(file.path(), &NoContent, 100),
-            FileResult::Read(pass) if pass.bytes == 100 && pass.sha256 == whole
+            read(file.path(), 100),
+            FileResult::Binary { sha256, bytes: 100, found }
+                if sha256 == whole && found == BinaryFindings::default()
         ));
         for budget in [99, 50, 16] {
             assert!(
-                matches!(read_file(file.path(), &NoContent, budget), FileResult::OverBudget(100)),
+                matches!(read(file.path(), budget), FileResult::OverBudget(100)),
                 "budget {budget}"
             );
         }
         // A file the collector has no reason to read is not over any budget.
         let mut other = tempfile::NamedTempFile::new().unwrap();
         other.write_all(&[b'x'; 100]).unwrap();
-        assert!(matches!(read_file(other.path(), &NoContent, 50), FileResult::NotCandidate));
+        assert!(matches!(read(other.path(), 50), FileResult::NotCandidate));
+
+        // A privacy manifest is read whole, whatever its first bytes are,
+        // and one over the property-list budget is set aside with its size.
+        let manifest = location("Contents/Resources/PrivacyInfo.xcprivacy");
+        let document = b"<plist version=\"1.0\"><dict><key>NSPrivacyTrackingDomains</key>\
+            <array><string>tracker.example.net</string></array></dict></plist>";
+        let mut other = tempfile::NamedTempFile::new().unwrap();
+        other.write_all(document).unwrap();
+        assert!(matches!(
+            read_file(other.path(), &manifest, &matchers, 50),
+            FileResult::Manifest { sha256, bytes, declared: Ok(listed) }
+                if sha256 == Sha256Digest::of(document)
+                    && bytes == document.len() as u64
+                    && listed == ["tracker.example.net"]
+        ));
+        let oversized = privacy_manifest::MAX_BYTES as u64 + 1;
+        other.as_file().set_len(oversized).unwrap();
+        assert!(matches!(
+            read_file(other.path(), &manifest, &matchers, 50),
+            FileResult::OverBudget(size) if size == oversized
+        ));
     }
 
     fn pack(rules: Vec<Rule>) -> Pack {

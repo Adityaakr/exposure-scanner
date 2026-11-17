@@ -13,8 +13,13 @@
 #![cfg_attr(not(test), deny(clippy::indexing_slicing, clippy::arithmetic_side_effects))]
 
 pub mod asar;
+pub mod codesign;
+pub mod host;
 pub mod info_plist;
 pub mod macho;
+#[cfg(any(test, feature = "testkit"))]
+pub mod macho_build;
+pub mod privacy_manifest;
 
 use std::fmt;
 

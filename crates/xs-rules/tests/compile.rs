@@ -284,6 +284,52 @@ fn a_boundary_must_suit_its_matcher() {
     assert_one(&problems, "unknown boundary `regex`");
 }
 
+/// The matcher for hosts a privacy manifest declares: a token is a whole
+/// host or, with the `host` boundary, a parent of one. Nothing is searched
+/// for.
+#[test]
+fn privacy_manifest_takes_exact_and_host_tokens() {
+    let table = r#"
+privacy_manifest = ["eu.i.posthog.com", { lit = "i.posthog.com", at = "host" }]
+"#;
+    let rule = with_match(table);
+    let files = files(&[("sdk/sentry.toml", &rule), ("sdk/sparkle.toml", SPARKLE)]);
+    let layer = compiled(&files).layer;
+    let tokens: Vec<(&str, Boundary)> = layer.rules[0].matchers[&MatcherKind::PrivacyManifest]
+        .iter()
+        .map(|token| (token.lit.as_str(), token.at))
+        .collect();
+    assert_eq!(tokens, [("eu.i.posthog.com", Boundary::Exact), ("i.posthog.com", Boundary::Host)]);
+
+    for refused in ["word", "prefix", "none"] {
+        let table =
+            format!(r#"privacy_manifest = [{{ lit = "i.posthog.com", at = "{refused}" }}]"#);
+        assert_one(
+            &problems_for(&with_match(&table)),
+            &format!("cannot use the `{refused}` boundary"),
+        );
+    }
+}
+
+/// An update feed host is reported as itself and no rule maps it to an SDK
+/// (rules/README.md), so `update_feed` is not a matcher a rule may name.
+#[test]
+fn a_rule_cannot_list_update_feed_tokens() {
+    for table in [
+        r#"update_feed = ["updates.vendor.example"]"#,
+        r#"update_feed = [{ lit = "vendor.example", at = "host" }]"#,
+        r#"update_feed = [{ lit = "updates.vendor.example", at = "exact" }]"#,
+    ] {
+        let table = format!("npm_package = [\"@sentry/electron\"]\n{table}");
+        assert_one(&problems_for(&with_match(&table)), "unknown matcher `update_feed`");
+    }
+    let table = "npm_package = [\"a\", \"b\"]\n[match.min_distinct]\nupdate_feed = 2";
+    assert_one(
+        &problems_for(&with_match(table)),
+        "min_distinct names unknown matcher `update_feed`",
+    );
+}
+
 #[test]
 fn malformed_tokens_and_tables_are_rejected() {
     assert_one(&problems_for(&with_match(r#"npm_package = ["has space"]"#)), "printable ASCII");

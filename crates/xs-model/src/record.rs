@@ -16,6 +16,10 @@
 //!    hardware ids.
 //! 6. Derivation is pure.
 //!
+//! An edge points at an SDK, which a rule of the pack names, or at a host the
+//! app's own files declare, such as its update feed. Only the host is kept
+//! of a declared address, never the address itself.
+//!
 //! Besides edges there are two more kinds. An `artifact` record carries facts
 //! about the subject itself. A `coverage` record says what was skipped or not
 //! recognized, so that "nothing found" is never confused with "not looked at".
@@ -148,7 +152,8 @@ pub enum RecordError {
     BadText(&'static str),
     /// The grade does not belong to the ladder of the edge type.
     GradeOffLadder,
-    /// An edge to an SDK must be produced by the rule of that SDK.
+    /// An edge to an SDK must be produced by the rule of that SDK, and an
+    /// edge to a host by one of the built-in [`declared`] rules.
     ObjectRuleMismatch,
     /// A count of zero says nothing was seen, which is not evidence.
     ZeroCount,
@@ -161,9 +166,10 @@ impl fmt::Display for RecordError {
                 write!(f, "field `{field}` is empty, too long or holds a control character")
             }
             Self::GradeOffLadder => f.write_str("grade does not belong to the edge type's ladder"),
-            Self::ObjectRuleMismatch => {
-                f.write_str("an edge to an SDK must name that SDK's rule as its rule")
-            }
+            Self::ObjectRuleMismatch => f.write_str(
+                "an edge to an SDK must name that SDK's rule as its rule, and an edge to a host \
+                 one of the built-in declaration rules",
+            ),
             Self::ZeroCount => f.write_str("count must be at least 1"),
         }
     }
@@ -337,6 +343,13 @@ impl EdgeRecord {
                 return Err(RecordError::ObjectRuleMismatch);
             }
             ObjectKind::Sdk => {}
+            ObjectKind::Host if !text::is_host(&self.object.id) => {
+                return Err(RecordError::BadText("object.id"));
+            }
+            ObjectKind::Host if declared::category(&self.rule).is_none() => {
+                return Err(RecordError::ObjectRuleMismatch);
+            }
+            ObjectKind::Host => {}
         }
         check_text("proof.token", &self.proof.token, text::MAX_TOKEN_BYTES)?;
         if let Some(example) = &self.proof.example {
@@ -355,7 +368,8 @@ impl EdgeRecord {
 pub struct ObjectRef {
     /// What sort of thing the object is.
     pub kind: ObjectKind,
-    /// Its id, such as `sdk/firebase-crashlytics`.
+    /// Its id: a rule id such as `sdk/firebase-crashlytics` for an SDK, the
+    /// host name such as `updates.example.com` for a host.
     pub id: String,
 }
 
@@ -365,6 +379,9 @@ pub struct ObjectRef {
 pub enum ObjectKind {
     /// A software development kit named by a rule.
     Sdk,
+    /// A host the app's own files declare. Records hold the host only, never
+    /// the address it was taken from.
+    Host,
 }
 
 impl ObjectKind {
@@ -373,6 +390,32 @@ impl ObjectKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Sdk => "sdk",
+            Self::Host => "host",
+        }
+    }
+}
+
+/// The built-in rules behind edges to hosts.
+///
+/// A host the app itself declares is not named by any rule of the pack: the
+/// collector reads it from a fixed key of a property list. The edge names
+/// one of these ids as its rule instead, which says what kind of declaration
+/// it is. They cannot collide with a pack rule, whose id starts with `sdk/`.
+pub mod declared {
+    /// The update feed an app's property list names.
+    pub const UPDATE_FEED: &str = "declared/update-feed";
+    /// A tracking domain a privacy manifest lists.
+    pub const TRACKING_DOMAIN: &str = "declared/tracking-domain";
+
+    /// The category id of the claims a built-in rule supports, or `None` if
+    /// `rule` is not a built-in rule. A rule pack must define these
+    /// categories for such claims to be derived.
+    #[must_use]
+    pub fn category(rule: &str) -> Option<&'static str> {
+        match rule {
+            UPDATE_FEED => Some("update_feed"),
+            TRACKING_DOMAIN => Some("tracking_domain"),
+            _ => None,
         }
     }
 }
@@ -383,7 +426,8 @@ impl ObjectKind {
 pub struct Proof {
     /// The kind of witness.
     pub matcher: MatcherKind,
-    /// The rule token that matched.
+    /// The rule token that matched. For a host the app declares, the key of
+    /// the property list that holds the declaration, such as `SUFeedURL`.
     pub token: String,
     /// How many times it matched in this place.
     pub count: u32,
@@ -414,6 +458,18 @@ pub enum Region {
     /// the number of files the token was found in, and the example is the
     /// path of one of them inside that folder or archive.
     Files,
+    /// The `__objc_classname` section of a Mach-O file: the names of the
+    /// Objective-C classes, categories and protocols it defines.
+    ObjcClassname,
+    /// The load commands of a Mach-O file, which name the libraries it links.
+    LoadCommands,
+    /// The bytes of a Mach-O file outside its executable-code sections.
+    NonCode,
+    /// A section of a Mach-O file that holds script text, such as
+    /// `__BUN,__bun`.
+    EmbeddedScript,
+    /// The values a property list holds under one key.
+    PropertyList,
 }
 
 /// What kind of code a file holds (design report, section 5.2 control 1).
@@ -449,6 +505,9 @@ impl ArtifactRecord {
         if let Some(name) = &self.facts.name {
             check_text("facts.name", name, text::MAX_NAME_BYTES)?;
         }
+        if let Some(team_id) = &self.facts.team_id {
+            check_text("facts.team_id", team_id, text::MAX_TEAM_ID_BYTES)?;
+        }
         Ok(())
     }
 }
@@ -460,6 +519,12 @@ pub struct Facts {
     /// The display name the artifact declares.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The Apple Team ID the code signature of the main executable names.
+    /// It is what the signature claims: the scanner reads it and does not
+    /// verify the signature, so it is a fact about the file and never part
+    /// of the subject's identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_id: Option<String>,
     /// How many files the collector read.
     pub files_scanned: u64,
     /// How many bytes the collector read.
@@ -672,6 +737,54 @@ pub(crate) mod tests {
         assert_eq!(check("/subject/id", json!("")), Err(RecordError::BadText("subject.id")));
     }
 
+    /// An edge to a host the app declares: the object is the host alone and
+    /// the rule is a built-in one.
+    #[test]
+    fn a_declared_host_is_an_edge_with_a_built_in_rule() {
+        let feed = json!({
+            "v": 1, "kind": "edge", "collector": "macos.bundle",
+            "subject": {
+                "kind": "app", "platform": "macos", "id": "com.example.app",
+                "digest": "bd1:8aa0e5bf089ace014976eb8cae42a857ceb0604a7d2f00870419a3f03c588293"
+            },
+            "edge": "channel", "grade": "declares",
+            "object": {"kind": "host", "id": "updates.example.com"},
+            "rule": "declared/update-feed",
+            "proof": {
+                "matcher": "update_feed", "token": "SUFeedURL", "count": 1,
+                "where": "Contents/Info.plist", "region": "property_list", "scope": "app_code"
+            }
+        });
+        let record: Record = serde_json::from_value(feed.clone()).unwrap();
+        record.validate().unwrap();
+        assert_eq!(serde_json::to_value(&record).unwrap(), feed);
+
+        let with = |pointer: &str, value: serde_json::Value| {
+            let mut tree = feed.clone();
+            *tree.pointer_mut(pointer).unwrap() = value;
+            serde_json::from_value::<Record>(tree).unwrap().validate()
+        };
+        // Hosts only: no address, no port, no other spelling of the name.
+        for not_a_host in [
+            "https://updates.example.com/feed.xml",
+            "updates.example.com:443",
+            "Updates.Example.com",
+            "updates.example.com.",
+        ] {
+            assert_eq!(
+                with("/object/id", json!(not_a_host)),
+                Err(RecordError::BadText("object.id"))
+            );
+        }
+        // No pack rule names a host, and no built-in rule names an SDK.
+        assert_eq!(with("/rule", json!("sdk/sparkle")), Err(RecordError::ObjectRuleMismatch));
+        assert_eq!(with("/rule", json!("declared/other")), Err(RecordError::ObjectRuleMismatch));
+        assert_eq!(with("/rule", json!("declared/tracking-domain")), Ok(()));
+        assert_eq!(declared::category(declared::UPDATE_FEED), Some("update_feed"));
+        assert_eq!(declared::category(declared::TRACKING_DOMAIN), Some("tracking_domain"));
+        assert_eq!(declared::category("sdk/sparkle"), None);
+    }
+
     #[test]
     fn grades_order_within_their_ladder() {
         assert!(Grade::Declares < Grade::Contains);
@@ -691,7 +804,10 @@ pub(crate) mod tests {
                 "kind": "app", "platform": "macos", "id": "com.example.app",
                 "digest": "bd1:8aa0e5bf089ace014976eb8cae42a857ceb0604a7d2f00870419a3f03c588293"
             },
-            "facts": {"name": "Example", "files_scanned": 41, "bytes_scanned": 68_219_904}
+            "facts": {
+                "name": "Example", "team_id": "ABCDE12345",
+                "files_scanned": 41, "bytes_scanned": 68_219_904
+            }
         });
         let coverage = json!({
             "v": 1, "kind": "coverage", "collector": "macos.bundle",

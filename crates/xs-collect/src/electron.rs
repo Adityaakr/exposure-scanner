@@ -90,7 +90,7 @@ use xs_model::{MatcherKind, RelPath, Sha256Digest, Sha256Stream, text};
 use crate::read::{self, WINDOW, read_full};
 
 /// The folder npm installs packages into.
-const NODE_MODULES: &str = "node_modules";
+pub(crate) const NODE_MODULES: &str = "node_modules";
 /// The file every npm package has at its top.
 const PACKAGE_JSON: &str = "package.json";
 /// The folder Electron runs when there is no archive.

@@ -16,9 +16,10 @@ use xs_model::record::{
 };
 use xs_model::{EvidenceSet, MatcherKind, Pack, Sha256Digest, SubjectDigest};
 
-/// The first bytes of a 64-bit little-endian Mach-O file, then filler.
+/// The header of a 64-bit little-endian Mach-O file that has no load
+/// commands, then filler.
 fn macho(filler: &[u8]) -> Vec<u8> {
-    let mut bytes = vec![0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01];
+    let mut bytes = xs_formats::macho_build::Binary::new().build();
     bytes.extend_from_slice(filler);
     bytes
 }

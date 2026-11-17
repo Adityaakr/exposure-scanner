@@ -19,6 +19,11 @@
 //! * **Company.** The rule names the entity that operates the SDK; the claim
 //!   names the company at the top of that entity's ownership chain. A rule
 //!   without an entity is a component and yields a claim with no company.
+//! * **Declared hosts.** An edge to a host the app's own files declare, such
+//!   as its update feed, is not the work of a pack rule. Its claim takes the
+//!   category of the kind of declaration and names no company: mapping a
+//!   host to its owner is the resolver's job (task 10), and until then an
+//!   unmapped host is shown as itself and counted nowhere.
 //!
 //! Party (first or third) needs the app's vendor, which arrives with the
 //! resolver in task 10. Until then every claim says `unknown` rather than
@@ -40,7 +45,7 @@ use xs_model::claim::{Claim, ClaimId, ClaimKey, ClaimObject, Confidence, Party};
 use xs_model::matcher::MatcherKind;
 use xs_model::pack::{Pack, Rule};
 use xs_model::record::{
-    EdgeRecord, EdgeType, Grade, ObjectKind, ObjectRef, Record, RecordId, Scope, Subject,
+    EdgeRecord, EdgeType, Grade, ObjectKind, ObjectRef, Record, RecordId, Scope, Subject, declared,
 };
 
 /// Why evidence could not be turned into claims.
@@ -54,6 +59,15 @@ pub enum DeriveError {
         /// The rule id.
         rule: String,
     },
+    /// An edge to a declared host needs a category the pack does not define.
+    /// As with an unknown rule, the evidence and the pack do not belong
+    /// together.
+    UnknownCategory {
+        /// The record that needs the category.
+        record: String,
+        /// The category id.
+        category: String,
+    },
     /// An id could not be computed.
     Canon(CanonError),
 }
@@ -65,6 +79,11 @@ impl fmt::Display for DeriveError {
                 f,
                 "record {record} was produced by rule `{rule}`, which the loaded rule pack does \
                  not contain"
+            ),
+            Self::UnknownCategory { record, category } => write!(
+                f,
+                "record {record} needs the category `{category}`, which the loaded rule pack \
+                 does not define"
             ),
             Self::Canon(error) => write!(f, "cannot compute a claim id: {error}"),
         }
@@ -94,7 +113,8 @@ pub const fn confidence(matcher: MatcherKind, scope: Scope) -> Confidence {
         | MatcherKind::AppleFramework
         | MatcherKind::MachoDylib
         | MatcherKind::MachoObjcClass
-        | MatcherKind::PrivacyManifest => Confidence::High,
+        | MatcherKind::PrivacyManifest
+        | MatcherKind::UpdateFeed => Confidence::High,
         // Literals in a binary's data.
         MatcherKind::DexString | MatcherKind::MachoToken => Confidence::Medium,
         // Literals in script text: medium in the app's own code, low anywhere
@@ -106,12 +126,21 @@ pub const fn confidence(matcher: MatcherKind, scope: Scope) -> Confidence {
     }
 }
 
+/// What stands behind the object of a claim.
+#[derive(Clone, Copy)]
+enum Origin<'a> {
+    /// An SDK, described by its rule.
+    Rule(&'a Rule),
+    /// A host the app declares, with the category id of the declaration.
+    Declared(&'a str),
+}
+
 /// Everything known about one claim while its evidence is gathered.
 struct Group<'a> {
     edge: EdgeType,
     subject: &'a Subject,
     object: &'a ObjectRef,
-    rule: &'a Rule,
+    origin: Origin<'a>,
     rungs: BTreeSet<Grade>,
     matchers: BTreeSet<MatcherKind>,
     confidence: Confidence,
@@ -127,7 +156,8 @@ struct Group<'a> {
 ///
 /// # Errors
 ///
-/// Fails if an edge names a rule that `pack` does not contain.
+/// Fails if an edge names a rule that `pack` does not contain, or is to a
+/// declared host whose category `pack` does not define.
 pub fn derive(evidence: &EvidenceSet, pack: &Pack) -> Result<Vec<Claim>, DeriveError> {
     let mut groups: BTreeMap<ClaimId, Group<'_>> = BTreeMap::new();
 
@@ -135,18 +165,22 @@ pub fn derive(evidence: &EvidenceSet, pack: &Pack) -> Result<Vec<Claim>, DeriveE
     // sorted without further work.
     for (&record_id, record) in evidence {
         let Record::Edge(edge) = record else { continue };
-        let rule = pack.rule(&edge.rule).ok_or_else(|| DeriveError::UnknownRule {
-            record: record_id.to_string(),
-            rule: edge.rule.clone(),
-        })?;
+        let origin = origin(record_id, edge, pack)?;
         let claim_id = ClaimId::of(edge.edge, &edge.subject, &edge.object)?;
         let witness = confidence(edge.proof.matcher, edge.proof.scope);
 
-        let group = groups.entry(claim_id).or_insert_with(|| new_group(edge, rule));
+        let group = groups.entry(claim_id).or_insert_with(|| new_group(edge, origin));
         // Records in one group share a digest. Should they disagree on the
         // rest of the subject, keep the smallest, never the first seen.
         if edge.subject < *group.subject {
             group.subject = &edge.subject;
+        }
+        // One host may be declared in two ways. The claim then takes the
+        // least category id, never that of the first record seen.
+        if let (Origin::Declared(ours), Origin::Declared(theirs)) = (group.origin, origin)
+            && theirs < ours
+        {
+            group.origin = origin;
         }
         group.rungs.insert(edge.grade);
         group.matchers.insert(edge.proof.matcher);
@@ -162,12 +196,34 @@ pub fn derive(evidence: &EvidenceSet, pack: &Pack) -> Result<Vec<Claim>, DeriveE
     Ok(claims)
 }
 
-fn new_group<'a>(edge: &'a EdgeRecord, rule: &'a Rule) -> Group<'a> {
+/// Finds what stands behind the object of `edge`: the pack rule of an SDK,
+/// or the pack category of a declared host.
+fn origin<'a>(
+    record_id: RecordId,
+    edge: &'a EdgeRecord,
+    pack: &'a Pack,
+) -> Result<Origin<'a>, DeriveError> {
+    let unknown_rule =
+        || DeriveError::UnknownRule { record: record_id.to_string(), rule: edge.rule.clone() };
+    match edge.object.kind {
+        ObjectKind::Sdk => pack.rule(&edge.rule).map(Origin::Rule).ok_or_else(unknown_rule),
+        ObjectKind::Host => {
+            let id = declared::category(&edge.rule).ok_or_else(unknown_rule)?;
+            let category = pack.category(id).ok_or_else(|| DeriveError::UnknownCategory {
+                record: record_id.to_string(),
+                category: id.to_string(),
+            })?;
+            Ok(Origin::Declared(category.id.as_str()))
+        }
+    }
+}
+
+fn new_group<'a>(edge: &'a EdgeRecord, origin: Origin<'a>) -> Group<'a> {
     Group {
         edge: edge.edge,
         subject: &edge.subject,
         object: &edge.object,
-        rule,
+        origin,
         rungs: BTreeSet::new(),
         matchers: BTreeSet::new(),
         confidence: Confidence::Low,
@@ -176,12 +232,21 @@ fn new_group<'a>(edge: &'a EdgeRecord, rule: &'a Rule) -> Group<'a> {
 }
 
 fn finish(id: ClaimId, group: Group<'_>, pack: &Pack) -> Result<Claim, DeriveError> {
-    let company = group
-        .rule
-        .entity
-        .as_deref()
-        .and_then(|entity| pack.company_of(entity))
-        .map(|company| company.id.clone());
+    let (name, company, category, notes) = match group.origin {
+        Origin::Rule(rule) => (
+            rule.name.clone(),
+            rule.entity
+                .as_deref()
+                .and_then(|entity| pack.company_of(entity))
+                .map(|company| company.id.clone()),
+            rule.category.clone(),
+            rule.notes.clone(),
+        ),
+        // A host is shown as itself. Nobody is named as its owner here.
+        Origin::Declared(category) => {
+            (group.object.id.clone(), None, category.to_string(), Vec::new())
+        }
+    };
     // Variants are declared in ladder order, so the last rung is the highest.
     // A group is only created for a record, so it always has one.
     let grade = group.rungs.last().copied().unwrap_or(Grade::Declares);
@@ -190,22 +255,16 @@ fn finish(id: ClaimId, group: Group<'_>, pack: &Pack) -> Result<Claim, DeriveErr
         key: ClaimKey::of(group.edge, group.subject, group.object)?,
         edge: group.edge,
         subject: group.subject.clone(),
-        object: ClaimObject {
-            kind: group.object.kind,
-            id: group.object.id.clone(),
-            name: match group.object.kind {
-                ObjectKind::Sdk => group.rule.name.clone(),
-            },
-        },
+        object: ClaimObject { kind: group.object.kind, id: group.object.id.clone(), name },
         company,
-        category: group.rule.category.clone(),
+        category,
         party: Party::Unknown,
         grade,
         rungs: group.rungs.into_iter().collect(),
         confidence: group.confidence,
         witnesses: u32::try_from(group.matchers.len()).unwrap_or(u32::MAX),
         evidence: group.evidence,
-        notes: group.rule.notes.clone(),
+        notes,
     })
 }
 
@@ -257,6 +316,7 @@ mod tests {
                     headline: false,
                 },
                 Category { id: "component".into(), name: "Component".into(), headline: false },
+                Category { id: "update_feed".into(), name: "Update feed".into(), headline: false },
             ],
             entities: vec![
                 Entity {
@@ -460,7 +520,12 @@ mod tests {
                 v: V1,
                 collector: Collector::MacosBundle,
                 subject: subject("com.example.app", 1),
-                facts: Facts { name: Some("Example".into()), files_scanned: 1, bytes_scanned: 1 },
+                facts: Facts {
+                    name: Some("Example".into()),
+                    team_id: None,
+                    files_scanned: 1,
+                    bytes_scanned: 1,
+                },
             }),
             Record::Coverage(CoverageRecord {
                 v: V1,
@@ -507,11 +572,76 @@ mod tests {
         );
     }
 
+    /// An edge to a host the app declares under `rule`.
+    fn host_edge(app: &str, seed: u8, host: &str, rule: &str, matcher: MatcherKind) -> Record {
+        let Record::Edge(mut edge) =
+            edge(subject(app, seed), "sdk/sparkle", Grade::Declares, matcher, Scope::AppCode, 1)
+        else {
+            unreachable!()
+        };
+        edge.object = ObjectRef { kind: ObjectKind::Host, id: host.into() };
+        edge.rule = rule.into();
+        Record::Edge(edge)
+    }
+
+    /// Build plan, task 6: an update feed is reported and graded. Who owns
+    /// the host is not decided here.
+    #[test]
+    fn a_declared_update_feed_is_a_graded_claim_that_names_no_company() {
+        let feed = host_edge(
+            "com.example.app",
+            1,
+            "updates.example.com",
+            declared::UPDATE_FEED,
+            MatcherKind::UpdateFeed,
+        );
+        let evidence = set([feed.clone(), framework_edge("com.example.app", 1, "sdk/sparkle")]);
+        let claims = derive(&evidence, &pack()).unwrap();
+        assert_eq!(claims.len(), 2);
+        // Objects are listed by kind: SDKs, then hosts.
+        assert_eq!(claims[0].object.id, "sdk/sparkle");
+
+        let claim = &claims[1];
+        assert_eq!(claim.object.kind, ObjectKind::Host);
+        assert_eq!(claim.object.id, "updates.example.com");
+        assert_eq!(claim.object.name, "updates.example.com");
+        assert_eq!(claim.edge, EdgeType::Channel);
+        assert_eq!(claim.grade, Grade::Declares);
+        assert_eq!(claim.rungs, [Grade::Declares]);
+        assert_eq!(claim.category, "update_feed");
+        assert_eq!(claim.company, None, "an unmapped host is not accused");
+        assert_eq!(claim.party, Party::Unknown);
+        assert_eq!(claim.confidence, Confidence::High);
+        assert_eq!(claim.witnesses, 1);
+        assert_eq!(claim.evidence, [feed.id().unwrap()]);
+        assert!(claim.notes.is_empty());
+    }
+
+    #[test]
+    fn a_declared_host_needs_its_category_in_the_pack() {
+        // The test pack defines `update_feed` and not `tracking_domain`.
+        let evidence = set([host_edge(
+            "com.example.app",
+            1,
+            "tracker.example.net",
+            declared::TRACKING_DOMAIN,
+            MatcherKind::PrivacyManifest,
+        )]);
+        let error = derive(&evidence, &pack()).unwrap_err();
+        assert!(matches!(
+            &error,
+            DeriveError::UnknownCategory { category, .. } if category == "tracking_domain"
+        ));
+        assert!(error.to_string().contains("tracking_domain"));
+    }
+
     #[test]
     fn the_confidence_table_follows_the_design() {
         use Confidence::{High, Low, Medium};
         assert_eq!(confidence(MatcherKind::AppleFramework, Scope::Dependency), High);
         assert_eq!(confidence(MatcherKind::ManifestComponent, Scope::AppCode), High);
+        assert_eq!(confidence(MatcherKind::UpdateFeed, Scope::AppCode), High);
+        assert_eq!(confidence(MatcherKind::PrivacyManifest, Scope::Dependency), High);
         assert_eq!(confidence(MatcherKind::DexString, Scope::AppCode), Medium);
         assert_eq!(confidence(MatcherKind::MachoToken, Scope::AppCode), Medium);
         assert_eq!(confidence(MatcherKind::ContentLiteral, Scope::AppCode), Medium);
@@ -535,11 +665,22 @@ mod tests {
             Just(Scope::Resource)
         ];
         let rules = prop_oneof![Just("sdk/crashlytics"), Just("sdk/sparkle")];
-        (0u8..3, rules, grades, matchers, scopes, 1u32..4).prop_map(
+        let sdks = (0u8..3, rules, grades, matchers, scopes, 1u32..4).prop_map(
             |(app, rule, grade, matcher, scope, count)| {
                 edge(subject("com.example.app", app), rule, grade, matcher, scope, count)
             },
-        )
+        );
+        let hosts =
+            (0u8..3, prop_oneof![Just("a.example"), Just("b.example")]).prop_map(|(app, host)| {
+                host_edge(
+                    "com.example.app",
+                    app,
+                    host,
+                    declared::UPDATE_FEED,
+                    MatcherKind::UpdateFeed,
+                )
+            });
+        prop_oneof![4 => sdks, 1 => hosts]
     }
 
     proptest! {

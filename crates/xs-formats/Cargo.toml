@@ -13,6 +13,11 @@ plist.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[features]
+# Test support for other crates' tests: a writer of small Mach-O files. Only
+# dev-dependencies enable it, so it is never part of the shipped scanner.
+testkit = []
+
 [dev-dependencies]
 proptest.workspace = true
 

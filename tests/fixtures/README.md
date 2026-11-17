@@ -9,10 +9,15 @@ A synthetic macOS application bundle, the fixture of the walking skeleton
 (build plan, task 4): scanning it must yield exactly one claim, Sentry, from
 the folder name `Contents/Frameworks/Sentry.framework`.
 
-The two "binaries" are a Mach-O magic number followed by a line of text,
-which is all the collector needs to classify and hash them. The framework
-uses the symbolic links Xcode creates, so the fixture also exercises the rule
-that links are never followed.
+The two "binaries" are the 32-byte header of a 64-bit Mach-O file that has no
+load commands, followed by a line of text. That is a well-formed file to the
+collector, which classifies it, reads its (empty) load commands and hashes
+it. The framework uses the symbolic links Xcode creates, so the fixture also
+exercises the rule that links are never followed.
+
+Mach-O files with content, such as class names, linked libraries, a code
+signature or an encrypted part, are not stored either: tests build them in
+memory with `xs_formats::macho_build`.
 
 `macos/Skeleton.report.json` is the report a scan of it must reproduce byte
 for byte.
@@ -45,11 +50,17 @@ must reproduce byte for byte.
 
 ## Real apps
 
+Real apps are pinned here by URL and SHA-256 and read from a cache folder
+outside the repository, named by `EXPOSURE_FIXTURE_CACHE`. The apps are only
+read; nothing in the cache is ever executed. Fetching the whole fixture
+corpus in CI is build plan task 13.
+
+### Electron apps
+
 The Electron collector is measured on three real apps (project spec, spike
-results). They are pinned here by URL and SHA-256 and read from a folder
-outside the repository, named by `EXPOSURE_FIXTURE_CACHE`. The tests in
-`crates/xs-cli/tests/electron.rs` that need them are skipped when that
-variable is not set, and fail when it is set and an app is missing.
+results). The tests in `crates/xs-cli/tests/electron.rs` that need them are
+skipped when the variable is not set, and fail when it is set and an app is
+missing.
 
 | App | Download | SHA-256 of the download | Place in the cache |
 |---|---|---|---|
@@ -66,3 +77,28 @@ scanner only reads the apps; nothing in them is run.
 | Logseq | Sentry and PostHog, both from `js/main.js` in `app.asar`, as `app_code` | Its `package.json` lists `@sentry/react` and `posthog-js`; both are bundled, and neither is among the 280 packages the archive lists |
 | Bitwarden desktop | Nothing | No analytics package among its packages. The archive does hold an analytics snippet, in `node_modules/lunr/index.html`, the demo page of a search library |
 | Obsidian | Nothing | Negative control. It ships two archives, `app.asar` and `obsidian.asar` |
+
+### macOS apps
+
+`crates/xs-cli/tests/real_apps.rs` checks the macOS collector against three
+of the apps in the spec's spike table. It runs only when
+`EXPOSURE_FIXTURE_CACHE` names the cache folder, and passes without doing
+anything otherwise. The test checks both hashes below before it scans.
+
+| Folder in the cache | Archive | SHA-256 of the archive |
+|---|---|---|
+| `alttab-11.10.2/` | <https://github.com/lwouis/alt-tab-macos/releases/download/v11.10.2/AltTab-11.10.2.zip> | `5a2a821a83be1092df0f63d2403359ef2f7d52ad39cec36d930e4c7554cc045b` |
+| `netnewswire-7.2.1/` | <https://github.com/Ranchero-Software/NetNewsWire/releases/download/mac-7.2.1/NetNewsWire7.2.1.zip> | `9459896e516ac6c34685b38111dc456a3d1a4e49c964e40bc8f8af8fdc3b17db` |
+| `maccy-2.8.0/` | <https://github.com/p0deje/Maccy/releases/download/2.8.0/Maccy.app.zip> | `e684e1ce0c60d7cffd3a2b182dc37bd7e88c29967a64a431a2c71be65b1d27e0` |
+
+Each folder holds the archive as downloaded and, in `app/`, the bundle
+unpacked from it:
+
+```console
+$ cache=~/Library/Caches/exposure-fixtures
+$ mkdir -p "$cache/alttab-11.10.2" && cd "$cache/alttab-11.10.2"
+$ curl --fail --location --remote-name https://github.com/lwouis/alt-tab-macos/releases/download/v11.10.2/AltTab-11.10.2.zip
+$ shasum -a 256 AltTab-11.10.2.zip          # compare with the table
+$ unzip -q AltTab-11.10.2.zip -d app        # gives app/AltTab.app
+$ EXPOSURE_FIXTURE_CACHE="$cache" cargo test --package exposure --test real_apps
+```

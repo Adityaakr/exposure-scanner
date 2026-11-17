@@ -60,6 +60,31 @@ digit: one that starts or ends with a dot cannot sit on a hostname boundary.
 two different `macho_token` tokens of the rule must hit in one file before
 any of them counts.
 
+## What the macOS matchers are given
+
+A token is matched against values the collector takes from a bundle. Write
+the token as that value is stored:
+
+| Matcher | The value | Example token |
+|---|---|---|
+| `apple_framework` | The name of a folder directly under `Contents/Frameworks` | `Sentry.framework` |
+| `macho_dylib` | One path component of the install name of a library a Mach-O file links. A token therefore names the framework folder or the library file, not where it is installed: `Sentry.framework` hits `@rpath/Sentry.framework/Versions/A/Sentry`. The proof shows the whole install name when it is relative to the bundle (`@rpath/`, `@executable_path/`, `@loader_path/`), and otherwise only the part from the matched component on, so no path of the machine that built the binary is stored | `Sentry.framework` |
+| `macho_objc_class` | One name of the `__objc_classname` section: an Objective-C class, category or protocol the file defines. Swift classes are not listed there under their plain names | `MSACAppCenter` |
+| `macho_token` | Searched for in the bytes of a Mach-O file outside its sections of instructions and outside an encrypted part. Not searched for in a runtime, such as a browser engine | `{ lit = "…", at = "host" }` |
+| `content_literal` | Besides script files: searched for in a section that holds script text, such as `__BUN,__bun` | `{ lit = "sentry.javascript.", at = "word" }` |
+| `privacy_manifest` | A host listed under `NSPrivacyTrackingDomains` in a `PrivacyInfo.xcprivacy` file, in lowercase, without scheme, port or trailing dot | `{ lit = "i.posthog.com", at = "host" }` |
+
+A `privacy_manifest` hit is a declaration: it is graded `declares`, not
+`contains`. An entry written as an address rather than a bare domain is not
+matched; it is reported as not understood.
+
+Every declared host is also reported as itself, with or without a rule: a
+tracking domain under the category `tracking_domain`, and the host of the
+update feed (`SUFeedURL` in `Contents/Info.plist`) under `update_feed`. Those
+two categories are for declared hosts; a rule does not use them. The update
+feed is reported only that way: `update_feed` is the kind of that proof, not a
+matcher a rule may list, and the compiler refuses a rule that does.
+
 ## What the compiler refuses
 
 These lints exist because of failures seen on real apps (design report,

@@ -14,6 +14,11 @@
 //!   bytes around a literal that its boundary rule looks at. The matcher is
 //!   also told which window is the last. With both, the result does not
 //!   depend on where windows fall.
+//!
+//! A file that is searched as one stream goes through [`one_pass`]. A file
+//! with structure, where which bytes are searched for what depends on what
+//! the file says about itself, goes through [`pass`] with a [`Sink`] that
+//! keeps state from window to window.
 
 use std::io::{self, Read};
 
@@ -38,10 +43,51 @@ pub struct OnePass {
     pub hits: HitAcc,
 }
 
+/// What the windows of one file are fed to.
+///
+/// The contract is that of [`ContentMatcher`], for a receiver that keeps
+/// state: [`window`](Self::window) is called once per window, in order. Each
+/// window after the first starts with a copy of the last
+/// [`overlap`](Self::overlap) bytes read so far, or of all of them if the
+/// file has been shorter than that; those repeated bytes are the `carry`.
+/// Exactly one call has `last` set, the final one, and its window may hold
+/// nothing but the carry.
+pub trait Sink {
+    /// How many bytes of each window are repeated at the start of the next.
+    /// It is asked once, before the first window.
+    fn overlap(&self) -> usize;
+
+    /// Takes one window, whose first `carry` bytes repeat the end of what
+    /// was read before.
+    fn window(&mut self, view: &[u8], carry: usize, last: bool);
+}
+
+/// A [`Sink`] that searches the whole file as one stream.
+struct Search<'m, M: ?Sized> {
+    matcher: &'m M,
+    hits: HitAcc,
+}
+
+impl<M: ContentMatcher + ?Sized> Sink for Search<'_, M> {
+    fn overlap(&self) -> usize {
+        self.matcher.overlap()
+    }
+
+    fn window(&mut self, view: &[u8], carry: usize, last: bool) {
+        self.matcher.scan(view, carry, last, &mut self.hits);
+    }
+}
+
 /// The buffer size [`one_pass`] needs for a given matcher and window.
 #[must_use]
 pub fn buffer_len<M: ContentMatcher + ?Sized>(matcher: &M, window: usize) -> usize {
-    matcher.overlap().saturating_add(window.max(HEAD))
+    buffer_len_for(matcher.overlap(), window)
+}
+
+/// The buffer size [`pass`] needs for a sink with this overlap and window.
+#[must_use]
+pub fn buffer_len_for(overlap: usize, window: usize) -> usize {
+    overlap.saturating_add(window.max(HEAD))
 }
 
 /// Reads until `buf` is full or the stream ends. A short count means the end
@@ -80,8 +126,32 @@ pub fn one_pass<M: ContentMatcher + ?Sized>(
     matcher: &M,
     wanted: impl FnOnce(&[u8]) -> bool,
 ) -> io::Result<Option<OnePass>> {
+    let mut search = Search { matcher, hits: HitAcc::new() };
+    let hashed = pass(reader, buf, window, &mut search, wanted)?;
+    Ok(hashed.map(|(sha256, bytes)| OnePass { sha256, bytes, hits: search.hits }))
+}
+
+/// Hashes a stream in one pass and feeds its windows to `sink`.
+///
+/// This is [`one_pass`] for a receiver that keeps state. It returns the
+/// SHA-256 of the whole stream and its length, or `Ok(None)` if `wanted`
+/// turned the stream down after its first [`HEAD`] bytes, in which case
+/// `sink` saw nothing.
+///
+/// `buf` is scratch space of at least [`buffer_len_for`] bytes.
+///
+/// # Errors
+///
+/// Passes on the first read error. `InvalidInput` if `buf` is too small.
+pub fn pass<S: Sink + ?Sized>(
+    reader: &mut impl Read,
+    buf: &mut [u8],
+    window: usize,
+    sink: &mut S,
+    wanted: impl FnOnce(&[u8]) -> bool,
+) -> io::Result<Option<(Sha256Digest, u64)>> {
     let window = window.max(HEAD);
-    let overlap = matcher.overlap();
+    let overlap = sink.overlap();
     if buf.len() < overlap.saturating_add(window) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "scratch buffer is too small"));
     }
@@ -98,7 +168,6 @@ pub fn one_pass<M: ContentMatcher + ?Sized>(
     }
 
     let mut hasher = Sha256Stream::new();
-    let mut hits = HitAcc::new();
     let mut bytes: u64 = 0;
     let mut carry = 0;
     loop {
@@ -113,7 +182,7 @@ pub fn one_pass<M: ContentMatcher + ?Sized>(
         // nothing; its last window then holds the carry alone, and the
         // matcher still has to see it to judge what ended at that edge.
         let last = got < window;
-        matcher.scan(view, carry, last, &mut hits);
+        sink.window(view, carry, last);
         if last {
             break;
         }
@@ -122,7 +191,7 @@ pub fn one_pass<M: ContentMatcher + ?Sized>(
         carry = keep;
         got = read_full(reader, buf.get_mut(carry..carry + window).unwrap_or_default())?;
     }
-    Ok(Some(OnePass { sha256: hasher.finish(), bytes, hits }))
+    Ok(Some((hasher.finish(), bytes)))
 }
 
 #[cfg(test)]
