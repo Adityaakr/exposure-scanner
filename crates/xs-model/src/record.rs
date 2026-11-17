@@ -243,6 +243,9 @@ pub enum Collector {
     /// A macOS application bundle.
     #[serde(rename = "macos.bundle")]
     MacosBundle,
+    /// The code of an Electron app: its asar archives and loose scripts.
+    #[serde(rename = "electron.app")]
+    ElectronApp,
 }
 
 /// The two kinds of link a subject can have.
@@ -405,6 +408,12 @@ pub enum Region {
     ClassDefs,
     /// The names of the entries of a directory.
     DirEntries,
+    /// The file table in the header of an asar archive.
+    AsarHeader,
+    /// The content of the files a folder or an archive holds. The count is
+    /// the number of files the token was found in, and the example is the
+    /// path of one of them inside that folder or archive.
+    Files,
 }
 
 /// What kind of code a file holds (design report, section 5.2 control 1).

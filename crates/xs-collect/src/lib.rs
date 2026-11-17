@@ -8,6 +8,10 @@
 //!             reads)
 //! ```
 //!
+//! One collector walks a macOS application bundle ([`macos`]). Inside a
+//! bundle, the code of an Electron app (asar archives and loose scripts) is
+//! read by a part of its own.
+//!
 //! Everything here is read-only. Nothing is extracted, executed or written,
 //! and symbolic links inside an artifact are never followed, so a hostile
 //! bundle cannot point the scanner at files outside itself.
@@ -20,6 +24,7 @@
 //! where the artifact sits on disk is not recorded anywhere.
 
 pub mod discover;
+mod electron;
 pub mod macos;
 pub mod read;
 pub mod schedule;

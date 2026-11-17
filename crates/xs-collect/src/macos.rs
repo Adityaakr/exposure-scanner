@@ -8,6 +8,9 @@
 //!   rule pack's `apple_framework` tokens.
 //! * Every Mach-O file in the bundle is hashed in one pass, so that two
 //!   builds which share an app id and version are still two subjects.
+//! * The code of an Electron app, its asar archives and loose scripts, is
+//!   read by the `electron` module (build plan, task 7), which says what it
+//!   draws from them. Its findings are records about the same bundle.
 //!
 //! Every limit is a fixed budget, so a hostile bundle costs a bounded amount
 //! of work and memory and gives the same result on every run: [`MAX_DEPTH`]
@@ -43,6 +46,7 @@ use xs_model::record::{
 use xs_model::{MatcherKind, RelPath, Sha256Digest, canon, text};
 
 use crate::ScanStats;
+use crate::electron;
 use crate::read::{self, OnePass, WINDOW};
 use crate::schedule::Pool;
 
@@ -61,9 +65,10 @@ pub const MAX_ENTRIES: usize = 1_000_000;
 /// status and reason that names no place and counts them.
 pub const MAX_LOCATED_GAPS: usize = 1000;
 /// Largest file the collector reads: 2 GiB. The budget applies to the files
-/// it would read, those whose first bytes say Mach-O. A larger one is not
-/// read past those first bytes; it is reported with its size, and the bundle
-/// digest covers that size instead of a content hash. A file the collector
+/// it would read: those whose first bytes say Mach-O, and the archives and
+/// loose scripts of an Electron app. A larger one is not read past its first
+/// bytes; it is reported with its size, and the bundle digest covers that
+/// size instead of a content hash. A file the collector
 /// has no reason to read is ignored whatever its size. The largest file seen
 /// in a real app was 485 MB.
 pub const MAX_FILE_BYTES: u64 = 2 << 30;
@@ -95,13 +100,25 @@ impl Gaps {
         location: Option<RelPath>,
         bytes: Option<u64>,
     ) {
+        self.add_many(status, reason, location, bytes, 1);
+    }
+
+    /// Adds a gap that stands for `items` things at one place.
+    fn add_many(
+        &mut self,
+        status: CoverageStatus,
+        reason: CoverageReason,
+        location: Option<RelPath>,
+        bytes: Option<u64>,
+        items: u32,
+    ) {
         let mut fold = |status, reason, count: u32| {
             let total = self.unlocated.entry((status, reason)).or_insert(0);
             *total = total.saturating_add(count);
         };
-        let Some(path) = location else { return fold(status, reason, 1) };
+        let Some(path) = location else { return fold(status, reason, items) };
         let count = self.located.entry((path, status, reason, bytes)).or_insert(0);
-        *count = count.saturating_add(1);
+        *count = count.saturating_add(items);
         if self.located.len() > MAX_LOCATED_GAPS
             && let Some(((_, status, reason, _), count)) = self.located.pop_last()
         {
@@ -165,6 +182,8 @@ enum FileResult {
     NotCandidate,
     /// Read to the end.
     Read(OnePass),
+    /// An asar archive, read to the end and searched.
+    Archive(electron::ArchiveScan),
     /// A file the collector reads, but larger than the byte budget: its size.
     OverBudget(u64),
     /// The file system refused.
@@ -200,16 +219,10 @@ pub fn collect(
         b.size.cmp(&a.size).then(a.bundle.cmp(&b.bundle)).then(a.file.cmp(&b.file))
     });
 
-    // Which bytes of a Mach-O file are searched for which tokens is decided
-    // by the section table, which task 6 reads. Until then the pass hashes
-    // only.
-    let content = NoContent;
     let results: Vec<FileResult> = pool.map(&jobs, |job| {
         let found = plans.get(job.bundle).and_then(|plan| Some((plan, plan.files.get(job.file)?)));
         match found {
-            Some((plan, (path, _))) => {
-                read_file(&plan.root.join(path.as_str()), &content, MAX_FILE_BYTES)
-            }
+            Some((plan, (path, _))) => read_listed(&plan.root, path, matchers),
             None => FileResult::Failed,
         }
     });
@@ -449,6 +462,30 @@ thread_local! {
     static SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Reads one file the walk listed, the way its place in the bundle calls
+/// for: an asar archive and a loose script of an Electron app by their path
+/// (see [`electron`]), anything else by its first bytes.
+fn read_listed(root: &Path, path: &RelPath, matchers: &Matchers<'_>) -> FileResult {
+    let file = root.join(path.as_str());
+    match electron::classify(path.as_str()) {
+        electron::FileKind::Archive { dependency } => {
+            match electron::read_archive(&file, dependency, matchers, MAX_FILE_BYTES) {
+                electron::ArchiveRead::Scanned(scan) => FileResult::Archive(scan),
+                electron::ArchiveRead::OverBudget(bytes) => FileResult::OverBudget(bytes),
+                electron::ArchiveRead::Failed => FileResult::Failed,
+            }
+        }
+        electron::FileKind::Script { scope, .. } => {
+            let content = matchers.content(MatcherKind::ContentLiteral, scope);
+            read_matching(&file, content, MAX_FILE_BYTES, |_| true)
+        }
+        // Which bytes of a Mach-O file are searched for which tokens is
+        // decided by the section table, which task 6 reads. Until then the
+        // pass hashes only.
+        electron::FileKind::Other => read_file(&file, &NoContent, MAX_FILE_BYTES),
+    }
+}
+
 /// Reads one file in a single pass if its first bytes say it is a Mach-O
 /// file, and gives up after one small read otherwise.
 ///
@@ -456,6 +493,17 @@ thread_local! {
 /// read. One that grows while it is being read stops one byte past `budget`
 /// and is reported the same way, so the read is bounded in every case.
 fn read_file<M: ContentMatcher + ?Sized>(path: &Path, content: &M, budget: u64) -> FileResult {
+    read_matching(path, content, budget, |head| macho::sniff(head).is_some())
+}
+
+/// Reads one file in a single pass if `candidate` says so of its first
+/// bytes, within `budget` as [`read_file`] describes.
+fn read_matching<M: ContentMatcher + ?Sized>(
+    path: &Path,
+    content: &M,
+    budget: u64,
+    candidate: impl Fn(&[u8]) -> bool,
+) -> FileResult {
     let Ok(file) = File::open(path) else { return FileResult::Failed };
     let mut bounded = (&file).take(budget.saturating_add(1));
     SCRATCH.with_borrow_mut(|buf| {
@@ -465,7 +513,7 @@ fn read_file<M: ContentMatcher + ?Sized>(path: &Path, content: &M, budget: u64) 
         }
         let mut oversize = None;
         let wanted = |head: &[u8]| {
-            if macho::sniff(head).is_none() {
+            if !candidate(head) {
                 return false;
             }
             match file.metadata() {
@@ -494,6 +542,11 @@ fn finish(
     results: Vec<(usize, FileResult)>,
     matchers: &Matchers<'_>,
 ) -> (Vec<Record>, u64, u64) {
+    // The code of an Electron app: its archives and loose scripts.
+    let mut code = electron::Roots::default();
+    for (path, _) in &plan.files {
+        code.listed(path, matchers);
+    }
     for (file, result) in results {
         let Some((path, _)) = plan.files.get(file) else { continue };
         match result {
@@ -502,6 +555,13 @@ fn finish(
                 plan.manifest.file(path.clone(), pass.sha256);
                 plan.files_read += 1;
                 plan.bytes_read += pass.bytes;
+                code.script(path, &pass.hits, matchers);
+            }
+            FileResult::Archive(scan) => {
+                plan.manifest.file(path.clone(), scan.sha256);
+                plan.files_read += 1;
+                plan.bytes_read += scan.bytes;
+                code.archive(path, scan);
             }
             FileResult::OverBudget(bytes) => {
                 let path = path.clone();
@@ -509,6 +569,12 @@ fn finish(
             }
             FileResult::Failed => plan.gaps.skipped(CoverageReason::Unreadable, Some(path.clone())),
         }
+    }
+    // Before the digest is taken: the listings evidence is drawn from enter
+    // the manifest here.
+    let (code_edges, code_gaps) = code.finish(matchers, &mut plan.manifest);
+    for (location, status, reason, items) in code_gaps {
+        plan.gaps.add_many(status, reason, location, None, items);
     }
 
     // A value the property list declares but leaves empty is no value, so
@@ -580,6 +646,19 @@ fn finish(
                 },
             }));
         }
+    }
+
+    for found in code_edges {
+        records.push(Record::Edge(EdgeRecord {
+            v: V1,
+            collector: Collector::ElectronApp,
+            subject: subject.clone(),
+            edge: EdgeType::Channel,
+            grade: found.proof.matcher.grade(),
+            object: ObjectRef { kind: ObjectKind::Sdk, id: found.rule.clone() },
+            rule: found.rule,
+            proof: found.proof,
+        }));
     }
 
     let located =

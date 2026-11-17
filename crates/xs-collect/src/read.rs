@@ -46,7 +46,7 @@ pub fn buffer_len<M: ContentMatcher + ?Sized>(matcher: &M, window: usize) -> usi
 
 /// Reads until `buf` is full or the stream ends. A short count means the end
 /// of the stream was reached.
-fn read_full(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
+pub(crate) fn read_full(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while let Some(rest) = buf.get_mut(filled..).filter(|rest| !rest.is_empty()) {
         match reader.read(rest) {
