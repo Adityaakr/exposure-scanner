@@ -818,10 +818,9 @@ mod tests {
         layer.rules.sort_by(|a, b| a.id.cmp(&b.id));
         let pack = Pack::new(layers).unwrap();
 
-        for (app, domain) in [
-            ("com.github.alice.tool", "github.com"),
-            ("io.github.alice.tool", "alice.github.io"),
-        ] {
+        for (app, domain) in
+            [("com.github.alice.tool", "github.com"), ("io.github.alice.tool", "alice.github.io")]
+        {
             let records = [
                 artifact(app, 1, None),
                 framework_edge(app, 1, "sdk/appcenter"),

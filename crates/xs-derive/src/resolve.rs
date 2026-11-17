@@ -136,11 +136,7 @@ pub(crate) fn vendor(
 
 /// Whether `company`, the company behind `object`, is the app's vendor. See
 /// the module documentation for the rules.
-pub(crate) fn party(
-    company: Option<&str>,
-    object: &ObjectRef,
-    vendor: Option<&Vendor>,
-) -> Party {
+pub(crate) fn party(company: Option<&str>, object: &ObjectRef, vendor: Option<&Vendor>) -> Party {
     let Some(vendor) = vendor else { return Party::Unknown };
     match (company, vendor.company.as_deref()) {
         (Some(company), Some(own)) if company == own => Party::First,
