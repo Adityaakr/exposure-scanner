@@ -28,6 +28,7 @@
 //! the rule pack, which describe channels.
 
 use crate::matcher::MatcherKind;
+use crate::text;
 
 /// One thing on a device that an app can ask to reach.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,13 +466,41 @@ pub fn declared(matcher: MatcherKind, key: &str) -> Option<&'static Permission> 
         Some((_, id)) => id,
         None if matcher == MatcherKind::AndroidPermission
             && key.len() > ANDROID_HEALTH_PREFIX.len()
-            && key.starts_with(ANDROID_HEALTH_PREFIX) =>
+            && key.starts_with(ANDROID_HEALTH_PREFIX)
+            && text::is_clean(key, text::MAX_TOKEN_BYTES) =>
         {
             "health"
         }
         None => return None,
     };
     permission(id)
+}
+
+/// The Android release of each API level, as Android's own table of API
+/// levels names it: index `n` is API level `n + 1`.
+const ANDROID_RELEASES: [&str; 36] = [
+    "1.0", "1.1", "1.5", "1.6", "2.0", "2.0.1", "2.1", "2.2", "2.3", "2.3.3", "3.0", "3.1", "3.2",
+    "4.0", "4.0.3", "4.1", "4.2", "4.3", "4.4", "4.4W", "5.0", "5.1", "6.0", "7.0", "7.1", "8.0",
+    "8.1", "9", "10", "11", "12", "12L", "13", "14", "15", "16",
+];
+
+/// The Android release of API level `level`, such as `9` for 28. `None`
+/// for a level this build does not know.
+#[must_use]
+pub fn android_release(level: u32) -> Option<&'static str> {
+    let index = usize::try_from(level.checked_sub(1)?).ok()?;
+    ANDROID_RELEASES.get(index).copied()
+}
+
+/// The note on an access claim whose every Android permission stops at API
+/// level `level` (`android:maxSdkVersion`): the devices the access is
+/// limited to, such as `only on Android 9 and older (API level 28)`.
+#[must_use]
+pub fn android_limit_note(level: u32) -> alloc::string::String {
+    match android_release(level) {
+        Some(release) => alloc::format!("only on Android {release} and older (API level {level})"),
+        None => alloc::format!("only up to Android API level {level}"),
+    }
 }
 
 #[cfg(test)]
@@ -481,7 +510,6 @@ mod tests {
 
     use super::*;
     use crate::pack::is_category_id;
-    use crate::text;
 
     const DECLARATIONS: [MatcherKind; 3] =
         [MatcherKind::UsageDescription, MatcherKind::Entitlement, MatcherKind::AndroidPermission];
@@ -558,6 +586,10 @@ mod tests {
         assert_eq!(android("android.permission.health.WRITE_SLEEP"), health);
         assert_eq!(android("android.permission.health."), None);
         assert_eq!(android("android.permission.healthy"), None);
+        let long = alloc::format!("android.permission.health.{}", "A".repeat(300));
+        assert_eq!(android(&long), None);
+        assert_eq!(android("android.permission.health.READ\u{1b}[31m"), None);
+        assert_eq!(android("android.permission.health.READ\u{202e}SPETS"), None);
         assert_eq!(
             declared(MatcherKind::Entitlement, "android.permission.health.READ_STEPS"),
             None
@@ -566,6 +598,25 @@ mod tests {
 
     /// The sandbox is a fact about the app and no permission, and posting
     /// notifications reaches nothing of the user's.
+    /// The oracle is Android's published table of API levels
+    /// (developer.android.com, "API levels").
+    #[test]
+    fn api_levels_name_the_android_release() {
+        assert_eq!(android_release(0), None);
+        assert_eq!(android_release(1), Some("1.0"));
+        assert_eq!(android_release(20), Some("4.4W"));
+        assert_eq!(android_release(23), Some("6.0"));
+        assert_eq!(android_release(28), Some("9"));
+        assert_eq!(android_release(29), Some("10"));
+        assert_eq!(android_release(32), Some("12L"));
+        assert_eq!(android_release(33), Some("13"));
+        assert_eq!(android_release(36), Some("16"));
+        assert_eq!(android_release(37), None);
+        assert_eq!(android_limit_note(28), "only on Android 9 and older (API level 28)");
+        assert_eq!(android_limit_note(99), "only up to Android API level 99");
+        assert!(text::is_clean(&android_limit_note(u32::MAX), text::MAX_NAME_BYTES));
+    }
+
     #[test]
     fn what_is_no_permission_is_not_in_the_table() {
         assert_eq!(declared(MatcherKind::Entitlement, SANDBOX_ENTITLEMENT), None);

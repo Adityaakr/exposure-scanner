@@ -174,6 +174,9 @@ pub enum RecordError {
     ObjectOffEdge,
     /// A count of zero says nothing was seen, which is not evidence.
     ZeroCount,
+    /// A highest API level is only part of an Android permission, and is at
+    /// least 1.
+    BadMaxSdk,
     /// The record draws on the content of an artifact that was not read.
     /// About such a subject there can only be a `coverage` record that says
     /// it was skipped.
@@ -197,6 +200,9 @@ impl fmt::Display for RecordError {
                  a channel edge points at an SDK or a host and rests on any other witness",
             ),
             Self::ZeroCount => f.write_str("count must be at least 1"),
+            Self::BadMaxSdk => f.write_str(
+                "a highest API level belongs to an Android permission only and is at least 1",
+            ),
             Self::UnreadSubject => f.write_str(
                 "the subject was not read, so the only record about it is a coverage record \
                  that says it was skipped",
@@ -411,6 +417,11 @@ impl EdgeRecord {
         if self.proof.count == 0 {
             return Err(RecordError::ZeroCount);
         }
+        if let Some(level) = self.proof.max_sdk
+            && (level == 0 || self.proof.matcher != MatcherKind::AndroidPermission)
+        {
+            return Err(RecordError::BadMaxSdk);
+        }
         Ok(())
     }
 }
@@ -511,6 +522,11 @@ pub struct Proof {
     pub region: Region,
     /// What kind of code the file is. Confidence depends on it.
     pub scope: Scope,
+    /// For an Android permission, the `android:maxSdkVersion` the manifest
+    /// gives it: the highest API level on which the app asks for it. Absent
+    /// when the app asks on every level, and for every other witness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_sdk: Option<u32>,
 }
 
 /// The table or section a hit was found in.
@@ -927,6 +943,28 @@ pub(crate) mod tests {
                 ("/proof/region", json!("permissions")),
             ]),
             Ok(())
+        );
+        // A highest API level is part of an Android permission only.
+        let limited = |matcher: &str, token: &str, rule: &str, level: u32| {
+            let mut tree = camera.clone();
+            tree["rule"] = json!(rule);
+            tree["proof"]["matcher"] = json!(matcher);
+            tree["proof"]["token"] = json!(token);
+            tree["proof"]["max_sdk"] = json!(level);
+            serde_json::from_value::<Record>(tree).unwrap().validate()
+        };
+        let android =
+            ("android_permission", "android.permission.CAMERA", "access/android-permission");
+        assert_eq!(limited(android.0, android.1, android.2, 28), Ok(()));
+        assert_eq!(limited(android.0, android.1, android.2, 0), Err(RecordError::BadMaxSdk));
+        assert_eq!(
+            limited(
+                "usage_description",
+                "NSCameraUsageDescription",
+                "access/usage-description",
+                28
+            ),
+            Err(RecordError::BadMaxSdk)
         );
         // The key must ask for the permission the edge points at, and the
         // rule must be the one of the place the key was read from.

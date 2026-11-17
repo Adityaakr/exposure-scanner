@@ -753,6 +753,7 @@ fn records(
                 location: location.clone(),
                 region,
                 scope: SCOPE,
+                max_sdk: None,
             },
         }));
     };
@@ -805,10 +806,18 @@ fn records(
 
     // What the app asks for: the permissions of its manifest that reach the
     // user's data or devices, each name once. The others are no finding and
-    // no gap: most of what a manifest asks for is plumbing.
+    // no gap: most of what a manifest asks for is plumbing. A name asked for
+    // twice is limited only if both ask up to an API level, and then up to
+    // the higher one.
     if let Some((location, parsed)) = &manifest {
-        let asked: BTreeSet<&str> = parsed.permissions.iter().map(String::as_str).collect();
-        records.extend(asked.into_iter().filter_map(|key| {
+        let mut asked: BTreeMap<&str, Option<u32>> = BTreeMap::new();
+        for permission in &parsed.permissions {
+            asked
+                .entry(permission.name.as_str())
+                .and_modify(|limit| *limit = limit.zip(permission.max_sdk).map(|(a, b)| a.max(b)))
+                .or_insert(permission.max_sdk);
+        }
+        records.extend(asked.into_iter().filter_map(|(key, max_sdk)| {
             Asked {
                 collector: Collector::AndroidManifest,
                 matcher: MatcherKind::AndroidPermission,
@@ -817,6 +826,7 @@ fn records(
                 purpose: None,
                 location,
                 region: Region::Permissions,
+                max_sdk,
             }
             .edge(&subject)
         }));

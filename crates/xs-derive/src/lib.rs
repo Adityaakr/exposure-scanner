@@ -32,7 +32,9 @@
 //!   number. Asking in two places, a usage description and an entitlement,
 //!   is two witnesses of one claim. The two ladders are never joined here:
 //!   that an app may access the camera and ships an analytics SDK does not
-//!   say the SDK receives pictures.
+//!   say the SDK receives pictures. When every Android permission behind
+//!   the claim stops at an API level (`android:maxSdkVersion`), a note says
+//!   which devices the access is limited to.
 //! * **Vendor and party.** Who publishes the app is read from its signature
 //!   first and its app id second, and the claim says whether the company is
 //!   that vendor: first party, third party, or unknown. The rules are
@@ -171,6 +173,9 @@ struct Group<'a> {
     matchers: BTreeSet<MatcherKind>,
     confidence: Confidence,
     evidence: Vec<RecordId>,
+    /// The highest API level any witness asks on, or `None` once one asks on
+    /// every level.
+    max_sdk: Option<u32>,
 }
 
 /// Derives the claims that `evidence` supports under `pack`.
@@ -227,6 +232,7 @@ pub fn derive(evidence: &EvidenceSet, pack: &Pack) -> Result<Vec<Claim>, DeriveE
         group.matchers.insert(edge.proof.matcher);
         group.confidence = group.confidence.max(witness);
         group.evidence.push(record_id);
+        group.max_sdk = group.max_sdk.zip(edge.proof.max_sdk).map(|(a, b)| a.max(b));
     }
 
     let mut claims = Vec::with_capacity(groups.len());
@@ -275,6 +281,7 @@ fn new_group<'a>(edge: &'a EdgeRecord, origin: Origin<'a>) -> Group<'a> {
         matchers: BTreeSet::new(),
         confidence: Confidence::Low,
         evidence: Vec::new(),
+        max_sdk: edge.proof.max_sdk,
     }
 }
 
@@ -303,10 +310,14 @@ fn finish(
             Vec::new(),
         ),
         // A permission is the platform's, not a company's: the claim says
-        // what the app may reach and names nobody as receiving it.
-        Origin::Permission(permission) => {
-            (permission.name.to_string(), None, permission.category, Vec::new())
-        }
+        // what the app may reach and names nobody as receiving it, and on
+        // which devices when every witness stops at an API level.
+        Origin::Permission(permission) => (
+            permission.name.to_string(),
+            None,
+            permission.category,
+            group.max_sdk.map(access::android_limit_note).into_iter().collect(),
+        ),
     };
     let headline = group.edge == EdgeType::Channel
         && company.is_some()
@@ -468,6 +479,7 @@ mod tests {
                 location: RelPath::new("Contents/Frameworks").unwrap(),
                 region: Region::DirEntries,
                 scope,
+                max_sdk: None,
             },
         })
     }

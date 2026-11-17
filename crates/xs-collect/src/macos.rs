@@ -670,6 +670,7 @@ fn sdk_edge(
             location: location.clone(),
             region,
             scope,
+            max_sdk: None,
         },
     })
 }
@@ -712,6 +713,7 @@ impl Declaration<'_> {
                     location: self.location.clone(),
                     region: Region::PropertyList,
                     scope: self.scope,
+                    max_sdk: None,
                 },
             }));
         }
@@ -853,6 +855,7 @@ pub(crate) fn finish(
                 purpose: None,
                 location,
                 region: Region::Entitlements,
+                max_sdk: None,
             }
             .edge(&subject)
         }));
@@ -871,6 +874,7 @@ pub(crate) fn finish(
                 purpose: Some(purpose),
                 location: &location,
                 region: Region::PropertyList,
+                max_sdk: None,
             };
             match asked.edge(&subject) {
                 Some(record) => records.push(record),

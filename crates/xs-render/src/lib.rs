@@ -233,6 +233,7 @@ mod tests {
                 location: RelPath::new("Contents/Frameworks").unwrap(),
                 region: Region::DirEntries,
                 scope: Scope::Dependency,
+                max_sdk: None,
             },
         })
     }

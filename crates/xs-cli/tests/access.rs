@@ -219,3 +219,110 @@ fn an_edited_access_edge_is_refused() {
         .unwrap();
     assert!(!output.status.success());
 }
+
+/// A package whose manifest asks for each permission up to the API level
+/// given (`android:maxSdkVersion`, resource id 0x01010271), or on every
+/// level for `None`.
+fn limited_package(parent: &Path, asked: &[(&str, Option<u32>)]) -> PathBuf {
+    let mut manifest =
+        AxmlBuilder::new().start("manifest", &[Attr::plain("package", "org.example.files")]);
+    for &(name, max_sdk) in asked {
+        let mut attributes = vec![Attr::android(ANDROID_NAME, "name", name)];
+        attributes.extend(max_sdk.map(|level| Attr::int(0x0101_0271, "maxSdkVersion", level)));
+        manifest = manifest.start("uses-permission", &attributes).end();
+    }
+    let manifest = manifest.start("application", &[]).end().end().finish();
+    let path = parent.join("files.apk");
+    write(&path, ZipBuilder::new().deflated("AndroidManifest.xml", &manifest).finish());
+    path
+}
+
+/// A permission the manifest asks for only up to an API level is no access
+/// on newer devices, and the claim says which devices it is limited to.
+/// The oracle for the release names is Android's own table of API levels:
+/// 28 is Android 9 and 30 is Android 11. A permission asked for once with a
+/// limit and once without is not limited.
+#[test]
+fn a_permission_limited_to_old_android_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let apk = limited_package(
+        dir.path(),
+        &[
+            ("android.permission.WRITE_EXTERNAL_STORAGE", Some(28)),
+            ("android.permission.CAMERA", Some(28)),
+            ("android.permission.CAMERA", None),
+            ("android.permission.READ_CONTACTS", Some(28)),
+            ("android.permission.WRITE_CONTACTS", Some(30)),
+            ("android.permission.INTERNET", None),
+        ],
+    );
+    let json = exposure(&["scan", text(&apk)]);
+    let report: Report = serde_json::from_str(&json).unwrap();
+    let notes: Vec<(&str, Vec<&str>)> = may_access(&report, Platform::Android)
+        .into_iter()
+        .map(|claim| (claim.object.id.as_str(), claim.notes.iter().map(String::as_str).collect()))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            ("camera", vec![]),
+            ("contacts", vec!["only on Android 11 and older (API level 30)"]),
+            ("network-client", vec![]),
+            ("shared-storage", vec!["only on Android 9 and older (API level 28)"]),
+        ]
+    );
+    // The limit is in the evidence, where it can be checked by hand.
+    let limits: Vec<(&str, Option<u32>)> = report
+        .evidence
+        .iter()
+        .filter_map(|(_, record)| match record {
+            Record::Edge(edge) => Some((edge.proof.token.as_str(), edge.proof.max_sdk)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(limits.len(), 5);
+    assert!(limits.contains(&("android.permission.WRITE_EXTERNAL_STORAGE", Some(28))));
+    assert!(limits.contains(&("android.permission.CAMERA", None)));
+
+    let saved = dir.path().join("report.json");
+    fs::write(&saved, &json).unwrap();
+    assert!(exposure(&["report", text(&saved)]) == json);
+}
+
+/// A manifest may name a health permission no table lists. One whose name
+/// is too long for a record or holds a control or bidirectional character
+/// asks for nothing, and the scan of every other app goes on.
+#[test]
+fn a_hostile_health_permission_does_not_stop_the_scan() {
+    let dir = tempfile::tempdir().unwrap();
+    let long = format!("android.permission.health.{}", "A".repeat(300));
+    let hostile = limited_package(
+        dir.path(),
+        &[
+            (long.as_str(), None),
+            ("android.permission.health.READ\u{1b}[31m", None),
+            ("android.permission.health.READ\u{202e}SPETS", None),
+            ("android.permission.health.READ_STEPS", None),
+        ],
+    );
+    let app = call_app(dir.path());
+    let report: Report =
+        serde_json::from_str(&exposure(&["scan", text(&hostile), text(&app)])).unwrap();
+    let android: Vec<&str> = may_access(&report, Platform::Android)
+        .into_iter()
+        .map(|claim| claim.object.id.as_str())
+        .collect();
+    assert_eq!(android, ["health"]);
+    assert_eq!(may_access(&report, Platform::Macos).len(), 4);
+    let tokens: Vec<&str> = report
+        .evidence
+        .iter()
+        .filter_map(|(_, record)| match record {
+            Record::Edge(edge) if edge.subject.platform == Platform::Android => {
+                Some(edge.proof.token.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tokens, ["android.permission.health.READ_STEPS"]);
+}

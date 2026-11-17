@@ -479,6 +479,48 @@ fn a_package_says_what_it_asks_for_in_its_manifest() {
     assert_eq!(sandbox(&evidence), None);
 }
 
+/// A permission asked for up to an API level carries that level into its
+/// record, and one asked for twice is limited only when both ask with a
+/// limit, then up to the higher one.
+#[test]
+fn a_permission_keeps_the_highest_api_level_it_is_asked_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let max = |level| Attr::int(0x0101_0271, "maxSdkVersion", level);
+    let name = |name| Attr::android(ANDROID_NAME, "name", name);
+    let manifest = AxmlBuilder::new()
+        .start("manifest", &[Attr::plain("package", "org.example.droid")])
+        .start("uses-permission", &[name("android.permission.WRITE_EXTERNAL_STORAGE"), max(28)])
+        .end()
+        .start("uses-permission", &[name("android.permission.CAMERA"), max(28)])
+        .end()
+        .start("uses-permission-sdk-23", &[name("android.permission.CAMERA")])
+        .end()
+        .start("uses-permission", &[name("android.permission.READ_CONTACTS"), max(30)])
+        .end()
+        .start("uses-permission", &[name("android.permission.READ_CONTACTS"), max(26)])
+        .end()
+        .start("application", &[])
+        .end()
+        .end()
+        .finish();
+    let apk = dir.path().join("droid.apk");
+    write(&apk, ZipBuilder::new().deflated("AndroidManifest.xml", &manifest).finish());
+    let evidence = evidence(&apk);
+    let mut limits: Vec<(&str, Option<u32>)> = access(&evidence)
+        .into_iter()
+        .map(|edge| (edge.proof.token.as_str(), edge.proof.max_sdk))
+        .collect();
+    limits.sort_unstable();
+    assert_eq!(
+        limits,
+        [
+            ("android.permission.CAMERA", None),
+            ("android.permission.READ_CONTACTS", Some(30)),
+            ("android.permission.WRITE_EXTERNAL_STORAGE", Some(28)),
+        ]
+    );
+}
+
 /// One evidence set whatever the thread count and the order of the paths,
 /// and every record in it is one the format accepts.
 #[test]

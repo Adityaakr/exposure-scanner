@@ -28,6 +28,9 @@ pub(crate) struct Asked<'a> {
     pub(crate) location: &'a RelPath,
     /// The part of that file.
     pub(crate) region: Region,
+    /// For an Android permission, the highest API level the app asks on, if
+    /// the manifest limits it.
+    pub(crate) max_sdk: Option<u32>,
 }
 
 impl Asked<'_> {
@@ -57,6 +60,7 @@ impl Asked<'_> {
                 region: self.region,
                 // The declaration is the app's own, wherever its code is from.
                 scope: Scope::AppCode,
+                max_sdk: self.max_sdk,
             },
         }))
     }
@@ -108,6 +112,7 @@ mod tests {
             purpose,
             location,
             region: Region::PropertyList,
+            max_sdk: None,
         }
     }
 

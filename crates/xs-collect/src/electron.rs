@@ -699,6 +699,7 @@ impl Roots {
                         location: path.clone(),
                         region,
                         scope: Scope::Dependency,
+                        max_sdk: None,
                     },
                 });
             }
@@ -724,6 +725,7 @@ impl Roots {
                             location: path.clone(),
                             region: Region::Files,
                             scope,
+                            max_sdk: None,
                         },
                     });
                 }

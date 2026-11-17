@@ -10,7 +10,8 @@
 //! * the name of every component (`activity`, `activity-alias`, `service`,
 //!   `receiver`, `provider`) and of every `meta-data` entry;
 //! * the name of every permission the app asks for (`uses-permission` and
-//!   `uses-permission-sdk-23`).
+//!   `uses-permission-sdk-23`), with the highest API level it asks on when
+//!   the manifest limits it (`android:maxSdkVersion`).
 //!
 //! Component names are the witness that survives full obfuscation. The
 //! build tool keeps every class the manifest names, because the system
@@ -64,12 +65,15 @@ const NO_INDEX: u32 = u32::MAX;
 
 /// Typed value kinds (`Res_value`).
 const TYPE_STRING: u8 = 0x03;
+/// The range of integer kinds (`TYPE_FIRST_INT` to `TYPE_LAST_INT`).
+const TYPE_INTS: core::ops::RangeInclusive<u8> = 0x10..=0x1f;
 
 /// Resource ids of the `android:` attributes the reader wants
 /// (`android.R.attr`).
 const ATTR_LABEL: u32 = 0x0101_0001;
 const ATTR_NAME: u32 = 0x0101_0003;
 const ATTR_VERSION_NAME: u32 = 0x0101_021c;
+const ATTR_MAX_SDK_VERSION: u32 = 0x0101_0271;
 
 /// What a package says about itself.
 ///
@@ -87,10 +91,19 @@ pub struct Manifest {
     pub label: Option<String>,
     /// The components and `meta-data` entries, in document order.
     pub components: Vec<Component>,
-    /// The `android:name` of every `uses-permission` and
-    /// `uses-permission-sdk-23` element, as written and in document order,
-    /// such as `android.permission.CAMERA`. A name may appear twice.
-    pub permissions: Vec<String>,
+    /// Every `uses-permission` and `uses-permission-sdk-23` element that
+    /// asks on some API level, in document order. A name may appear twice.
+    pub permissions: Vec<UsesPermission>,
+}
+
+/// One permission a manifest asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsesPermission {
+    /// Its `android:name` as written, such as `android.permission.CAMERA`.
+    pub name: String,
+    /// Its `android:maxSdkVersion`: the highest API level the app asks on.
+    /// `None` when it asks on every level, as it does for a value of 0.
+    pub max_sdk: Option<u32>,
 }
 
 /// One component or `meta-data` entry of a manifest.
@@ -276,6 +289,11 @@ impl Attribute {
     fn typed_string(&self) -> Option<u32> {
         (self.kind == TYPE_STRING).then_some(self.data)
     }
+
+    /// The integer of the typed value, if it is one.
+    fn typed_int(&self) -> Option<i32> {
+        TYPE_INTS.contains(&self.kind).then_some(self.data.cast_signed())
+    }
 }
 
 /// The attributes of a start-element chunk.
@@ -381,6 +399,7 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                         .any(|element| pool.is(name, element));
                 let mut android_name = None;
                 let mut permission = None;
+                let mut max_sdk = None;
                 for attribute in attributes(&chunk)? {
                     // The package is the one attribute read by its name: it
                     // has no namespace and no resource id.
@@ -418,6 +437,9 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                         (Some(Tag::Manifest), Some(ATTR_NAME)) if asks => {
                             permission = attribute.typed_string();
                         }
+                        (Some(Tag::Manifest), Some(ATTR_MAX_SDK_VERSION)) if asks => {
+                            max_sdk = attribute.typed_int();
+                        }
                         _ => {}
                     }
                 }
@@ -440,11 +462,17 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                     Some(_) => (Tag::Other, None),
                 };
                 open.push(tag);
-                if let Some(index) = permission
+                // The platform takes 0 for no limit, and grants a permission
+                // whose limit is below every level on none.
+                let max_sdk = match max_sdk {
+                    None | Some(0) => Some(None),
+                    Some(level) => u32::try_from(level).ok().map(Some),
+                };
+                if let (Some(index), Some(max_sdk)) = (permission, max_sdk)
                     && let Some(name) = pool.text(index, &mut text_budget)?
                     && !name.is_empty()
                 {
-                    manifest.permissions.push(name);
+                    manifest.permissions.push(UsesPermission { name, max_sdk });
                 }
                 if let (Some(named), Some(index)) = (named, android_name)
                     && let Some(name) = pool.text(index, &mut text_budget)?
@@ -495,7 +523,7 @@ mod tests {
             .into_iter()
             .flatten()
             .chain(manifest.components.iter().map(|component| &component.name))
-            .chain(&manifest.permissions)
+            .chain(manifest.permissions.iter().map(|permission| &permission.name))
             .map(String::len)
             .sum()
     }
@@ -577,7 +605,10 @@ mod tests {
             ]
             .map(|name| Component { name: name.into() })
             .into(),
-            permissions: vec!["android.permission.INTERNET".into()],
+            permissions: vec![UsesPermission {
+                name: "android.permission.INTERNET".into(),
+                max_sdk: None,
+            }],
         }
     }
 
@@ -638,14 +669,93 @@ mod tests {
             .finish();
         let manifest = parse(&bytes).unwrap();
         assert_eq!(
-            manifest.permissions,
+            manifest
+                .permissions
+                .iter()
+                .map(|permission| permission.name.as_str())
+                .collect::<Vec<_>>(),
             [
                 "android.permission.CAMERA",
                 "android.permission.RECORD_AUDIO",
                 "android.permission.CAMERA"
             ]
         );
+        assert!(manifest.permissions.iter().all(|permission| permission.max_sdk.is_none()));
         assert_eq!(names(&manifest), ["com.example.app.Main"]);
+    }
+
+    /// `android:maxSdkVersion` (`android.R.attr.maxSdkVersion`, 0x01010271)
+    /// is the highest API level a permission is asked on. The platform reads
+    /// it as an integer by resource id, takes 0 for no limit and grants a
+    /// permission whose limit is below every level on no device.
+    #[test]
+    fn the_highest_api_level_of_a_permission_is_kept() {
+        let asks = |name: &str, max: Attr| [Attr::android(ATTR_NAME, "name", name), max];
+        let bytes = AxmlBuilder::new()
+            .start("manifest", &[Attr::plain("package", "com.example.app")])
+            .start(
+                "uses-permission",
+                &asks(
+                    "android.permission.WRITE_EXTERNAL_STORAGE",
+                    Attr::int(ATTR_MAX_SDK_VERSION, "maxSdkVersion", 28),
+                ),
+            )
+            .end()
+            .start(
+                "uses-permission-sdk-23",
+                &asks(
+                    "android.permission.READ_EXTERNAL_STORAGE",
+                    Attr::int(ATTR_MAX_SDK_VERSION, "maxSdkVersion", 32),
+                ),
+            )
+            .end()
+            .start(
+                "uses-permission",
+                &asks(
+                    "android.permission.CAMERA",
+                    Attr::int(ATTR_MAX_SDK_VERSION, "maxSdkVersion", 0),
+                ),
+            )
+            .end()
+            .start(
+                "uses-permission",
+                &asks(
+                    "android.permission.READ_SMS",
+                    Attr::int(ATTR_MAX_SDK_VERSION, "maxSdkVersion", u32::MAX),
+                ),
+            )
+            .end()
+            .start(
+                "uses-permission",
+                &asks("android.permission.RECORD_AUDIO", Attr::plain("maxSdkVersion", "28")),
+            )
+            .end()
+            .start(
+                "uses-permission",
+                &asks(
+                    "android.permission.READ_CONTACTS",
+                    Attr::android(ATTR_MAX_SDK_VERSION, "maxSdkVersion", "28"),
+                ),
+            )
+            .end()
+            .end()
+            .finish();
+        let manifest = parse(&bytes).unwrap();
+        let permissions: Vec<(&str, Option<u32>)> = manifest
+            .permissions
+            .iter()
+            .map(|permission| (permission.name.as_str(), permission.max_sdk))
+            .collect();
+        assert_eq!(
+            permissions,
+            [
+                ("android.permission.WRITE_EXTERNAL_STORAGE", Some(28)),
+                ("android.permission.READ_EXTERNAL_STORAGE", Some(32)),
+                ("android.permission.CAMERA", None),
+                ("android.permission.RECORD_AUDIO", None),
+                ("android.permission.READ_CONTACTS", None),
+            ]
+        );
     }
 
     #[test]
