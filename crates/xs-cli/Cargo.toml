@@ -1,5 +1,5 @@
 [package]
-name = "xs-cli"
+name = "exposure"
 description = "The exposure command-line scanner"
 version.workspace = true
 edition.workspace = true

@@ -300,6 +300,51 @@ fn symbolic_links_are_never_followed_out_of_the_bundle() {
     assert_eq!(evidence(&root), reference);
 }
 
+/// The collector's own promise (crate docs: "symbolic links inside an
+/// artifact are never followed") must also hold for the folders its two
+/// fixed-path reads pass through, not only for the entries `walk` lists.
+#[test]
+fn a_linked_contents_folder_does_not_stand_another_bundle_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let other = bundle(dir.path(), "Other.app");
+    let root = dir.path().join("Evil.app");
+    fs::create_dir(&root).unwrap();
+    symlink(other.join("Contents"), root.join("Contents")).unwrap();
+    let evidence = evidence(&root);
+
+    // Nothing of the other bundle is reported as this one's.
+    assert!(edges(&evidence).is_empty());
+    let gap = gap(&evidence, CoverageReason::ParseError);
+    assert_eq!(gap.status, CoverageStatus::Unrecognized);
+    assert_eq!(gap.location.as_ref().unwrap().as_str(), "Contents");
+    assert_eq!(gap.subject.id, "Evil.app");
+    assert_eq!(gap.subject.version, None);
+    assert_eq!(evidence.len(), 2, "the artifact record and the gap");
+    // The digest covers no file of the other bundle: it is the digest of a
+    // bundle with nothing in it.
+    let empty = dir.path().join("Hollow/Evil.app");
+    fs::create_dir_all(&empty).unwrap();
+    assert_eq!(digest(&evidence), digest(&self::evidence(&empty)));
+}
+
+#[test]
+fn a_linked_frameworks_folder_is_reported_not_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let other = bundle(dir.path(), "Other.app");
+    let root = bundle(dir.path(), "Example.app");
+    fs::remove_dir_all(root.join("Contents/Frameworks")).unwrap();
+    let without = evidence(&root);
+    symlink(other.join("Contents/Frameworks"), root.join("Contents/Frameworks")).unwrap();
+    let evidence = evidence(&root);
+
+    assert!(edges(&evidence).is_empty(), "the other bundle's Sentry is not this bundle's");
+    let gap = gap(&evidence, CoverageReason::ParseError);
+    assert_eq!(gap.status, CoverageStatus::Unrecognized);
+    assert_eq!(gap.location.as_ref().unwrap().as_str(), "Contents/Frameworks");
+    assert_eq!(gap.subject.id, "com.example.app");
+    assert_eq!(digest(&evidence), digest(&without));
+}
+
 fn gap(evidence: &EvidenceSet, reason: CoverageReason) -> &CoverageRecord {
     let gaps = coverage(evidence);
     let matching: Vec<&&CoverageRecord> = gaps.iter().filter(|gap| gap.reason == reason).collect();

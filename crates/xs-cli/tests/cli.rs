@@ -113,7 +113,7 @@ fn the_fixture_bundle_yields_one_claim() {
 /// The same bytes on every machine: the report for the committed fixture is
 /// compared with a committed file, so Linux and macOS CI must both produce
 /// it. Regenerate after a deliberate change (a rule-pack update changes the
-/// pack hash the report names) with `EXPOSURE_BLESS=1 cargo test -p xs-cli`.
+/// pack hash the report names) with `EXPOSURE_BLESS=1 cargo test -p exposure`.
 #[test]
 fn the_fixture_report_matches_the_committed_bytes() {
     let report = scan(&[Path::new(FIXTURE)], 3);
@@ -124,7 +124,7 @@ fn the_fixture_report_matches_the_committed_bytes() {
     assert!(
         report == golden,
         "the report for the fixture bundle changed.\n--- committed\n{golden}\n--- now\n{report}\n\
-         If the change is intended, run: EXPOSURE_BLESS=1 cargo test -p xs-cli"
+         If the change is intended, run: EXPOSURE_BLESS=1 cargo test -p exposure"
     );
 }
 

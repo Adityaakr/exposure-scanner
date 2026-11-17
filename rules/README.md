@@ -30,7 +30,7 @@ user's machine. No merged table is distributed. The licence texts are in
 2. `cargo xtask pack compile` runs the lints and writes `dist/core.pack.json`.
 3. `cargo xtask pack sign --key ~/.exposure/keys/exposure-pack-1.key` writes
    the signature. Only the holder of the secret key can do this step.
-4. `EXPOSURE_BLESS=1 cargo test -p xs-cli` refreshes the committed fixture
+4. `EXPOSURE_BLESS=1 cargo test -p exposure` refreshes the committed fixture
    report, which names the pack's hash.
 5. Commit the sources, both files in `dist/` and the fixture report together.
    CI runs `cargo xtask pack check`, which fails if the three disagree.
@@ -43,8 +43,9 @@ These lints exist because of failures seen on real apps (design report,
 section 5.2).
 
 - A content token (`content_literal`, `dex_string`, `macho_token`) under
-  eight bytes without the `exact` boundary. Short literals hit by
-  coincidence.
+  eight bytes. Short literals hit by coincidence. Only `dex_string` allows
+  the `exact` boundary, and a `dex_string` token that uses it may be
+  shorter.
 - A content token that is a bare registrable domain, such as
   `doubleclick.net` or `googleapis.com`. Embedded browser engines contain
   such names, so they would tie every app that embeds one to that company.
@@ -55,8 +56,9 @@ section 5.2).
 - A rule that neither names an `entity` nor sets `component = true`.
 
 A rule may pin real artifacts in `[[fixture]]` tables (`sha256`, `url`,
-`expect`). The table is parsed and checked today; it becomes mandatory when
-the fixture corpus lands (build plan, task 13).
+`expect`). The table is parsed and checked today, and a rule without one is
+accepted; pinning a fixture becomes a requirement when the fixture corpus
+lands (build plan, task 13).
 
 ## Where the data may come from
 

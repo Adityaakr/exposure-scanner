@@ -11,7 +11,7 @@
 //!   crate may open a socket, run a process or use a randomly seeded map:
 //!   the lint lists refuse them;
 //! * a crate that can open a socket may not become a dependency: `cargo deny`
-//!   refuses it (build plan, task 1: "adding `ureq` to `xs-cli` fails the
+//!   refuses it (build plan, task 1: "adding `ureq` to `exposure` fails the
 //!   deny check").
 
 use std::path::{Path, PathBuf};
@@ -93,17 +93,17 @@ const PROBES: &[Probe] = &[
         expect: &["use of a disallowed type `std::collections::HashMap`"],
     },
     Probe {
-        claim: "xs-cli may not read the clock (lint list)",
+        claim: "exposure may not read the clock (lint list)",
         file: "crates/xs-cli/src/commands.rs",
         addition: "\npub(crate) fn guardrail_probe() -> bool { std::time::SystemTime::now().elapsed().is_ok() }\n",
-        cargo: &["clippy", "--offline", "--package", "xs-cli"],
+        cargo: &["clippy", "--offline", "--package", "exposure"],
         expect: &["use of a disallowed type `std::time::SystemTime`"],
     },
     Probe {
-        claim: "xs-cli may not run a process (lint list)",
+        claim: "exposure may not run a process (lint list)",
         file: "crates/xs-cli/src/commands.rs",
         addition: "\npub(crate) fn guardrail_probe() -> bool { std::process::Command::new(\"true\").status().is_ok() }\n",
-        cargo: &["clippy", "--offline", "--package", "xs-cli"],
+        cargo: &["clippy", "--offline", "--package", "exposure"],
         expect: &["use of a disallowed type `std::process::Command`"],
     },
     Probe {
@@ -159,7 +159,7 @@ pub(crate) fn run() -> Result<()> {
 const TOOLING_ONLY: &[&str] =
     &["toml", "psl", "minisign", "object", "proptest", "tempfile", "serde_json_canonicalizer"];
 
-/// The tooling-only crates among the normal dependencies of `xs-cli`, which
+/// The tooling-only crates among the normal dependencies of `exposure`, which
 /// must be none.
 fn shipped_tooling(root: &Path) -> Result<Vec<String>> {
     let output = Command::new(cargo())
@@ -167,7 +167,7 @@ fn shipped_tooling(root: &Path) -> Result<Vec<String>> {
             "tree",
             "--locked",
             "--package",
-            "xs-cli",
+            "exposure",
             "--edges",
             "normal",
             "--prefix",

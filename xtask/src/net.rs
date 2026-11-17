@@ -91,7 +91,7 @@ fn wrapped(wrapper: &[&str], program: &Path, args: &[&str]) -> Command {
 pub(crate) fn run(strict: bool) -> Result<()> {
     let root = repo_root();
     let build = Command::new(cargo())
-        .args(["build", "--release", "--locked", "--package", "xs-cli"])
+        .args(["build", "--release", "--locked", "--package", "exposure"])
         .current_dir(&root)
         .status()
         .map_err(|error| format!("cannot run cargo: {error}"))?;
@@ -153,7 +153,7 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         checks.record("network namespace with no interfaces", outcome);
 
         let outcome = if works("strace", &["-V"]) {
-            strace_check(&target.join("no-network"), &exposure, &scan, &me)
+            strace_check(&target.join("no-network"), &exposure, &scan, &me, &baseline.stdout)
         } else {
             Outcome::Skipped(String::from("strace is not installed"))
         };
@@ -246,20 +246,27 @@ fn network_calls(log: &str) -> Vec<&str> {
         .collect()
 }
 
-fn strace_check(dir: &Path, exposure: &Path, scan: &[&str], control: &Path) -> Outcome {
+fn strace_check(
+    dir: &Path,
+    exposure: &Path,
+    scan: &[&str],
+    control: &Path,
+    baseline: &[u8],
+) -> Outcome {
     if let Err(error) = std::fs::create_dir_all(dir) {
         return Outcome::Failed(format!("cannot create {}: {error}", dir.display()));
     }
-    let trace = |program: &Path, args: &[&str], name: &str| -> Result<String> {
+    let trace = |program: &Path, args: &[&str], name: &str| -> Result<(Output, String)> {
         let log = dir.join(name);
         let log_text = log.to_str().ok_or("the target path is not UTF-8")?;
         let wrapper = ["strace", "-f", "-e", "trace=network", "-o", log_text];
-        output(&mut wrapped(&wrapper, program, args))?;
-        std::fs::read_to_string(&log)
-            .map_err(|error| format!("cannot read {}: {error}", log.display()))
+        let run = output(&mut wrapped(&wrapper, program, args))?;
+        let log = std::fs::read_to_string(&log)
+            .map_err(|error| format!("cannot read {}: {error}", log.display()))?;
+        Ok((run, log))
     };
     match trace(control, &["netprobe"], "control.strace") {
-        Ok(log) if network_calls(&log).iter().any(|call| call.starts_with("socket(")) => {}
+        Ok((_, log)) if network_calls(&log).iter().any(|call| call.starts_with("socket(")) => {}
         Ok(_) => {
             return Outcome::Failed(String::from(
                 "strace recorded no socket call for the control probe",
@@ -268,10 +275,19 @@ fn strace_check(dir: &Path, exposure: &Path, scan: &[&str], control: &Path) -> O
         Err(error) => return Outcome::Failed(error),
     }
     match trace(exposure, scan, "scan.strace") {
-        Ok(log) => {
+        Ok((run, _)) if !run.status.success() => Outcome::Failed(format!(
+            "the traced scan failed: {}",
+            String::from_utf8_lossy(&run.stderr).trim()
+        )),
+        Ok((run, _)) if run.stdout != baseline => {
+            Outcome::Failed(String::from("the traced scan printed a different report"))
+        }
+        Ok((_, log)) => {
             let calls = network_calls(&log);
             if calls.is_empty() {
-                Outcome::Passed(String::from("0 network system calls (control: caught)"))
+                Outcome::Passed(String::from(
+                    "scan succeeded with identical output and 0 network system calls (control: caught)",
+                ))
             } else {
                 Outcome::Failed(format!(
                     "the scan made network system calls: {}",

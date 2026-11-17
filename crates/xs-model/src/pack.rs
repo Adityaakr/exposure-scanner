@@ -305,13 +305,18 @@ impl Pack {
 
     /// Checks everything that crosses from one item to another.
     fn check_references(&self) -> Result<(), PackError> {
-        for entity in self.layers.iter().flat_map(|loaded| &loaded.layer.entities) {
+        let entities = || self.layers.iter().flat_map(|loaded| &loaded.layer.entities);
+        for entity in entities() {
             if let Some(parent) = &entity.parent
                 && self.entity(parent).is_none()
             {
                 return Err(PackError::Dangling(entity.id.clone(), "entity", parent.clone()));
             }
-            // A chain longer than the number of entities must repeat one.
+        }
+        // Every parent now resolves, so a chain can only end at an entity
+        // without one. A chain longer than the number of entities must
+        // repeat one.
+        for entity in entities() {
             let mut current = entity;
             for _ in 0..self.entities.len() {
                 match current.parent.as_deref().and_then(|parent| self.entity(parent)) {
@@ -616,6 +621,12 @@ pub(crate) mod tests {
         assert_eq!(
             broken(|l| l.entities[0].parent = Some("nobody".into())),
             PackError::Dangling("firebase".into(), "entity", "nobody".into())
+        );
+        // A dangling parent further up the chain names the entity that has
+        // it, not the first entity whose chain passes through it.
+        assert_eq!(
+            broken(|l| l.entities[1].parent = Some("nobody".into())),
+            PackError::Dangling("google".into(), "entity", "nobody".into())
         );
         assert_eq!(
             broken(|l| l.entities[1].parent = Some("firebase".into())),

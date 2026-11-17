@@ -32,9 +32,15 @@ Requires the Rust toolchain pinned in `rust-toolchain.toml` (rustup installs
 it on first use).
 
 ```console
-$ cargo build --release --package xs-cli
+$ cargo build --release --package exposure
 $ target/release/exposure scan tests/fixtures/macos/Skeleton.app --json report.json
 exposure: scanned 1 app (3 files, 628 bytes): 1 claim, 0 coverage notes
+```
+
+To install the binary instead of running it from the build folder:
+
+```console
+$ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exposure
 ```
 
 ```
@@ -102,7 +108,7 @@ One Cargo workspace. A crate may depend only on crates above it in this list.
 | `xs-derive` | Evidence and pack in, claims out | `no_std` |
 | `xs-render` | Claims and evidence in, report out | `no_std` |
 | `xs-collect` | Discovery and reading. The only crate that opens files | std |
-| `xs-cli` | The `exposure` binary | std |
+| `exposure` (in `crates/xs-cli`) | The `exposure` binary | std |
 | `xtask` | Developer tooling. Never shipped | anything |
 
 ```

@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, reason = "test code")]
 
 use xs_model::matcher::{Boundary, MatcherKind};
-use xs_rules::compile::{Compiled, Options, Problem, SourceFile, compile};
+use xs_rules::compile::{Compiled, Problem, SourceFile, compile};
 
 const PACK: &str = r#"
 layer = "core"
@@ -80,17 +80,17 @@ fn good() -> Vec<SourceFile<'static>> {
 }
 
 fn compiled(files: &[SourceFile<'_>]) -> Compiled {
-    compile(files, Options::default()).unwrap_or_else(|problems| panic!("{problems:#?}"))
+    compile(files).unwrap_or_else(|problems| panic!("{problems:#?}"))
 }
 
 /// The problems for one rule file that replaces the Sentry rule.
 fn problems_for(rule: &str) -> Vec<String> {
     let files = files(&[("sdk/sentry.toml", rule), ("sdk/sparkle.toml", SPARKLE)]);
-    problems(&files, Options::default())
+    problems(&files)
 }
 
-fn problems(files: &[SourceFile<'_>], options: Options) -> Vec<String> {
-    compile(files, options)
+fn problems(files: &[SourceFile<'_>]) -> Vec<String> {
+    compile(files)
         .expect_err("expected the sources to be refused")
         .iter()
         .map(Problem::to_string)
@@ -191,17 +191,27 @@ fn a_five_byte_unanchored_token_is_rejected() {
 }
 
 #[test]
-fn short_content_tokens_need_the_exact_boundary_whatever_the_matcher() {
+fn short_content_tokens_are_refused_with_advice_the_matcher_allows() {
+    // `content_literal` and `macho_token` have no `exact` boundary
+    // (`MatcherKind::boundaries`), so the only way out is a longer token.
     for (table, kind) in [
         (r#"content_literal = [{ lit = "abcdefg", at = "word" }]"#, "content_literal"),
         (r#"content_literal = [{ lit = "x.a.co", at = "host" }]"#, "content_literal"),
         (r#"macho_token = [{ lit = "abcdefg", at = "none" }]"#, "macho_token"),
-        (r#"dex_string = [{ lit = "abcdefg", at = "word" }]"#, "dex_string"),
     ] {
         let problems = problems_for(&with_match(table));
         assert_one(&problems, &format!("{kind} token"));
-        assert!(problems[0].contains("needs the `exact` boundary"), "{problems:#?}");
+        assert!(problems[0].contains("must be at least 8 bytes"), "{problems:#?}");
+        assert!(!problems[0].contains("exact"), "{problems:#?}");
     }
+    // Which is why `exact` must not be offered: taking it is refused.
+    let exact =
+        problems_for(&with_match(r#"content_literal = [{ lit = "abcdefg", at = "exact" }]"#));
+    assert_one(&exact, "cannot use the `exact` boundary");
+    // `dex_string` does allow `exact`, so there the advice stands.
+    let dex = problems_for(&with_match(r#"dex_string = [{ lit = "abcdefg", at = "word" }]"#));
+    assert_one(&dex, "dex_string token");
+    assert!(dex[0].contains("needs the `exact` boundary"), "{dex:#?}");
     // Eight bytes is long enough, and a short token may be exact.
     compiled(&files(&[(
         "sdk/sentry.toml",
@@ -356,7 +366,7 @@ fn references_must_resolve() {
 fn two_rules_cannot_claim_one_token() {
     let thief = SPARKLE.replace("Sparkle.framework", "Sentry.framework");
     let files = files(&[("sdk/sentry.toml", SENTRY), ("sdk/sparkle.toml", &thief)]);
-    let problems = problems(&files, Options::default());
+    let problems = problems(&files);
     assert_one(
         &problems,
         "apple_framework token `Sentry.framework` is already claimed by `sdk/sentry`",
@@ -371,10 +381,7 @@ fn entities_need_https_sources() {
         SourceFile { path: "entities.toml", text: &entities },
         SourceFile { path: "sdk/sparkle.toml", text: SPARKLE },
     ];
-    assert_one(
-        &problems(&files, Options::default()),
-        "source `see wikipedia` must be an https:// URL",
-    );
+    assert_one(&problems(&files), "source `see wikipedia` must be an https:// URL");
 
     let sourceless = ENTITIES.replace("source = \"https://sentry.io/terms/\"\n", "");
     let files = [
@@ -382,35 +389,35 @@ fn entities_need_https_sources() {
         SourceFile { path: "entities.toml", text: &sourceless },
         SourceFile { path: "sdk/sparkle.toml", text: SPARKLE },
     ];
-    assert_one(&problems(&files, Options::default()), "source");
+    assert_one(&problems(&files), "source");
 }
 
 #[test]
 fn the_layer_files_themselves_are_checked() {
     let no_pack = [SourceFile { path: "entities.toml", text: ENTITIES }];
-    assert_one(&problems(&no_pack, Options::default()), "pack.toml: missing");
+    assert_one(&problems(&no_pack), "pack.toml: missing");
 
     let mut stray = good();
     stray.push(SourceFile { path: "sdk/nested/x.toml", text: SPARKLE });
-    assert_one(&problems(&stray, Options::default()), "unexpected file");
+    assert_one(&problems(&stray), "unexpected file");
 
     let mut twice = good();
     twice.push(SourceFile { path: "sdk/sparkle.toml", text: SPARKLE });
-    assert_one(&problems(&twice, Options::default()), "listed more than once");
+    assert_one(&problems(&twice), "listed more than once");
 
     let zero = PACK.replace("version = 3", "version = 0");
     let files = [
         SourceFile { path: "pack.toml", text: &zero },
         SourceFile { path: "sdk/sparkle.toml", text: SPARKLE },
     ];
-    assert_one(&problems(&files, Options::default()), "version must be at least 1");
+    assert_one(&problems(&files), "version must be at least 1");
 
     let broken = [SourceFile { path: "pack.toml", text: "layer = " }];
-    assert_eq!(problems(&broken, Options::default()).len(), 1);
+    assert_eq!(problems(&broken).len(), 1);
 }
 
 #[test]
-fn fixtures_are_checked_and_can_be_required() {
+fn fixtures_are_checked_and_stay_out_of_the_compiled_layer() {
     let fixture = |sha: &str, expect: &str| {
         format!(
             "{SENTRY}\n[[fixture]]\nsha256 = \"{sha}\"\nurl = \"https://example.com/app.zip\"\nexpect = [{expect}]\n"
@@ -428,11 +435,6 @@ fn fixtures_are_checked_and_can_be_required() {
     let with = compiled(&files(&[("sdk/sentry.toml", &fixture(sha, "\"content_literal\""))]));
     let without = compiled(&files(&[("sdk/sentry.toml", SENTRY)]));
     assert_eq!(with.bytes, without.bytes);
-
-    let strict = Options { require_fixtures: true };
-    let problems = problems(&good(), strict);
-    assert_eq!(problems.len(), 2, "{problems:#?}");
-    assert!(problems.iter().all(|problem| problem.contains("pin at least one fixture")));
 }
 
 #[test]
@@ -445,8 +447,8 @@ fn every_problem_is_reported_at_once_in_a_fixed_order() {
     let mut backward = forward.clone();
     backward.reverse();
 
-    let found = problems(&forward, Options::default());
+    let found = problems(&forward);
     assert_eq!(found.len(), 3, "{found:#?}");
-    assert_eq!(found, problems(&backward, Options::default()));
+    assert_eq!(found, problems(&backward));
     assert!(found.is_sorted());
 }

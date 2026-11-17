@@ -13,7 +13,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use xs_model::Sha256Digest;
-use xs_rules::compile::{Compiled, Options, SourceFile, compile};
+use xs_rules::compile::{Compiled, SourceFile, compile};
 use xs_rules::{SignedLayer, TRUSTED_KEYS};
 
 use crate::{Result, read, read_text, repo_root, write};
@@ -56,7 +56,7 @@ fn sources() -> Result<Vec<(String, String)>> {
 fn compile_sources(files: &[(String, String)]) -> Result<Compiled> {
     let files: Vec<SourceFile<'_>> =
         files.iter().map(|(path, text)| SourceFile { path, text }).collect();
-    compile(&files, Options::default()).map_err(|problems| {
+    compile(&files).map_err(|problems| {
         let mut message = format!("the rule sources have {} problem(s):", problems.len());
         for problem in problems {
             message.push_str(&format!("\n  rules/{LAYER}/{problem}"));

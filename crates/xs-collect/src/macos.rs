@@ -44,6 +44,7 @@ pub const MAX_DEPTH: u32 = 64;
 /// Most files the collector considers in one bundle.
 pub const MAX_FILES: usize = 1_000_000;
 
+const CONTENTS: &str = "Contents";
 const INFO_PLIST: &str = "Contents/Info.plist";
 const FRAMEWORKS: &str = "Contents/Frameworks";
 
@@ -180,10 +181,23 @@ fn plan(root: &Path) -> Plan {
         files_read: 0,
         bytes_read: 0,
     };
-    read_info_plist(&mut plan);
-    list_frameworks(&mut plan);
+    // `walk` never follows a link. The two reads below go by fixed paths, so
+    // every folder on those paths must be a real one, or a link named
+    // `Contents` would stand another bundle in for this one.
+    if replaced(&plan.root.join(CONTENTS)) {
+        plan.gaps.unrecognized(CoverageReason::ParseError, rel(CONTENTS));
+    } else {
+        read_info_plist(&mut plan);
+        list_frameworks(&mut plan);
+    }
     walk(&mut plan);
     plan
+}
+
+/// Whether something other than a real folder (a symbolic link, a file) sits
+/// where a folder belongs. A missing folder is not a replaced one.
+fn replaced(dir: &Path) -> bool {
+    fs::symlink_metadata(dir).is_ok_and(|metadata| !metadata.is_dir())
 }
 
 fn read_info_plist(plan: &mut Plan) {
@@ -231,13 +245,16 @@ fn read_info_plist(plan: &mut Plan) {
 /// Records the names of the real folders under `Contents/Frameworks`.
 ///
 /// Only folders count: a file or a symbolic link with a framework's name is
-/// not a framework. The listing enters the bundle digest, because evidence is
+/// not a framework, and `Contents/Frameworks` itself must be a real folder.
+/// The listing enters the bundle digest, because evidence is
 /// drawn from it.
 fn list_frameworks(plan: &mut Plan) {
     let Some(location) = rel(FRAMEWORKS) else { return };
     let path = plan.root.join(FRAMEWORKS);
-    if !fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
-        return;
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return plan.gaps.unrecognized(CoverageReason::ParseError, Some(location)),
+        Err(_) => return,
     }
     let Ok(entries) = fs::read_dir(&path) else {
         return plan.gaps.skipped(CoverageReason::Unreadable, Some(location));

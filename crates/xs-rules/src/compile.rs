@@ -16,8 +16,9 @@
 //! top of the structural checks every loader repeats, and they exist because
 //! of failures seen on real apps (design report, section 5.2):
 //!
-//! * A content token (one searched for in free-form bytes) shorter than eight
-//!   bytes must use the `exact` boundary. Short literals hit by coincidence.
+//! * A content token (one searched for in free-form bytes) must be at least
+//!   eight bytes, unless its matcher allows the `exact` boundary and the
+//!   token uses it. Short literals hit by coincidence.
 //! * A content token may not be a bare registrable domain such as
 //!   `doubleclick.net`. A browser engine embeds such names, so they tie every
 //!   app that embeds one to the company. Name a specific endpoint instead.
@@ -36,7 +37,8 @@ use xs_model::pack::{Category, Entity, Layer, LoadedLayer, Rule, Token};
 use xs_model::record::V1;
 use xs_model::{Pack, Sha256Digest, canon, text};
 
-/// A content token shorter than this many bytes needs the `exact` boundary.
+/// A content token shorter than this many bytes is refused unless it uses
+/// the `exact` boundary, which only some content matchers allow.
 pub const MIN_CONTENT_TOKEN_BYTES: usize = 8;
 
 /// One source file: its path inside the layer directory, with `/` separators,
@@ -47,15 +49,6 @@ pub struct SourceFile<'a> {
     pub path: &'a str,
     /// The file's text.
     pub text: &'a str,
-}
-
-/// How strict to be.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Options {
-    /// Refuse a rule that pins no fixture. Off until the fixture corpus
-    /// exists (task 13 of the build plan); the fixture table is parsed and
-    /// checked either way.
-    pub require_fixtures: bool,
 }
 
 /// A compiled layer.
@@ -142,7 +135,7 @@ struct FixtureSource {
 ///
 /// Returns every problem found, sorted, so the same bad sources always give
 /// the same report.
-pub fn compile(files: &[SourceFile<'_>], options: Options) -> Result<Compiled, Vec<Problem>> {
+pub fn compile(files: &[SourceFile<'_>]) -> Result<Compiled, Vec<Problem>> {
     let mut problems = Problems::default();
     let mut pack_source: Option<PackSource> = None;
     let mut entities: Vec<Entity> = Vec::new();
@@ -171,7 +164,7 @@ pub fn compile(files: &[SourceFile<'_>], options: Options) -> Result<Compiled, V
             path => match rule_file_stem(path) {
                 Some(stem) => {
                     if let Some(source) = parse::<RuleSource>(file, &mut problems) {
-                        rules.extend(lower_rule(path, stem, source, options, &mut problems));
+                        rules.extend(lower_rule(path, stem, source, &mut problems));
                     }
                 }
                 None => problems.add(
@@ -264,13 +257,7 @@ fn check_https(file: &str, field: &str, url: &str, problems: &mut Problems) {
 }
 
 /// Turns one rule file into a [`Rule`], reporting every lint it trips.
-fn lower_rule(
-    file: &str,
-    stem: &str,
-    source: RuleSource,
-    options: Options,
-    problems: &mut Problems,
-) -> Option<Rule> {
+fn lower_rule(file: &str, stem: &str, source: RuleSource, problems: &mut Problems) -> Option<Rule> {
     let before = problems.0.len();
 
     if source.id != format!("sdk/{stem}") {
@@ -306,7 +293,7 @@ fn lower_rule(
     }
 
     let (matchers, min_distinct) = lower_match_table(file, &source.matchers, problems);
-    check_fixtures(file, &source.fixtures, &matchers, options, problems);
+    check_fixtures(file, &source.fixtures, &matchers, problems);
 
     if problems.0.len() > before {
         return None;
@@ -462,14 +449,14 @@ fn lower_token(
     }
     if kind.is_content() {
         if lit.len() < MIN_CONTENT_TOKEN_BYTES && at != Boundary::Exact {
-            problems.add(
-                file,
+            let remedy = if kind.boundaries().contains(&Boundary::Exact) {
                 format!(
-                    "{kind} token `{lit}` is {} bytes; a content token under {MIN_CONTENT_TOKEN_BYTES} \
-                     bytes needs the `exact` boundary",
-                    lit.len()
-                ),
-            );
+                    "a {kind} token under {MIN_CONTENT_TOKEN_BYTES} bytes needs the `exact` boundary"
+                )
+            } else {
+                format!("a {kind} token must be at least {MIN_CONTENT_TOKEN_BYTES} bytes")
+            };
+            problems.add(file, format!("{kind} token `{lit}` is {} bytes; {remedy}", lit.len()));
         }
         if is_bare_registrable_domain(lit) {
             problems.add(
@@ -511,13 +498,8 @@ fn check_fixtures(
     file: &str,
     fixtures: &[FixtureSource],
     matchers: &Matchers,
-    options: Options,
     problems: &mut Problems,
 ) {
-    if options.require_fixtures && fixtures.is_empty() {
-        problems
-            .add(file, "pin at least one fixture: an artifact, by hash, that this rule must match");
-    }
     for fixture in fixtures {
         if Sha256Digest::from_hex(&fixture.sha256).is_none() {
             problems.add(
