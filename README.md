@@ -366,19 +366,9 @@ flowchart LR
     G --> B
 ```
 
-To add or change a rule:
-
-1. Add or edit a file under [`rules/core/sdk/`](rules/core/sdk/), and the
-   company in [`rules/core/entities.toml`](rules/core/entities.toml) if it is
-   new. Cite an `https://` source for every token.
-2. Run `cargo xtask pack compile`. The compiler refuses short or unbounded
-   content tokens, bare brand domains, duplicated tokens and missing sources.
-3. Run the table test, `cargo test -p exposure --test rule_pack`: every token
-   must find its own rule and no other.
-4. Open a pull request. Signing the pack needs the maintainer's key, so a
-   maintainer signs and refreshes the fixture reports before merging.
-
-The rule format, the boundaries, the lints and advice on choosing tokens are
+To add or change a rule, follow
+[Adding or changing a rule](CONTRIBUTING.md#adding-or-changing-a-rule). The
+rule format, the boundaries, the lints and advice on choosing tokens are
 in [`rules/README.md`](rules/README.md).
 
 ## Testing and the six properties
