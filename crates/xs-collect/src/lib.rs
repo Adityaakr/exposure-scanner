@@ -11,7 +11,8 @@
 //! One collector walks a macOS application bundle ([`macos`]). Inside a
 //! bundle, the code of an Electron app (asar archives and loose scripts) is
 //! read by a part of its own. Another reads an Android package, a single
-//! file, in a pass of its own ([`android`]).
+//! file, in a pass of its own ([`android`]). A third reads the manifest of
+//! a browser extension ([`browser`]).
 //!
 //! Besides what an app ships, both say what it may access: the permissions
 //! it asks for in its property list and its code signature, or in its
@@ -50,6 +51,7 @@
 
 mod access;
 pub mod android;
+pub mod browser;
 pub mod cache;
 pub mod discover;
 mod electron;
@@ -101,9 +103,11 @@ pub struct ScanOutcome {
 /// Totals of one scan.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ScanStats {
-    /// Artifacts scanned. One that could not be read at all is not among
-    /// them; a `coverage` record stands for it.
+    /// Apps scanned. One that could not be read at all is not among them; a
+    /// `coverage` record stands for it.
     pub artifacts: u64,
+    /// Browser extensions read, counted like apps.
+    pub extensions: u64,
     /// Files read and hashed: in this scan, or for an artifact that has not
     /// changed, in the scan its stored result is from.
     pub files: u64,
@@ -147,8 +151,9 @@ impl fmt::Display for ScanError {
             Self::Path { path, error } => write!(f, "cannot read {}: {error}", path.display()),
             Self::Unsupported(path) => write!(
                 f,
-                "{} is not a macOS application bundle, an Android package (.apk) or a folder of \
-                 them; other artifact kinds are not supported yet",
+                "{} is not a macOS application bundle, an Android package (.apk), a browser \
+                 extension (a Firefox .xpi file, or a Chromium <id>/<version> folder) or a \
+                 folder of them; other artifact kinds are not supported yet",
                 path.display()
             ),
             Self::Threads(message) => write!(f, "cannot start worker threads: {message}"),
@@ -170,8 +175,9 @@ impl From<EvidenceError> for ScanError {
 /// Scans the artifacts found at `paths` and returns the evidence.
 ///
 /// Each path is a macOS application bundle, an Android package (a file
-/// named `.apk`) or a folder that holds either; see [`discover::artifacts`].
-/// With no path at all, the apps installed on this machine are scanned; see
+/// named `.apk`), a browser extension or a folder that holds any of them;
+/// see [`discover::artifacts`]. With no path at all, the apps and the
+/// browser extensions installed on this machine are scanned; see
 /// [`discover::installed`]. A path replaces those folders: when any is
 /// given, only what the paths name is scanned. Which of the two a scan was
 /// is its [`ScanScope`]. Giving the same artifact twice, directly or
@@ -371,5 +377,50 @@ fn collect<'c>(
     for (name, count) in unread {
         evidence.insert(android::unread(name, count))?;
     }
+    extensions(found, &mut evidence, &mut stats)?;
     Ok((evidence, stats))
+}
+
+/// Reads the browser extensions of `found`, one after the other, and adds
+/// their records and totals.
+///
+/// A manifest is a few kilobytes, so there is nothing to gain from the
+/// pool, and reading one add-on archive at a time bounds what is held in
+/// memory to one of them. For the same reason they are not kept in the
+/// cache: every scan reads them again.
+///
+/// # Errors
+///
+/// Fails if the collector made a record that breaks the evidence format.
+fn extensions(
+    found: &Artifacts,
+    evidence: &mut EvidenceSet,
+    stats: &mut ScanStats,
+) -> Result<(), EvidenceError> {
+    // Extensions that were not read and cannot be told apart are counted
+    // in one record.
+    let mut unread: BTreeMap<browser::Unread, u32> = BTreeMap::new();
+    for extension in &found.extensions {
+        match browser::read(extension) {
+            browser::Outcome::Scanned { records: read, files, bytes } => {
+                stats.extensions += 1;
+                stats.files += files;
+                stats.bytes += bytes;
+                for record in read {
+                    evidence.insert(record)?;
+                }
+            }
+            browser::Outcome::Unread(extension) => {
+                let count = unread.entry(extension).or_insert(0);
+                *count = count.saturating_add(1);
+            }
+        }
+    }
+    for (extension, count) in unread {
+        evidence.insert(browser::unread(extension, count))?;
+    }
+    for (&(browser, reason), &count) in &found.unlisted {
+        evidence.insert(browser::unlisted(browser, reason, count))?;
+    }
+    Ok(())
 }

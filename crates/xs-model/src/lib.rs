@@ -5,8 +5,9 @@
 //! * the versioned **evidence record** ([`record`]) and the set that holds
 //!   records keyed by content hash ([`evidence`]);
 //! * the **claim** derived from evidence ([`claim`]);
-//! * the fixed list of **permissions** an access edge can point at
-//!   ([`access`]);
+//! * the fixed list of **permissions** an access edge from an app can point
+//!   at ([`access`]), and of what a browser extension may be allowed to
+//!   reach ([`permission`]);
 //! * the compiled **rule pack** ([`pack`]);
 //! * the **report** document that carries claims together with the evidence
 //!   they cite ([`report`]);
@@ -31,6 +32,7 @@ pub mod evidence;
 pub mod matcher;
 pub mod pack;
 pub mod path;
+pub mod permission;
 pub mod record;
 pub mod report;
 pub mod text;
@@ -43,5 +45,6 @@ pub use evidence::EvidenceSet;
 pub use matcher::{Boundary, MatcherKind};
 pub use pack::Pack;
 pub use path::RelPath;
+pub use permission::Permission;
 pub use record::{Record, RecordId};
 pub use report::{Headline, Report};

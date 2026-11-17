@@ -1,0 +1,16 @@
+{
+  // A synthetic extension. Browsers accept comments in a manifest.
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "version": "2.1.0",
+  "default_locale": "en",
+  "author": "Example Ltd",
+  "homepage_url": "https://www.example.com/helper?ref=store",
+  "permissions": ["storage", "tabs", "cookies", "scripting"],
+  "optional_permissions": ["clipboardRead"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    { "matches": ["https://*/*", "http://*/*"], "js": ["content.js"], "all_frames": true }
+  ],
+  "background": { "service_worker": "background.js" }
+}

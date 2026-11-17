@@ -940,6 +940,7 @@ pub(crate) fn finish(
             sandbox,
             files_scanned: plan.files_read,
             bytes_scanned: plan.bytes_read,
+            ..Facts::default()
         },
     }));
 

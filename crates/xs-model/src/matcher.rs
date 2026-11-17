@@ -41,7 +41,7 @@ pub enum MatcherKind {
     /// kind.
     UpdateFeed,
     /// A usage description in the `Info.plist` of a macOS bundle: the app
-    /// asks for a permission, and says why. Like the two kinds after it,
+    /// asks for a permission, and says why. Like the three kinds after it,
     /// this is a declaration of access (see [`access`](crate::access)): the
     /// keys are the platform's own, and a rule has no tokens of these kinds.
     UsageDescription,
@@ -50,11 +50,16 @@ pub enum MatcherKind {
     Entitlement,
     /// A `uses-permission` element in an Android manifest.
     AndroidPermission,
+    /// What a browser extension's manifest asks the browser for: site
+    /// patterns and interface names under fixed keys. The collector reports
+    /// each as a permission from the fixed list in
+    /// [`permission`](crate::permission).
+    ExtensionManifest,
 }
 
 impl MatcherKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::ManifestComponent,
         Self::AndroidClassPrefix,
         Self::ApkFile,
@@ -70,6 +75,7 @@ impl MatcherKind {
         Self::UsageDescription,
         Self::Entitlement,
         Self::AndroidPermission,
+        Self::ExtensionManifest,
     ];
 
     /// The name used in rule files and records.
@@ -91,6 +97,7 @@ impl MatcherKind {
             Self::UsageDescription => "usage_description",
             Self::Entitlement => "entitlement",
             Self::AndroidPermission => "android_permission",
+            Self::ExtensionManifest => "extension_manifest",
         }
     }
 
@@ -118,7 +125,8 @@ impl MatcherKind {
             Self::UpdateFeed
             | Self::UsageDescription
             | Self::Entitlement
-            | Self::AndroidPermission => &[],
+            | Self::AndroidPermission
+            | Self::ExtensionManifest => &[],
             Self::DexString => &[Boundary::Host, Boundary::Word, Boundary::Exact, Boundary::None],
             Self::ContentLiteral | Self::MachoToken => {
                 &[Boundary::Host, Boundary::Word, Boundary::None]
@@ -145,21 +153,28 @@ impl MatcherKind {
     /// channel edge.
     #[must_use]
     pub const fn is_access(self) -> bool {
-        matches!(self, Self::UsageDescription | Self::Entitlement | Self::AndroidPermission)
+        matches!(
+            self,
+            Self::UsageDescription
+                | Self::Entitlement
+                | Self::AndroidPermission
+                | Self::ExtensionManifest
+        )
     }
 
     /// The grade a hit of this kind supports. A privacy manifest and an
     /// update feed are the app's own declarations of a channel. A
-    /// declaration of access shows that the app asks for a permission, which
-    /// a report words as "may access". Everything else shows that code is
-    /// shipped.
+    /// declaration of access shows that the app or extension asks for a
+    /// permission, which a report words as "may access". Everything else
+    /// shows that code is shipped.
     #[must_use]
     pub const fn grade(self) -> Grade {
         match self {
             Self::PrivacyManifest | Self::UpdateFeed => Grade::Declares,
-            Self::UsageDescription | Self::Entitlement | Self::AndroidPermission => {
-                Grade::Requested
-            }
+            Self::UsageDescription
+            | Self::Entitlement
+            | Self::AndroidPermission
+            | Self::ExtensionManifest => Grade::Requested,
             _ => Grade::Contains,
         }
     }
@@ -264,6 +279,7 @@ mod tests {
             MatcherKind::UsageDescription,
             MatcherKind::Entitlement,
             MatcherKind::AndroidPermission,
+            MatcherKind::ExtensionManifest,
         ];
         for kind in MatcherKind::ALL {
             let takes_none = declarations.contains(&kind);
@@ -300,7 +316,11 @@ mod tests {
         for kind in MatcherKind::ALL {
             let ladder = if kind.is_access() { EdgeType::Access } else { EdgeType::Channel };
             assert_eq!(kind.grade().ladder(), ladder, "{kind}");
-            assert_eq!(crate::access::rule_of(kind).is_some(), kind.is_access(), "{kind}");
+            let rule = match kind {
+                MatcherKind::ExtensionManifest => Some(crate::permission::RULE),
+                _ => crate::access::rule_of(kind),
+            };
+            assert_eq!(rule.is_some(), kind.is_access(), "{kind}");
         }
     }
 }

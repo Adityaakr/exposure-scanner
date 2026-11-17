@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Quiet Theme",
+  "version": "1.0",
+  "permissions": ["storage", "activeTab", "contextMenus"],
+  "host_permissions": ["https://mail.example.com/*", "*://*.example.org/*"],
+  "content_scripts": [{ "matches": ["<all_urls>"], "css": ["dark.css"] }]
+}

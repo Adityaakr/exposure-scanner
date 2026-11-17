@@ -122,13 +122,16 @@ pub struct Claim {
     /// What the link points at.
     pub object: ClaimObject,
     /// The company behind the object: the one at the top of the ownership
-    /// chain of the entity that operates the SDK or the host. `None` in two
-    /// cases, neither of which counts anywhere. A component is a library
+    /// chain of the entity that operates the SDK or the host. `None` in
+    /// three cases, none of which counts anywhere. A component is a library
     /// with no network side of its own. A host the rule pack lists under no
     /// company is unmapped: it is shown as itself and nobody is named as its
-    /// owner.
+    /// owner. A permission is something the app may reach, not somebody.
     pub company: Option<String>,
-    /// The category of the object, from the rule pack's fixed list.
+    /// The category of the object, from the rule pack's fixed list. For a
+    /// permission of a browser extension it is the built-in
+    /// [`permission::CATEGORY`](crate::permission::CATEGORY), which is not
+    /// in the pack.
     pub category: String,
     /// Whether the claim counts in the report's headline: it is a channel,
     /// it names a company, and its category is one of those the rule pack
@@ -153,6 +156,8 @@ pub struct Claim {
     /// Ids of the records that support the claim, in id order. Never empty.
     pub evidence: Vec<RecordId>,
     /// Remarks carried over from the rule, such as `retired:2025-03-31`.
+    /// A claim about a permission that rests on optional manifest keys
+    /// alone carries [`permission::NOTE_OPTIONAL`](crate::permission::NOTE_OPTIONAL).
     pub notes: Vec<String>,
 }
 

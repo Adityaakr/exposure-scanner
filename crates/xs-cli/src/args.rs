@@ -17,13 +17,19 @@ usage:
 commands:
   scan     Read the apps at each PATH (a macOS .app bundle, an Android .apk
            file, or a folder that holds either) and report which SDKs they
-           ship. Without a PATH, on macOS: the apps installed in /Applications
-           and in your own Applications folder, but not Apple's own apps in
-           /System/Applications. A PATH replaces those folders: when any
-           PATH is given, only what the PATHs name is scanned. An app that
-           cannot be read is reported as such and does not stop the scan.
-           No app is changed, nothing is executed and nothing is sent
-           anywhere.
+           ship. A PATH may also be a browser extension (a Firefox .xpi
+           file, or a Chromium <id>/<version> folder) or a folder of them:
+           the report says what each asks the browser for. Without a PATH,
+           on macOS: the apps installed in /Applications and in your own
+           Applications folder, but not Apple's own apps in
+           /System/Applications, and the extensions installed in your
+           profiles of the Chromium-family browsers and Firefox. Of an
+           extension only its manifest is read, never your history, cookies
+           or pages. A PATH replaces those folders: when any PATH is given,
+           only what the PATHs name is scanned. An app, an extension or a
+           browser that cannot be read is reported as such and does not stop
+           the scan. Nothing scanned is changed or executed, and nothing is
+           sent anywhere.
            An app that has not changed since an earlier scan is not read
            again: what was found in it is kept in a private cache, in
            ~/Library/Caches/exposure on macOS and in ~/.cache/exposure (or
