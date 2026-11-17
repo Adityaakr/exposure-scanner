@@ -783,6 +783,74 @@ fn the_summary_leads_with_everything_that_was_found() {
     assert_eq!((tags("counted"), tags("uncounted")), (1, 4));
 }
 
+/// Two apps of one entry that share a name are told apart in the entry: by
+/// platform, then by version, then by the start of the build digest, as
+/// the line under a finding shows it. A name that is alone in its entry
+/// stays as it is, and every link still leads to that app's finding.
+#[test]
+fn apps_that_share_a_name_are_told_apart_in_a_summary_entry() {
+    let pack = pack();
+    let mac = |id: &str, seed: u8, version: &str| {
+        let mut subject = subject(Platform::Macos, id, seed);
+        subject.version = Some(version.into());
+        subject
+    };
+    let first = mac("org.example.one", 1, "1.0");
+    let android = subject(Platform::Android, "org.example.two", 2);
+    let (third, fourth) = (mac("org.example.three", 3, "2.0"), mac("org.example.four", 4, "2.0"));
+    let other = mac("org.example.other", 5, "1.0");
+    let acme = |subject: &Subject, matcher| sdk(subject, "sdk/acme-analytics", matcher, None);
+    let evidence = set([
+        artifact(&first, "Skeleton", None),
+        acme(&first, MatcherKind::AppleFramework),
+        sdk(&first, "sdk/sparkle", MatcherKind::AppleFramework, None),
+        artifact(&android, "Skeleton", None),
+        acme(&android, MatcherKind::AndroidClassPrefix),
+        artifact(&third, "Skeleton", None),
+        acme(&third, MatcherKind::AppleFramework),
+        artifact(&fourth, "Skeleton", None),
+        acme(&fourth, MatcherKind::AppleFramework),
+        artifact(&other, "Other", None),
+        acme(&other, MatcherKind::AppleFramework),
+    ]);
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+
+    let entries = section(&root, "summary").named("ul")[0].named("li");
+    let named = |entry: &Element| -> BTreeMap<String, String> {
+        entry
+            .named("a")
+            .into_iter()
+            .map(|link| (link.attr("href").unwrap().to_string(), link.text()))
+            .collect()
+    };
+    let to = |subject: &Subject, object: &str| {
+        let claim = claims.iter().find(|c| c.subject == *subject && c.object.id == object).unwrap();
+        format!("#{}", anchor("f-", claim.id.digest()))
+    };
+    let build = |seed: u8| format!("bd1:{}…", &Sha256Digest::of(&[seed]).to_hex()[..12]);
+
+    assert_eq!(entries[0].named("strong")[0].text(), "AcmeAnalytics");
+    let expected: BTreeMap<String, String> = [
+        (&other, String::from("Other")),
+        (&android, String::from("Skeleton (Android)")),
+        (&first, String::from("Skeleton (macOS, version 1.0)")),
+        (&third, format!("Skeleton (macOS, version 2.0, build {})", build(3))),
+        (&fourth, format!("Skeleton (macOS, version 2.0, build {})", build(4))),
+    ]
+    .into_iter()
+    .map(|(subject, name)| (to(subject, "sdk/acme-analytics"), name))
+    .collect();
+    assert_eq!(named(entries[0]), expected);
+
+    // Alone in its entry, the same app needs nothing added.
+    assert_eq!(entries[1].named("strong")[0].text(), "Sparkle");
+    assert_eq!(
+        named(entries[1]),
+        BTreeMap::from([(to(&first, "sdk/sparkle"), String::from("Skeleton"))])
+    );
+}
+
 /// Each app named in the summary links to the finding about that thing in
 /// that app, further down the page.
 #[test]

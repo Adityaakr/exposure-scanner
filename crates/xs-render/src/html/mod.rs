@@ -211,6 +211,7 @@ fn document(sections: &[Section], input: &Input<'_>) -> Result<String, RenderErr
     for section in sections {
         let mut body = Markup::new();
         (section.body)(&mut body, input)?;
+        // Sections to come, such as app permissions, can have nothing to say on a machine.
         if !body.is_empty() {
             written.push((section, body));
         }
@@ -333,7 +334,8 @@ fn found_item(page: &mut Markup, view: &View<'_>, thing: &Found<'_>, scanned: u6
         if at > 0 {
             page.raw(", ");
         }
-        page.element("a", &[("href", Value::Link("f-", found.claim.id.digest()))], app.title());
+        let name = name_in_entry(view, thing, app);
+        page.element("a", &[("href", Value::Link("f-", found.claim.id.digest()))], &name);
     }
     page.close();
     page.raw("\n");
@@ -348,6 +350,42 @@ fn found_item(page: &mut Markup, view: &View<'_>, thing: &Found<'_>, scanned: u6
     page.raw("\n");
     page.close();
     page.raw("\n");
+}
+
+/// What a summary entry calls one of its apps: its name, and when another
+/// app of the entry has the same name, what tells the two apart. That is
+/// the platform; for two on one platform the version as well; and for two
+/// of one version the start of the build digest as well.
+fn name_in_entry(view: &View<'_>, thing: &Found<'_>, app: &App<'_>) -> String {
+    let subject = app.subject;
+    let mut alike: Vec<&Subject> = thing
+        .apps
+        .keys()
+        .filter_map(|&other| view.apps.get(other))
+        .filter(|other| other.title() == app.title() && other.subject != subject)
+        .map(|other| other.subject)
+        .collect();
+    if alike.is_empty() {
+        return String::from(app.title());
+    }
+    let mut told_by = String::from(words::platform_name(subject.platform));
+    alike.retain(|other| other.platform == subject.platform);
+    if !alike.is_empty() {
+        told_by.push_str(", ");
+        match &subject.version {
+            Some(version) => {
+                told_by.push_str("version ");
+                told_by.push_str(version);
+            }
+            None => told_by.push_str("no version stated"),
+        }
+        alike.retain(|other| other.version == subject.version);
+        if let (false, Some(build)) = (alike.is_empty(), build_words(subject)) {
+            told_by.push_str(", build ");
+            told_by.push_str(&build);
+        }
+    }
+    format!("{} ({told_by})", app.title())
 }
 
 /// The three counts of the headline, and what they count.
@@ -564,11 +602,16 @@ fn app_line(page: &mut Markup, subject: &Subject) {
 /// whole digest is in the app's records. A package that could not be read
 /// has no digest.
 fn build(page: &mut Markup, subject: &Subject) {
-    let digest = subject.digest.to_string();
-    match digest.split_once(':') {
-        Some((scheme, hex)) => page.element("code", &[], &format!("{scheme}:{}…", short(hex))),
+    match build_words(subject) {
+        Some(build) => page.element("code", &[], &build),
         None => page.raw("none, the file was not read"),
     }
+}
+
+fn build_words(subject: &Subject) -> Option<String> {
+    let digest = subject.digest.to_string();
+    let (scheme, hex) = digest.split_once(':')?;
+    Some(format!("{scheme}:{}…", short(hex)))
 }
 
 /// Who publishes the app, and how that is known. The party of every finding
