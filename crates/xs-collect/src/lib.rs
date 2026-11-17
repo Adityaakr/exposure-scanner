@@ -23,6 +23,7 @@
 //! can reach the output. Records hold paths relative to the artifact only;
 //! where the artifact sits on disk is not recorded anywhere.
 
+pub mod android;
 pub mod discover;
 mod electron;
 pub mod macos;
@@ -89,8 +90,8 @@ impl fmt::Display for ScanError {
             Self::Path { path, error } => write!(f, "cannot read {}: {error}", path.display()),
             Self::Unsupported(path) => write!(
                 f,
-                "{} is not a macOS application bundle or a folder of them; other artifact kinds \
-                 are not supported yet",
+                "{} is not a macOS application bundle, an Android package (.apk) or a folder of \
+                 them; other artifact kinds are not supported yet",
                 path.display()
             ),
             Self::Threads(message) => write!(f, "cannot start worker threads: {message}"),
@@ -111,23 +112,29 @@ impl From<EvidenceError> for ScanError {
 
 /// Scans the artifacts found at `paths` and returns the evidence.
 ///
-/// Each path is a macOS application bundle or a folder that holds bundles.
-/// Giving the same bundle twice, directly or through a symbolic link, scans
-/// it once.
+/// Each path is a macOS application bundle, an Android package (a file
+/// named `.apk`), or a folder that holds either. Giving the same artifact
+/// twice, directly or through a symbolic link, scans it once.
 ///
 /// # Errors
 ///
-/// Fails if a path does not exist or is not scannable, or if the worker
-/// threads cannot be started. Unreadable or malformed files inside an
-/// artifact do not fail the scan.
+/// Fails if a path does not exist or is not scannable, if an Android
+/// package cannot be read to its end or changes while it is read, or if the
+/// worker threads cannot be started. Unreadable or malformed files inside
+/// an artifact do not fail the scan.
 pub fn scan(
     paths: &[PathBuf],
     matchers: &Matchers<'_>,
     options: ScanOptions,
 ) -> Result<ScanOutcome, ScanError> {
-    let bundles = discover::bundles(paths)?;
+    let found = discover::artifacts(paths)?;
     let pool = schedule::Pool::new(options.threads).map_err(ScanError::Threads)?;
-    let (records, stats) = macos::collect(&bundles, matchers, &pool);
+    let (mut records, mut stats) = macos::collect(&found.bundles, matchers, &pool);
+    let (package_records, package_stats) = android::collect(&found.packages, matchers, &pool)?;
+    records.extend(package_records);
+    stats.artifacts += package_stats.artifacts;
+    stats.files += package_stats.files;
+    stats.bytes += package_stats.bytes;
 
     let mut evidence = EvidenceSet::new();
     for record in records {

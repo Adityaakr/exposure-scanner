@@ -1,0 +1,11 @@
+# Real apps the tests scan when a fixture cache is given. They are never
+# stored in this repository: each line pins one by the SHA-256 of its file,
+# the name it has in the cache, and where its publisher offers it.
+#
+#   cargo xtask fixtures fetch --dir DIR
+#   EXPOSURE_FIXTURE_CACHE=DIR cargo test -p exposure --test android_real_apps
+#
+# sha256  file  url
+8aa0e5bf089ace014976eb8cae42a857ceb0604a7d2f00870419a3f03c588293  bitwarden-android-2026.9.1-play.apk  https://github.com/bitwarden/android/releases/download/v2026.9.1-bwpm/com.x8bit.bitwarden.apk
+d09124150e0d3714745ffa4b5b08908e9639ca97e53acd7c47aafe4df0e352fb  bitwarden-android-2026.9.1-fdroid.apk  https://github.com/bitwarden/android/releases/download/v2026.9.1-bwpm/com.x8bit.bitwarden-fdroid.apk
+0ab2b9b5103bd3173cb4540f9a2fe660d93a44ac17254e7d13b26d1d8f012192  newpipe-0.29.3.apk  https://github.com/TeamNewPipe/NewPipe/releases/download/v0.29.3/NewPipe_v0.29.3.apk

@@ -12,7 +12,7 @@ nothing anywhere.
 ## Status
 
 Milestone 1 ("static truth") is in progress. This repository currently holds
-the foundation, the macOS collector and the Electron collector:
+the foundation and the macOS, Electron and Android collectors:
 
 | Part | State |
 |---|---|
@@ -22,7 +22,8 @@ the foundation, the macOS collector and the Electron collector:
 | Match engine: literal search with boundary rules, exact and prefix tables, and the controls against false positives | Done |
 | macOS collector: Mach-O load commands, Objective-C class names, data and embedded-script sections, Team ID, privacy manifests, update feed | Done (below) |
 | Electron apps: npm packages listed in an asar archive or in the `Contents/Resources/app` folder, literals in the app's scripts, scope labels, breadth guard | Done |
-| The Android collector, company and party resolution, HTML report, cache | Not yet (build plan tasks 8 to 14) |
+| `exposure scan` on an Android package (`.apk`) | Done, with four witnesses: manifest components, classes defined in the DEX files, DEX string constants, and entry names |
+| Company and party resolution, HTML report, cache | Not yet (build plan tasks 9 to 14) |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
 
@@ -46,9 +47,10 @@ An Electron app is a macOS bundle too, so all of the above applies to it.
 Its scripts are read as well: an SDK is found when it is installed as an npm
 package, or bundled into the app's own code.
 
-So today a scan covers macOS bundles, Electron apps among them. Android
-packages are not read. A clean report from this build does not mean an app
-is clean.
+So today a scan covers macOS bundles, Electron apps among them, and Android
+packages. A scan of an Android package looks for the Android SDKs the seed
+pack has rules for, and for nothing else. A clean report from this build
+does not mean an app is clean.
 
 Measured on the three Electron apps this part is tested against: Logseq
 2.0.2 reports Sentry and PostHog, both from `js/main.js` inside its archive
@@ -73,7 +75,7 @@ $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exp
 ```
 
 ```
-exposure scan PATH... [--json FILE] [--threads N]   scan .app bundles, or folders of them
+exposure scan PATH... [--json FILE] [--threads N]   scan .app bundles, .apk files, or folders of them
 exposure report FILE [--json FILE]                  derive the report again from saved evidence
 exposure rules show                                 list the built-in rule pack
 exposure rules verify PACK --sig SIGNATURE          check a signed pack file offline
@@ -104,6 +106,39 @@ show a live flow. The tool states graded facts and never says more than its
 evidence supports. Each id under `evidence` is a record in the same file that
 names the rule token, where it was found and how often.
 
+### Android packages
+
+```console
+$ target/release/exposure scan tests/fixtures/android/Skeleton.apk --json report.json
+exposure: scanned 1 app (1 file, 1818 bytes): 2 claims, 0 coverage notes
+```
+
+An `.apk` file is read once, from start to end, for its SHA-256, which is its
+identity. On the way the manifest and the DEX files are copied out and
+parsed in memory, one at a time, so evidence only comes from bytes the hash
+covers. Nothing is extracted to disk and nothing is executed. Four tables
+are matched, each an independent witness:
+
+| Witness | Table | Still there when |
+|---|---|---|
+| `manifest_component` | Component and `meta-data` names in `AndroidManifest.xml` | The code is fully obfuscated |
+| `android_class_prefix` | Classes the `classes*.dex` files define, not merely refer to | Entry classes keep their names |
+| `dex_string` | String constants of the `classes*.dex` files | The code is fully obfuscated |
+| `apk_file` | Names of the archive's entries | The code is fully obfuscated |
+
+A record names the table and the file a hit is in, so it can be checked with
+`unzip -l`, `aapt2 dump xmltree` or `dexdump`. A hit in the string table
+carries the rule's token and never the string, which could be a URL.
+
+Limits, each reported in the output where it bites: only the DEX files
+Android loads from a package are read (`classes.dex`, `classes2.dex`, ...);
+an entry over 256 MiB, or past 1 GiB in total, is set aside with its size;
+archives with the 64-bit zip extension and DEX container files (version 041)
+are reported as unsupported. The seed pack has no `apk_file` tokens yet, and
+split packages are scanned one file at a time. A package that cannot be read
+to its end, or that changes while it is read, fails the scan: without the
+hash of one version of the file there is no subject to report on.
+
 ## The six properties
 
 The scanner reads app lists, so it has to be safer than the apps it reports
@@ -115,7 +150,7 @@ than left to discipline.
 | **Private.** A scan opens no socket. | No crate that can open one is allowed into the dependency graph. The lint lists ban the socket, process, clock and environment APIs. | `cargo deny check`; `cargo xtask no-network`: the binary imports no socket function, and the scan runs in a network namespace with no interfaces, under `strace`, and under a macOS sandbox that denies the network. Each check is paired with a control program that must be caught. |
 | **Deterministic.** Same evidence and rule pack, same bytes. | Derivation and rendering live in `no_std` crates that cannot read a clock, a file or the environment and have no randomly seeded map. Records hold paths inside the artifact only. Evidence is a set keyed by content hash. | One report across input orders, thread counts and install locations; the committed fixture report must be reproduced byte for byte on Linux and macOS. |
 | **Honest.** Every finding shows its grade and the raw record behind it. | The renderer refuses a claim that cites a record the report does not carry. | A test deletes a cited record and expects the render to fail. |
-| **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary or archive that large is reported with its size instead. Of a Mach-O file only the headers and at most 1 MiB of load commands per architecture are held in memory, whatever its size. Symbolic links are never followed. The file table of an asar archive is not trusted: an entry that overlaps another or reaches past the end of the archive is counted as a gap and not read, and a header in a shape no archive writer produces is refused whole. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. |
+| **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary or archive that large is reported with its size instead. Of a Mach-O file only the headers and at most 1 MiB of load commands per architecture are held in memory, whatever its size. Symbolic links are never followed. The file table of an asar archive is not trusted: an entry that overlaps another or reaches past the end of the archive is counted as a gap and not read, and a header in a shape no archive writer produces is refused whole. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. The zip, DEX and manifest parsers and the Android collector also run under libFuzzer, 60 s each (`fuzz/run.sh`). |
 | **Rules are data.** A rule pack cannot run code. | A rule is a literal plus one boundary from a fixed list. The scanner only loads a compiled pack whose signature verifies against a key built into the binary; it contains no parser for rule sources. | A tampered pack is refused; the pack compiler's lints are tested. |
 | **Finds what is there / does not cry wolf.** | Several independent witnesses per SDK, with controls against coincidental hits (below). | Each control has its own tests, and a property test checks that cutting a file into windows never changes what is found. The canary and the negative corpus arrive with the collectors. |
 
@@ -152,6 +187,9 @@ One Cargo workspace. A crate may depend only on crates above it in this list.
 | `exposure` (in `crates/xs-cli`) | The `exposure` binary | std |
 | `xtask` | Developer tooling. Never shipped | anything |
 
+`fuzz/` holds the fuzz targets. It is a workspace of its own, because it
+needs a nightly toolchain and the libFuzzer runtime.
+
 ```
 discover ─▶ collect ─▶ evidence ─▶ derive ─▶ claims ─▶ render ─▶ report
 (stat)     (read, hash,  set       (pure)              (pure)
@@ -177,6 +215,16 @@ $ cargo deny check                          # needs cargo-deny
 $ cargo xtask pack check                    # rule sources, compiled pack and signature agree
 $ cargo xtask guardrails                    # the guardrails refuse deliberate violations
 $ cargo xtask no-network                    # a scan opens no socket
+$ fuzz/run.sh 60                            # every fuzz target for 60 s; see fuzz/README.md
+```
+
+Some tests scan real apps, which are never stored here; without a cache
+folder the tests say so and pass. The Android packages are pinned by hash in
+`tests/fixtures/real-apps.txt`; `tests/fixtures/README.md` pins the rest.
+
+```console
+$ cargo xtask fixtures fetch --dir ~/.cache/exposure-fixtures
+$ EXPOSURE_FIXTURE_CACHE=~/.cache/exposure-fixtures cargo test -p exposure --test android_real_apps
 ```
 
 Rule changes are described in [`rules/README.md`](rules/README.md).

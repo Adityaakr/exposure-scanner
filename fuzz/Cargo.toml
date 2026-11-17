@@ -1,0 +1,53 @@
+# Fuzz targets for the parsers that read hostile files, run with cargo-fuzz
+# (libFuzzer). See README.md in this folder.
+#
+# This package is a workspace of its own on purpose: it needs a nightly
+# toolchain and the libFuzzer runtime, and neither may reach the scanner's
+# lock file, its dependency checks or its pinned toolchain.
+[package]
+name = "xs-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+xs-collect = { path = "../crates/xs-collect" }
+xs-formats = { path = "../crates/xs-formats" }
+xs-match = { path = "../crates/xs-match" }
+xs-model = { path = "../crates/xs-model" }
+xs-rules = { path = "../crates/xs-rules" }
+
+[[bin]]
+name = "zip"
+path = "fuzz_targets/zip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dex"
+path = "fuzz_targets/dex.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "android_manifest"
+path = "fuzz_targets/android_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "apk"
+path = "fuzz_targets/apk.rs"
+test = false
+doc = false
+bench = false

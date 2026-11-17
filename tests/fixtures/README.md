@@ -48,6 +48,19 @@ Scanning it must yield two claims: Sentry with two kinds of witness, and
 PostHog with one. `macos/ElectronSkeleton.report.json` is the report a scan
 must reproduce byte for byte.
 
+## `android/Skeleton.apk`
+
+A synthetic Android package, 1.8 kB, and the fixture of the Android
+collector (build plan, task 8). Scanning it must yield exactly two claims, Sentry and PostHog, each from two kinds of
+witness: `android/Skeleton.report.json` is the report, byte for byte. The
+package holds decoys that must find nothing: the server-side PostHog SDK, a
+host name that continues past a rule's token, an ad host no rule names, and
+a resource that mentions Crashlytics. Its DEX files define classes and hold
+strings and no code. The file is written by `fixture()` in
+`crates/xs-cli/tests/android.rs`, and a test fails if the two disagree;
+`EXPOSURE_BLESS=1 cargo test -p exposure` regenerates it and the committed
+reports.
+
 ## Real apps
 
 Real apps are pinned here by URL and SHA-256 and read from a cache folder
@@ -102,3 +115,13 @@ $ shasum -a 256 AltTab-11.10.2.zip          # compare with the table
 $ unzip -q AltTab-11.10.2.zip -d app        # gives app/AltTab.app
 $ EXPOSURE_FIXTURE_CACHE="$cache" cargo test --package exposure --test real_apps
 ```
+
+### Android packages
+
+The Android collector is measured on real packages too. `real-apps.txt` pins
+them by SHA-256 and download address. `cargo xtask fixtures fetch --dir DIR`
+downloads them into a folder outside the repository and refuses a file
+whose hash is not the pinned one, and tests that scan them run when
+`EXPOSURE_FIXTURE_CACHE` names that folder. CI does both, for
+`crates/xs-cli/tests/android_real_apps.rs` alone: the macOS apps above are
+not fetched there.

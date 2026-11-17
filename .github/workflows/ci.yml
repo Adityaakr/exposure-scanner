@@ -52,6 +52,17 @@ jobs:
           install -m 0755 "$RUNNER_TEMP/${archive}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
           command -v strace >/dev/null || { sudo apt-get update --quiet && sudo apt-get install --yes --quiet strace; }
 
+      # Real apps are pinned by hash in tests/fixtures/real-apps.txt and
+      # never stored in the repository. The cache spares their publishers a
+      # download on every run.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/real-apps
+          key: real-apps-${{ hashFiles('tests/fixtures/real-apps.txt') }}
+
+      - name: Fetch the pinned real apps
+        run: cargo xtask fixtures fetch --dir "$RUNNER_TEMP/real-apps"
+
       - name: Format
         run: cargo fmt --all --check
 
@@ -60,6 +71,14 @@ jobs:
 
       - name: Tests (determinism, honesty, hostile inputs, pack lints)
         run: cargo test --locked --workspace --all-features
+
+      # Only this test file is given the cache: it holds the Android
+      # packages, and the Electron and macOS tests read the same variable
+      # and would fail on the macOS apps that are not fetched here.
+      - name: Tests on the pinned real apps
+        run: cargo test --locked --all-features -p exposure --test android_real_apps
+        env:
+          EXPOSURE_FIXTURE_CACHE: ${{ runner.temp }}/real-apps
 
       - name: Pure crates build without the standard library
         run: cargo build --locked --target wasm32v1-none -p xs-model -p xs-match -p xs-derive -p xs-render
@@ -75,3 +94,42 @@ jobs:
 
       - name: A scan opens no socket
         run: cargo xtask no-network --strict
+
+  # The parsers of hostile files, under libFuzzer with the address
+  # sanitizer: one target per parser and one for the Android collector as a
+  # whole, 60 s each, seeded from the committed fixture.
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_FUZZ_VERSION: "0.13.2"
+      CARGO_FUZZ_SHA256: b5b704018b63e0f151c17a057ac53b5111e1db545d1b9f72fee79f08a545931c
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the nightly toolchain pinned in fuzz/
+        working-directory: fuzz
+        run: rustup toolchain install || rustup show
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            fuzz/target
+          key: fuzz-${{ hashFiles('fuzz/rust-toolchain.toml', 'fuzz/Cargo.lock') }}
+          restore-keys: fuzz-
+
+      - name: Install cargo-fuzz (pinned by hash)
+        run: |
+          archive="cargo-fuzz-${CARGO_FUZZ_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/rust-fuzz/cargo-fuzz/releases/download/${CARGO_FUZZ_VERSION}/${archive}"
+          echo "${CARGO_FUZZ_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar --extract --gzip --file "$RUNNER_TEMP/$archive" --directory "$RUNNER_TEMP" cargo-fuzz
+          install -m 0755 "$RUNNER_TEMP/cargo-fuzz" "$HOME/.cargo/bin/cargo-fuzz"
+
+      - name: Every fuzz target runs clean for 60 s
+        run: fuzz/run.sh 60

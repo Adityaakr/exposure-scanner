@@ -12,14 +12,20 @@
 //!   (design report, section 3, issue C3).
 #![cfg_attr(not(test), deny(clippy::indexing_slicing, clippy::arithmetic_side_effects))]
 
+pub mod android_manifest;
 pub mod asar;
 pub mod codesign;
+pub mod dex;
 pub mod host;
 pub mod info_plist;
+mod le;
 pub mod macho;
 #[cfg(any(test, feature = "testkit"))]
 pub mod macho_build;
 pub mod privacy_manifest;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
+pub mod zip;
 
 use std::fmt;
 
@@ -58,3 +64,36 @@ impl fmt::Display for FormatError {
 }
 
 impl std::error::Error for FormatError {}
+
+/// Why a reader gave up on an input whose format comes in variants.
+///
+/// A zip archive may be split over several disks or use the 64-bit
+/// extension, an entry may be encrypted, a DEX file may be of a later
+/// version. Such an input is not damaged, so calling it malformed would be
+/// wrong: the caller reports it as `unsupported_format` coverage instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadError {
+    /// The input is over a budget or not well formed.
+    Format(FormatError),
+    /// The input is a variant of the format this build has no reader for.
+    Unsupported,
+}
+
+impl From<FormatError> for ReadError {
+    fn from(error: FormatError) -> Self {
+        Self::Format(error)
+    }
+}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Format(error) => error.fmt(f),
+            Self::Unsupported => {
+                f.write_str("input is a variant of its format that this build cannot read")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ReadError {}
