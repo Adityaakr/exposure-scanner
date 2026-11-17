@@ -17,7 +17,7 @@
 //! The crate is `no_std` on purpose. Code here cannot read a clock, the
 //! environment or a file, and it has no `HashMap`, so no randomly seeded
 //! iteration order can leak into output. That is what makes a report a pure
-//! function of its evidence and rule pack.
+//! function of its evidence, rule pack and scan scope.
 #![no_std]
 
 extern crate alloc;
