@@ -96,7 +96,8 @@ pub enum RenderError {
     PackMismatch,
     /// A claim names a company or a category the rule pack does not hold. The
     /// category of an access claim is looked up in the fixed access list of
-    /// `xs_model::access` instead.
+    /// `xs_model::access` instead, or is `xs_model::permission::CATEGORY`
+    /// for a browser extension.
     NotInPack {
         /// The claim.
         claim: String,

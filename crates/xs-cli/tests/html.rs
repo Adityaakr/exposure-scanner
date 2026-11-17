@@ -15,7 +15,7 @@ use std::process::{Command, Output};
 
 use xs_formats::testkit::{self as formats, Attr, AxmlBuilder, DexBuilder, ZipBuilder};
 use xs_model::record::Record;
-use xs_model::{Report, canon};
+use xs_model::{Report, canon, permission};
 use xs_render::CONTENT_SECURITY_POLICY;
 use xs_render::testkit::{self, Element};
 
@@ -184,6 +184,45 @@ fn what_an_app_may_access_is_on_the_page() {
     assert_eq!(access.len(), 1, "one section for what the apps may access");
     assert!(access[0].contains("Camera"), "{}", access[0]);
     assert!(access[0].contains("Camera, microphone and screen"), "{}", access[0]);
+}
+
+/// A browser extension's permissions are access claims whose category is
+/// `xs_model::permission::CATEGORY`, which is in neither the rule pack nor
+/// the app access list. A scan of the committed extensions renders: each
+/// claim is a finding with its grade under what the apps may access, named
+/// as `xs_model::permission` names it, and a claim on optional keys alone
+/// says the extension does not hold the permission yet.
+#[test]
+fn what_a_browser_extension_may_access_is_on_the_page() {
+    let browser = Path::new(FIXTURES).join("browser");
+    let scanned = scan(&[&browser.join("Extensions"), &browser.join("addon@example.org.xpi")], 1);
+    let report: Report = serde_json::from_str(&scanned.json).unwrap();
+    let page = read(&scanned.html);
+    assert!(!report.claims.is_empty());
+
+    let access: Vec<&Element> =
+        page.descendants().into_iter().filter(|element| element.has_class("access")).collect();
+    assert_eq!(access.len(), 1, "one section for what the apps may access");
+    let section = access[0].text();
+    assert!(section.contains(permission::CATEGORY_NAME), "{section}");
+    for claim in &report.claims {
+        assert_eq!(claim.category, permission::CATEGORY);
+        let name = permission::Permission::from_id(&claim.object.id).unwrap().name();
+        let finding = access[0].by_id(&format!("f-{}", claim.id.digest())).unwrap();
+        let said = finding.text();
+        assert!(said.contains(name), "{said}");
+        let badge = finding.descendants().into_iter().find(|e| e.has_class("grade")).unwrap();
+        assert_eq!(badge.text(), "requested");
+        let optional = claim.notes.iter().any(|note| note == permission::NOTE_OPTIONAL);
+        assert_eq!(said.contains("does not hold this until it asks"), optional, "{said}");
+    }
+    assert!(
+        report
+            .claims
+            .iter()
+            .any(|claim| claim.notes.iter().any(|n| n == permission::NOTE_OPTIONAL)),
+        "the fixture has a permission on optional keys alone"
+    );
 }
 
 /// Property 3: one page across input order and thread count, from a scan

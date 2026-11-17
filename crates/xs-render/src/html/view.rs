@@ -11,10 +11,10 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Reverse;
 
-use xs_model::access;
 use xs_model::pack::{Entity, Pack};
 use xs_model::record::{CoverageRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject};
 use xs_model::{Claim, EvidenceSet, Headline, SubjectDigest};
+use xs_model::{access, permission};
 
 use crate::RenderError;
 
@@ -100,7 +100,8 @@ impl<'a> App<'a> {
 }
 
 /// The category of a claim: one of the rule pack's for a channel, one of the
-/// fixed list in [`access`] for an access claim.
+/// fixed list in [`access`] for an app's access claim, and
+/// [`permission::CATEGORY`] for a browser extension's.
 #[derive(Clone, Copy)]
 pub(crate) struct Category<'a> {
     pub(crate) name: &'a str,
@@ -339,6 +340,9 @@ fn finding<'a>(claim: &'a Claim, pack: &'a Pack) -> Result<Finding<'a>, RenderEr
         EdgeType::Channel => pack
             .category(&claim.category)
             .map(|category| Category { name: &category.name, headline: category.headline }),
+        EdgeType::Access if claim.category == permission::CATEGORY => {
+            Some(Category { name: permission::CATEGORY_NAME, headline: false })
+        }
         EdgeType::Access => access::category(&claim.category)
             .map(|category| Category { name: category.name, headline: false }),
     }

@@ -117,6 +117,8 @@ pub(crate) const fn platform_name(platform: Platform) -> &'static str {
     match platform {
         Platform::Android => "Android",
         Platform::Macos => "macOS",
+        Platform::Chromium => "Chromium-family browser",
+        Platform::Firefox => "Firefox",
     }
 }
 
@@ -138,6 +140,7 @@ pub(crate) const fn matcher_words(matcher: MatcherKind) -> &'static str {
         MatcherKind::UsageDescription => "A usage description in the app's property list",
         MatcherKind::Entitlement => "An entitlement in the app's code signature",
         MatcherKind::AndroidPermission => "A permission the app's manifest asks for",
+        MatcherKind::ExtensionManifest => "A permission the extension's manifest asks for",
     }
 }
 
@@ -158,6 +161,7 @@ pub(crate) const fn region_words(region: Region) -> &'static str {
         Region::ZipEntries => "the names of the archive's entries",
         Region::Entitlements => "the entitlements in the code signature",
         Region::Permissions => "the permissions the manifest asks for",
+        Region::ManifestKey => "the entries the manifest lists under that key",
     }
 }
 
@@ -189,6 +193,9 @@ pub(crate) const fn reason_words(reason: CoverageReason) -> &'static str {
         }
         CoverageReason::OverBudget => "It is over one of the scanner's limits of size or count.",
         CoverageReason::ParseError => "It is damaged, or is not the format its name says.",
+        CoverageReason::SupersededVersion => {
+            "Older versions of the extension, left for the browser to remove, were not scanned."
+        }
         CoverageReason::UnexpectedCase => {
             "Its name differs only in letter case from the one an app's layout fixes, so it \
              was not read as that part of the app."

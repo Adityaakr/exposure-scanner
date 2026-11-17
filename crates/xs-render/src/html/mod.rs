@@ -32,13 +32,13 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use xs_model::canon;
 use xs_model::claim::{Party, VendorBasis};
 use xs_model::pack::Pack;
 use xs_model::record::{
     CoverageRecord, EdgeRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject,
 };
 use xs_model::{Claim, EvidenceSet, Headline};
+use xs_model::{canon, permission};
 
 use self::view::{App, AppFindings, Company, Finding, Found, View};
 use self::words::{list_words, plural, short};
@@ -731,6 +731,10 @@ fn finding_block(page: &mut Markup, finding: &Finding<'_>, evidence: &EvidenceSe
                 page.text(date);
                 page.raw(". An app that still ships the code does not show a live flow.");
             }
+            None if note == permission::NOTE_OPTIONAL => page.raw(
+                "Optional: the extension does not hold this until it asks while it runs and \
+                 the person agrees.",
+            ),
             None => page.text(note),
         });
     }

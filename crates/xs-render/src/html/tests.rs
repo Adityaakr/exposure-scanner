@@ -102,8 +102,8 @@ fn subject(platform: Platform, id: &str, seed: u8) -> Subject {
         id: id.into(),
         version: Some("1.0".into()),
         digest: match platform {
-            Platform::Macos => SubjectDigest::Bundle(digest),
-            Platform::Android => SubjectDigest::Sha256(digest),
+            Platform::Macos | Platform::Chromium => SubjectDigest::Bundle(digest),
+            Platform::Android | Platform::Firefox => SubjectDigest::Sha256(digest),
         },
     }
 }
@@ -119,6 +119,9 @@ fn artifact(subject: &Subject, name: &str, team_id: Option<&str>) -> Record {
             files_scanned: 41,
             bytes_scanned: 68_219_904,
             sandbox: None,
+            publisher: None,
+            homepage: None,
+            browser: None,
         },
     })
 }
@@ -1239,7 +1242,8 @@ fn coverage_says_where_the_scan_looked_or_that_it_is_not_on_record() {
         stated(Some(ScanScope::Installed)),
         "This scan covered the apps installed in /Applications and ~/Applications; \
          /System/Applications (Apple's own apps on the sealed system volume) was not searched: \
-         name the folder to scan it."
+         name the folder to scan it; the extensions installed in your profiles of Arc, Brave, \
+         Google Chrome, Chromium, Dia, Microsoft Edge, Firefox and Vivaldi."
     );
     assert_eq!(
         stated(None),
