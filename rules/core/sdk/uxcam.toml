@@ -1,0 +1,17 @@
+id = "sdk/uxcam"
+name = "UXCam"
+entity = "uxcam"
+category = "session_replay"
+sources = [
+    "https://raw.githubusercontent.com/uxcam/uxcam-ios-sdk/3.9.0/UXCam.xcframework.zip",
+    "https://repo1.maven.org/maven2/com/uxcam/uxcam/3.12.1/uxcam-3.12.1.aar",
+]
+
+[match]
+manifest_component = [
+    "com.uxcam.performance.AppLaunchContentProvider",
+    "com.uxcam.service.UploadService",
+]
+android_class_prefix = ["com.uxcam."]
+apple_framework = ["UXCam.framework"]
+macho_objc_class = ["UXCam", "UXCamConfiguration", "UXCamHandler"]

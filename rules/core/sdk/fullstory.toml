@@ -1,0 +1,17 @@
+id = "sdk/fullstory"
+name = "Fullstory"
+entity = "fullstory"
+category = "session_replay"
+sources = [
+    "https://ios-releases.fullstory.com/fullstory-1.76.2-xcframework.zip",
+    "https://maven.fullstory.com/com/fullstory/instrumentation-full/1.76.2/instrumentation-full-1.76.2.aar",
+    "https://registry.npmjs.org/@fullstory/browser/-/browser-2.1.2.tgz",
+    "https://registry.npmjs.org/@fullstory/snippet/-/snippet-2.1.0.tgz",
+]
+
+[match]
+android_class_prefix = ["com.fullstory."]
+npm_package = ["@fullstory/browser", "@fullstory/snippet"]
+content_literal = [{ lit = "edge.fullstory.com", at = "host" }]
+apple_framework = ["FullStory.framework"]
+macho_objc_class = ["FSAllowlistNode", "FSBlockRegionOverlayWindow", "FSCallStackSource"]

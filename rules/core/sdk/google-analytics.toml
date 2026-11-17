@@ -1,0 +1,42 @@
+id = "sdk/google-analytics"
+name = "Google Analytics"
+entity = "google"
+category = "analytics"
+sources = [
+    "https://dl.google.com/android/maven2/com/google/android/gms/play-services-measurement-api/24.0.0/play-services-measurement-api-24.0.0.aar",
+    "https://dl.google.com/android/maven2/com/google/android/gms/play-services-measurement-impl/24.0.0/play-services-measurement-impl-24.0.0.aar",
+    "https://dl.google.com/android/maven2/com/google/android/gms/play-services-measurement/24.0.0/play-services-measurement-24.0.0.aar",
+    "https://dl.google.com/android/maven2/com/google/firebase/firebase-analytics/24.0.0/firebase-analytics-24.0.0.aar",
+    "https://dl.google.com/firebase/ios/swiftpm/13.2.0/FirebaseAnalytics.zip",
+    "https://dl.google.com/firebase/ios/swiftpm/13.2.0/GoogleAppMeasurement.zip",
+    "https://registry.npmjs.org/@firebase/analytics/-/analytics-0.10.26.tgz",
+]
+
+# Google Analytics 4. On Android and Apple platforms it ships as the SDK Google
+# calls Google Analytics for Firebase; on the web it is the gtag.js loader.
+#
+# The Android class prefix is the AppMeasurement entry classes and not the whole
+# package com.google.android.gms.measurement: the Mobile Ads SDK pulls in the
+# modules below that package (measurement-base, measurement-sdk-api) without
+# Analytics being in the app.
+[match]
+manifest_component = [
+    "com.google.android.gms.measurement.AppMeasurementJobService",
+    "com.google.android.gms.measurement.AppMeasurementReceiver",
+    "com.google.android.gms.measurement.AppMeasurementService",
+    "com.google.firebase.components:com.google.firebase.analytics.connector.internal.AnalyticsConnectorRegistrar",
+]
+android_class_prefix = [
+    "com.google.android.gms.measurement.AppMeasurement",
+    "com.google.firebase.analytics.",
+]
+apk_file = [
+    "firebase-analytics.properties",
+    "play-services-measurement-api.properties",
+    "play-services-measurement-impl.properties",
+    "play-services-measurement.properties",
+]
+npm_package = ["@firebase/analytics"]
+content_literal = [{ lit = "www.googletagmanager.com/gtag/js", at = "word" }]
+apple_framework = ["FirebaseAnalytics.framework", "GoogleAppMeasurement.framework"]
+macho_objc_class = ["APMAnalytics", "APMMeasurement", "FIRAnalytics"]

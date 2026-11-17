@@ -1,0 +1,28 @@
+id = "sdk/countly"
+name = "Countly"
+entity = "countly"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/Countly/countly-sdk-ios/HEAD/Countly.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/Countly/countly-sdk-ios/HEAD/CountlyCommon.m",
+    "https://raw.githubusercontent.com/Countly/countly-sdk-ios/HEAD/CountlyConfig.m",
+    "https://raw.githubusercontent.com/Countly/countly-sdk-ios/HEAD/CountlyConnectionManager.m",
+    "https://registry.npmjs.org/countly-sdk-nodejs/-/countly-sdk-nodejs-26.8.0.tgz",
+    "https://registry.npmjs.org/countly-sdk-web/-/countly-sdk-web-26.8.1.tgz",
+    "https://repo1.maven.org/maven2/ly/count/android/sdk/26.1.6/sdk-26.1.6.aar",
+]
+
+# Countly has no fixed endpoint: an app sends to the server its developer names,
+# which may be Countly's cloud or the developer's own. The rule therefore proves
+# the SDK and not where the data goes.
+#
+# The two script literals are storage keys of the web SDK. Either one alone is
+# a short name another program could use, so both must be in one file.
+[match]
+manifest_component = ["ly.count.android.sdk.CountlyInitProvider"]
+android_class_prefix = ["ly.count.android.sdk."]
+npm_package = ["countly-sdk-nodejs", "countly-sdk-web"]
+content_literal = [{ lit = "cly_event", at = "word" }, { lit = "cly_queue", at = "word" }]
+apple_framework = ["Countly.framework"]
+macho_objc_class = ["CountlyCommon", "CountlyConfig", "CountlyConnectionManager"]
+min_distinct = { content_literal = 2 }

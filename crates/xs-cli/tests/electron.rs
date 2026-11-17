@@ -205,9 +205,31 @@ fn scan_real(cache: &Path, app: &str) -> Report {
     serde_json::from_str(&scan(&[&path], 4)).unwrap()
 }
 
-/// The claims about channels: what the app ships.
-fn channels(report: &Report) -> Vec<&Claim> {
-    report.claims.iter().filter(|claim| claim.edge == EdgeType::Channel).collect()
+/// The SDKs the channel claims of a report name, other than components,
+/// which are libraries with no network side of their own and name no company.
+fn companies_sdks(report: &Report) -> Vec<&str> {
+    let mut sdks: Vec<&str> = report
+        .claims
+        .iter()
+        .filter(|claim| claim.edge == EdgeType::Channel && claim.category != "component")
+        .map(|claim| claim.object.id.as_str())
+        .collect();
+    sdks.sort_unstable();
+    sdks
+}
+
+/// The components a report names. Each one names no company and counts
+/// nowhere.
+fn components(report: &Report) -> Vec<&str> {
+    let mut found: Vec<&str> = report
+        .claims
+        .iter()
+        .filter(|claim| claim.edge == EdgeType::Channel && claim.category == "component")
+        .inspect(|claim| assert_eq!(claim.company, None, "{claim:#?}"))
+        .map(|claim| claim.object.id.as_str())
+        .collect();
+    found.sort_unstable();
+    found
 }
 
 /// The permissions the app may access, by id. They come from the bundle's
@@ -225,18 +247,6 @@ fn may_access(report: &Report) -> Vec<&str> {
 /// What the Electron template's property list asks for, in every app built
 /// from it, whether or not the app ever uses it.
 const TEMPLATE_ASKS_FOR: [&str; 4] = ["bluetooth", "camera", "microphone", "system-audio"];
-
-/// The records that are not about access: the ones the tests on real apps
-/// counted before access edges existed.
-fn other_records(report: &Report) -> usize {
-    report
-        .evidence
-        .iter()
-        .filter(
-            |(_, record)| !matches!(record, Record::Edge(edge) if edge.edge == EdgeType::Access),
-        )
-        .count()
-}
 
 /// Bytes the collector read, to tell "nothing found" from "not looked at".
 fn bytes_scanned(report: &Report) -> u64 {
@@ -264,7 +274,9 @@ fn logseq_reports_sentry_and_posthog_from_app_code() {
     let Some(cache) = fixture_cache("logseq") else { return };
     let app = "logseq-2.0.2/Logseq.app";
     let report = scan_real(&cache, app);
-    assert_eq!(channels(&report).len(), 2, "{:#?}", report.claims);
+    assert_eq!(companies_sdks(&report), ["sdk/posthog", "sdk/sentry"], "{:#?}", report.claims);
+    // The updaters it ships: Electron's own, and electron-builder's.
+    assert_eq!(components(&report), ["sdk/electron-updater", "sdk/squirrel"]);
     assert_eq!(may_access(&report), TEMPLATE_ASKS_FOR);
     for (sdk, company, token) in [
         ("sdk/sentry", "sentry", "sentry.javascript."),
@@ -291,6 +303,10 @@ fn logseq_reports_sentry_and_posthog_from_app_code() {
 
 /// Build plan, task 7: "Bitwarden desktop and Obsidian report nothing."
 ///
+/// Nothing that names a company: what they report is the updaters they ship,
+/// which are components. Squirrel is part of Electron on macOS, so every
+/// Electron app has it.
+///
 /// Bitwarden's archive carries an analytics snippet in the demo page of a
 /// search library (`node_modules/lunr/index.html`), which is not the app's
 /// code.
@@ -299,9 +315,10 @@ fn bitwarden_desktop_reports_nothing() {
     let Some(cache) = fixture_cache("bitwarden desktop") else { return };
     let app = "bitwarden-desktop-2026.10.4/Bitwarden.app";
     let report = scan_real(&cache, app);
-    assert!(channels(&report).is_empty(), "{:#?}", report.claims);
+    assert!(companies_sdks(&report).is_empty(), "{:#?}", report.claims);
+    assert_eq!(components(&report), ["sdk/electron-updater", "sdk/squirrel"]);
     assert_eq!(may_access(&report), TEMPLATE_ASKS_FOR);
-    assert_eq!(other_records(&report), 1, "the artifact record alone: {:#?}", report.evidence);
+    assert_eq!(report.headline, Headline::default());
     assert!(bytes_scanned(&report) >= archive_len(&cache, app, "app.asar"));
 }
 
@@ -310,7 +327,8 @@ fn obsidian_reports_nothing() {
     let Some(cache) = fixture_cache("obsidian") else { return };
     let app = "obsidian-1.15.1/Obsidian.app";
     let report = scan_real(&cache, app);
-    assert!(channels(&report).is_empty(), "{:#?}", report.claims);
+    assert!(companies_sdks(&report).is_empty(), "{:#?}", report.claims);
+    assert_eq!(components(&report), ["sdk/squirrel"]);
     assert_eq!(
         may_access(&report),
         [
@@ -324,7 +342,7 @@ fn obsidian_reports_nothing() {
             "system-audio"
         ]
     );
-    assert_eq!(other_records(&report), 1, "the artifact record alone: {:#?}", report.evidence);
+    assert_eq!(report.headline, Headline::default());
     // Both of its archives were read.
     let archives = archive_len(&cache, app, "app.asar") + archive_len(&cache, app, "obsidian.asar");
     assert!(bytes_scanned(&report) >= archives);

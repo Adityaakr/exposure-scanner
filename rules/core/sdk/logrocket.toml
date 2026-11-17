@@ -1,0 +1,26 @@
+id = "sdk/logrocket"
+name = "LogRocket"
+entity = "logrocket"
+category = "session_replay"
+sources = [
+    "https://registry.npmjs.org/logrocket/-/logrocket-12.4.0.tgz",
+    "https://storage.googleapis.com/logrocket-maven/com/logrocket/logrocket/3.17.0/logrocket-3.17.0.aar",
+]
+
+# LogRocket serves its recorder and takes recordings under several domains;
+# these are the ones the JavaScript SDK names.
+[match]
+manifest_component = ["com.logrocket.core.ApplicationInitProvider"]
+android_class_prefix = ["com.logrocket."]
+dex_string = [{ lit = "r.logrocket.io", at = "host" }, { lit = "r.lr-intake.com", at = "host" }]
+npm_package = ["logrocket"]
+content_literal = [
+    { lit = "cdn.logrocket.io", at = "host" },
+    { lit = "cdn.lr-in-prod.com", at = "host" },
+    { lit = "cdn.lr-in.com", at = "host" },
+    { lit = "cdn.lr-ingest.com", at = "host" },
+    { lit = "cdn.lr-ingest.io", at = "host" },
+    { lit = "cdn.lr-intake.com", at = "host" },
+    { lit = "r.logrocket.io", at = "host" },
+    { lit = "r.lr-ingest.io", at = "host" },
+]

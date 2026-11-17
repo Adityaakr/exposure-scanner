@@ -1,7 +1,7 @@
 # The project's own rule layer. Data in this directory is licensed CC BY 4.0
 # (see ../README.md).
 layer = "core"
-version = 4
+version = 5
 license = "CC-BY-4.0"
 
 # The fixed list of categories. Only the five marked `headline` count in a
@@ -34,6 +34,7 @@ id = "session_replay"
 name = "Session replay"
 headline = true
 
+
 [[category]]
 id = "crash_reporting"
 name = "Crash reporting"
@@ -42,6 +43,15 @@ headline = false
 [[category]]
 id = "push_messaging"
 name = "Push messaging"
+headline = false
+
+# Messaging platforms an app reports its user to, by identity and by what the
+# user does, so that the platform can choose and send messages: in-app chat,
+# campaigns, push. Not in the headline: the five headline categories are a
+# fixed list (design report, section 3, A7).
+[[category]]
+id = "customer_messaging"
+name = "Customer messaging"
 headline = false
 
 [[category]]

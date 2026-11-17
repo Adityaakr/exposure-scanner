@@ -1,0 +1,18 @@
+id = "sdk/appsflyer"
+name = "AppsFlyer"
+entity = "appsflyer"
+category = "attribution"
+sources = [
+    "https://github.com/AppsFlyerSDK/AppsFlyerFramework/releases/download/7.0.4/AppsFlyerLib-Static-SPM.xcframework.zip",
+    "https://raw.githubusercontent.com/AppsFlyerSDK/AppsFlyerFramework/HEAD/Package.swift",
+    "https://raw.githubusercontent.com/AppsFlyerSDK/AppsFlyerFramework/HEAD/Resources/PrivacyInfo.xcprivacy",
+    "https://repo1.maven.org/maven2/com/appsflyer/af-android-sdk/7.0.4/af-android-sdk-7.0.4.aar",
+]
+
+# The privacy manifest of the Apple SDK declares its tracking domains; an app
+# that repeats one of them in its own manifest declares the channel itself.
+[match]
+android_class_prefix = ["com.appsflyer."]
+apple_framework = ["AppsFlyerLib.framework"]
+macho_objc_class = ["AppsFlyerConsent", "AppsFlyerDeepLink", "AppsFlyerLib"]
+privacy_manifest = [{ lit = "appsflyersdk.com", at = "host" }]

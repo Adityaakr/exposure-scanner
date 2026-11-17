@@ -1,0 +1,42 @@
+id = "sdk/bugsnag"
+name = "Bugsnag"
+entity = "bugsnag"
+category = "crash_reporting"
+sources = [
+    "https://raw.githubusercontent.com/bugsnag/bugsnag-cocoa/HEAD/Bugsnag.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/bugsnag/bugsnag-cocoa/HEAD/Bugsnag/BugsnagSessionTracker.m",
+    "https://raw.githubusercontent.com/bugsnag/bugsnag-cocoa/HEAD/Bugsnag/Client/BugsnagClient.m",
+    "https://raw.githubusercontent.com/bugsnag/bugsnag-cocoa/HEAD/Bugsnag/Configuration/BugsnagConfiguration.m",
+    "https://raw.githubusercontent.com/bugsnag/bugsnag-cocoa/HEAD/Bugsnag/Configuration/BugsnagEndpointConfiguration.m",
+    "https://registry.npmjs.org/@bugsnag/browser/-/browser-9.1.0.tgz",
+    "https://registry.npmjs.org/@bugsnag/electron/-/electron-9.1.0.tgz",
+    "https://registry.npmjs.org/@bugsnag/js/-/js-9.1.0.tgz",
+    "https://registry.npmjs.org/@bugsnag/node/-/node-9.1.0.tgz",
+    "https://repo1.maven.org/maven2/com/bugsnag/bugsnag-android-core/6.28.1/bugsnag-android-core-6.28.1.aar",
+]
+
+# Bugsnag is part of SmartBear, which also serves it under bugsnag.smartbear.com.
+[match]
+manifest_component = ["com.bugsnag.android.internal.BugsnagContentProvider"]
+android_class_prefix = ["com.bugsnag.android."]
+apk_file = [
+    "lib/arm64-v8a/libbugsnag-root-detection.so",
+    "lib/armeabi-v7a/libbugsnag-root-detection.so",
+    "lib/x86/libbugsnag-root-detection.so",
+    "lib/x86_64/libbugsnag-root-detection.so",
+]
+dex_string = [
+    { lit = "notify.bugsnag.com", at = "host" },
+    { lit = "sessions.bugsnag.com", at = "host" },
+]
+npm_package = ["@bugsnag/browser", "@bugsnag/electron", "@bugsnag/js", "@bugsnag/node"]
+content_literal = [
+    { lit = "notify.bugsnag.com", at = "host" },
+    { lit = "sessions.bugsnag.com", at = "host" },
+]
+apple_framework = ["Bugsnag.framework"]
+macho_objc_class = ["BugsnagClient", "BugsnagConfiguration", "BugsnagSessionTracker"]
+macho_token = [
+    { lit = "notify.bugsnag.com", at = "host" },
+    { lit = "sessions.bugsnag.com", at = "host" },
+]

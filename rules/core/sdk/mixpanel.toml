@@ -1,0 +1,30 @@
+id = "sdk/mixpanel"
+name = "Mixpanel"
+entity = "mixpanel"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/mixpanel/mixpanel-iphone/HEAD/Mixpanel.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/mixpanel/mixpanel-iphone/HEAD/Sources/Mixpanel.h",
+    "https://raw.githubusercontent.com/mixpanel/mixpanel-iphone/HEAD/Sources/MixpanelGroup.m",
+    "https://raw.githubusercontent.com/mixpanel/mixpanel-iphone/HEAD/Sources/MixpanelPeople.m",
+    "https://registry.npmjs.org/mixpanel-browser/-/mixpanel-browser-2.86.0.tgz",
+    "https://registry.npmjs.org/mixpanel/-/mixpanel-0.24.0.tgz",
+    "https://repo1.maven.org/maven2/com/mixpanel/android/mixpanel-android/8.12.0/mixpanel-android-8.12.0.aar",
+]
+
+# api-js.mixpanel.com is the default host of the browser SDK, api.mixpanel.com
+# that of the Node, Android and Apple SDKs. The Swift SDK defines Swift classes
+# only: the Objective-C runtime lists them as _TtC, the length of the module
+# name, the module name, then the class.
+[match]
+android_class_prefix = ["com.mixpanel.android."]
+dex_string = [{ lit = "api.mixpanel.com", at = "host" }]
+npm_package = ["mixpanel", "mixpanel-browser"]
+content_literal = [
+    { lit = "api-js.mixpanel.com", at = "host" },
+    { lit = "api.mixpanel.com", at = "host" },
+    { lit = "cdn.mxpnl.com", at = "host" },
+]
+apple_framework = ["Mixpanel.framework"]
+macho_objc_class = ["MixpanelGroup", "MixpanelPeople", { lit = "_TtC8Mixpanel", at = "prefix" }]
+macho_token = [{ lit = "api.mixpanel.com", at = "host" }]

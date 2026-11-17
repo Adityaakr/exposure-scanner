@@ -1,0 +1,25 @@
+id = "sdk/electron-updater"
+name = "electron-updater"
+# The updater of electron-builder. It fetches the feed the app's own developer
+# names in the app-update.yml file it reads.
+component = true
+category = "component"
+sources = [
+    "https://registry.npmjs.org/electron-updater/-/electron-updater-6.8.11.tgz",
+]
+
+[match]
+npm_package = ["electron-updater"]
+content_literal = [{ lit = "app-update.yml", at = "word" }]
+
+# Logseq 2.0.2 for macOS on Apple silicon (tests/fixtures/README.md).
+[[fixture]]
+sha256 = "ffd6e086ba6f68a4748f80eaa8b38244a9cf78b05c076343d75e0230fe9440b4"
+url = "https://github.com/logseq/logseq/releases/download/2.0.2/Logseq-darwin-arm64-2.0.2.zip"
+expect = ["content_literal"]
+
+# Trezor Suite 26.7.3 for macOS on Apple silicon.
+[[fixture]]
+sha256 = "cfe8aa29bc2a4a7ea2a3126b68e4f57ff4b158434120f6e3f5473354ac013517"
+url = "https://github.com/trezor/trezor-suite/releases/download/v26.7.3/Trezor-Suite-26.7.3-mac-arm64.zip"
+expect = ["content_literal"]

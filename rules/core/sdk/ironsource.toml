@@ -1,0 +1,19 @@
+id = "sdk/ironsource"
+name = "Unity LevelPlay (ironSource)"
+entity = "ironsource"
+category = "advertising"
+sources = [
+    "https://repo1.maven.org/maven2/com/unity3d/ads-mediation/mediation-sdk/9.8.0/mediation-sdk-9.8.0.aar",
+]
+
+# ironSource merged into Unity in 2022 and its mediation SDK is now published as
+# Unity LevelPlay. The code keeps the com.ironsource package.
+[match]
+manifest_component = [
+    "com.ironsource.lifecycle.IronsourceLifecycleProvider",
+    "com.ironsource.sdk.controller.ControllerActivity",
+    "com.ironsource.sdk.controller.InterstitialActivity",
+    "com.ironsource.sdk.controller.OpenUrlActivity",
+]
+android_class_prefix = ["com.ironsource."]
+dex_string = [{ lit = "o-sdk.mediation.unity3d.com", at = "host" }]

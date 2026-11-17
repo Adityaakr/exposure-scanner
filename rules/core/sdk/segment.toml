@@ -1,0 +1,37 @@
+id = "sdk/segment"
+name = "Segment"
+entity = "segment"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/segmentio/analytics-ios/HEAD/Segment/Classes/SEGAnalytics.m",
+    "https://raw.githubusercontent.com/segmentio/analytics-ios/HEAD/Segment/Classes/SEGAnalyticsConfiguration.h",
+    "https://raw.githubusercontent.com/segmentio/analytics-ios/HEAD/Segment/Classes/SEGAnalyticsConfiguration.m",
+    "https://registry.npmjs.org/@segment/analytics-next/-/analytics-next-1.84.4.tgz",
+    "https://registry.npmjs.org/@segment/analytics-node/-/analytics-node-3.1.0.tgz",
+    "https://registry.npmjs.org/analytics-node/-/analytics-node-6.2.0.tgz",
+    "https://repo1.maven.org/maven2/com/segment/analytics/android/analytics/4.11.3/analytics-4.11.3.aar",
+]
+
+# Twilio Segment. The SDK sends events to Segment, which forwards them to the
+# destinations the app's developer configures on the server side; those
+# destinations cannot be seen in the app.
+#
+# The Swift SDK's module is named Segment. A folder Segment.framework or a
+# class under the module Segment is not a token: the word is common enough for
+# an app to name its own code so. The SDK's default hosts find it instead.
+[match]
+android_class_prefix = ["com.segment.analytics."]
+dex_string = [
+    { lit = "api.segment.io", at = "host" },
+    { lit = "cdn-settings.segment.com", at = "host" },
+]
+npm_package = ["@segment/analytics-next", "@segment/analytics-node", "analytics-node"]
+content_literal = [
+    { lit = "api.segment.io", at = "host" },
+    { lit = "cdn.segment.com", at = "host" },
+]
+macho_objc_class = ["SEGAnalytics", "SEGAnalyticsConfiguration"]
+macho_token = [
+    { lit = "api.segment.io", at = "host" },
+    { lit = "cdn-settings.segment.com", at = "host" },
+]

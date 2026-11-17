@@ -1,0 +1,15 @@
+id = "sdk/facebook-audience-network"
+name = "Meta Audience Network"
+entity = "meta"
+category = "advertising"
+sources = [
+    "https://repo1.maven.org/maven2/com/facebook/android/audience-network-sdk/6.22.0/audience-network-sdk-6.22.0.aar",
+]
+
+# Meta's ad network SDK, separate from the core Facebook SDK.
+[match]
+manifest_component = [
+    "com.facebook.ads.AudienceNetworkActivity",
+    "com.facebook.ads.AudienceNetworkContentProvider",
+]
+android_class_prefix = ["com.facebook.ads."]

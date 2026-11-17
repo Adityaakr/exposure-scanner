@@ -1,0 +1,19 @@
+id = "sdk/kochava"
+name = "Kochava"
+entity = "kochava"
+category = "attribution"
+sources = [
+    "https://repo1.maven.org/maven2/com/kochava/core/core/4.2.0/core-4.2.0.aar",
+    "https://repo1.maven.org/maven2/com/kochava/tracker/tracker/5.7.1/tracker-5.7.1.aar",
+]
+
+# Its endpoint hosts are strings an app that filters ad or tracking traffic can
+# hold as data, so two different ones must be in one DEX file to count.
+[match]
+android_class_prefix = ["com.kochava.core.", "com.kochava.tracker."]
+dex_string = [
+    { lit = "control.kochava.com", at = "host" },
+    { lit = "kvinit-prod.api.kochava.com", at = "host" },
+    { lit = "token.api.kochava.com", at = "host" },
+]
+min_distinct = { dex_string = 2 }
