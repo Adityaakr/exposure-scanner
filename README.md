@@ -243,7 +243,11 @@ such as `WAKE_LOCK`, is not listed and is no finding. A usage description
 under a key the list does not know is a coverage note (`unrecognized`,
 `unrecognized_record`), not silence. An entitlement that holds a list, such
 as a sandbox exception for paths on your disk, is recorded with the number
-of its entries and never the entries.
+of its entries and never the entries. An Android permission the manifest
+limits with `android:maxSdkVersion` keeps that level as `max_sdk` in its
+record. When every witness of a claim stops at a level, the claim's `notes`
+say which devices it is limited to, such as "only on Android 9 and older
+(API level 28)".
 
 Only the main executable speaks for the app; a helper's entitlements are the
 helper's. Its signature also says whether the app runs in the App Sandbox,
