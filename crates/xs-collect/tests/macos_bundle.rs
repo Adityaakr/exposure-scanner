@@ -477,9 +477,13 @@ fn facts(evidence: &EvidenceSet) -> (u64, u64) {
         .unwrap()
 }
 
-/// Every limit is a budget: a file over `MAX_FILE_BYTES` (2 GiB) is not
-/// read. The file here is sparse, so the test would take minutes and count
-/// two gibibytes if the collector read it.
+fn resize(path: &Path, len: u64) -> std::io::Result<()> {
+    fs::OpenOptions::new().write(true).open(path)?.set_len(len)
+}
+
+/// Every limit is a budget: a Mach-O file over `MAX_FILE_BYTES` (2 GiB) is
+/// not read. The file here is sparse, so the test would take minutes and
+/// count two gibibytes if the collector read it.
 #[test]
 fn a_file_over_the_byte_budget_is_reported_with_its_size_and_not_read() {
     let dir = tempfile::tempdir().unwrap();
@@ -488,7 +492,7 @@ fn a_file_over_the_byte_budget_is_reported_with_its_size_and_not_read() {
     let huge = root.join("Contents/MacOS/Huge");
     write(&huge, macho(b""));
     let scan_with = |len: u64| {
-        fs::OpenOptions::new().write(true).open(&huge).unwrap().set_len(len).unwrap();
+        resize(&huge, len).unwrap();
         evidence(&root)
     };
     let size = (2u64 << 30) + 1;
@@ -507,6 +511,58 @@ fn a_file_over_the_byte_budget_is_reported_with_its_size_and_not_read() {
     // again when only the file's size differs.
     assert_ne!(digest(&evidence), digest(&reference));
     assert_ne!(digest(&scan_with(size + 1)), digest(&evidence));
+}
+
+/// The bundle digest covers what evidence is drawn from (`bd1`, design
+/// report section 4.3), and a coverage record says something relevant was
+/// skipped. A large file the collector would never read is neither.
+#[test]
+fn a_large_file_the_collector_does_not_read_leaves_no_trace() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = bundle(dir.path(), "Example.app");
+    let reference = evidence(&root);
+    let pack = root.join("Contents/Resources/data.pak");
+    write(&pack, b"PACK: assets, not a binary");
+
+    resize(&pack, 3 << 30).unwrap();
+    assert_eq!(evidence(&root), reference);
+    resize(&pack, (3 << 30) + 1).unwrap();
+    assert_eq!(evidence(&root), reference);
+}
+
+/// "A problem inside a bundle never fails the scan": a file whose size does
+/// not fit a canonical JSON integer (2^53 - 1, RFC 7493) is still one
+/// coverage record, and the other app is still reported.
+#[test]
+#[allow(clippy::print_stderr, reason = "a skipped case must be visible in the test output")]
+fn a_file_too_large_for_a_json_integer_does_not_stop_the_scan() {
+    let dir = tempfile::tempdir().unwrap();
+    let hostile = bundle(dir.path(), "Hostile.app");
+    let other = bundle(dir.path(), "Other.app");
+    write(&other.join("Contents/Info.plist"), info_plist("com.example.other", "1.0"));
+    let huge = hostile.join("Contents/MacOS/Huge");
+    write(&huge, macho(b""));
+    if let Err(error) = resize(&huge, 1 << 53) {
+        eprintln!("SKIPPED: this file system refuses a file of 2^53 bytes ({error})");
+        return;
+    }
+    let scan = || evidence_with(&[dir.path().to_path_buf()], 2);
+    let evidence = scan();
+
+    let gap = gap(&evidence, CoverageReason::OverBudget);
+    assert_eq!(gap.subject.id, "com.example.app");
+    assert_eq!(gap.location.as_ref().unwrap().as_str(), "Contents/MacOS/Huge");
+    assert_eq!(gap.bytes, Some((1 << 53) - 1));
+    let mut subjects: Vec<&str> =
+        edges(&evidence).iter().map(|edge| edge.subject.id.as_str()).collect();
+    subjects.sort_unstable();
+    assert_eq!(subjects, ["com.example.app", "com.example.other"]);
+
+    // The exact size still reaches the digest.
+    let before = gap.subject.digest;
+    resize(&huge, (1 << 53) + 1).unwrap();
+    let evidence = scan();
+    assert_ne!(self::gap(&evidence, CoverageReason::OverBudget).subject.digest, before);
 }
 
 #[test]

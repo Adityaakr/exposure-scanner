@@ -11,7 +11,7 @@
 //!
 //! Every limit is a fixed budget, so a hostile bundle costs a bounded amount
 //! of work and gives the same result on every run: [`MAX_DEPTH`] folders
-//! deep, [`MAX_FILES`] files, [`MAX_FILE_BYTES`] per file, and the property
+//! deep, [`MAX_FILES`] files, [`MAX_FILE_BYTES`] per file read, and the property
 //! list parser's own budgets. What a budget cuts off becomes an
 //! `over_budget` coverage record.
 //!
@@ -39,7 +39,7 @@ use xs_model::record::{
     EdgeType, Facts, ObjectKind, ObjectRef, Platform, Proof, Record, Region, Scope, Subject,
     SubjectKind, V1,
 };
-use xs_model::{MatcherKind, RelPath, Sha256Digest, text};
+use xs_model::{MatcherKind, RelPath, Sha256Digest, canon, text};
 
 use crate::ScanStats;
 use crate::read::{self, OnePass, WINDOW};
@@ -49,9 +49,12 @@ use crate::schedule::Pool;
 pub const MAX_DEPTH: u32 = 64;
 /// Most files the collector considers in one bundle.
 pub const MAX_FILES: usize = 1_000_000;
-/// Largest file the collector reads: 2 GiB. A larger file is not opened; it
-/// is reported with its size, and the bundle digest covers that size instead
-/// of a content hash. The largest file seen in a real app was 485 MB.
+/// Largest file the collector reads: 2 GiB. The budget applies to the files
+/// it would read, those whose first bytes say Mach-O. A larger one is not
+/// read past those first bytes; it is reported with its size, and the bundle
+/// digest covers that size instead of a content hash. A file the collector
+/// has no reason to read is ignored whatever its size. The largest file seen
+/// in a real app was 485 MB.
 pub const MAX_FILE_BYTES: u64 = 2 << 30;
 
 const CONTENTS: &str = "Contents";
@@ -99,13 +102,17 @@ struct Plan {
 
 impl Plan {
     /// Sets aside a file of `bytes` bytes, which is over [`MAX_FILE_BYTES`].
+    ///
+    /// The digest covers the exact size. The record carries it only up to
+    /// the largest integer canonical JSON can hold, so that a file of any
+    /// size the file system allows still yields a record.
     fn over_budget(&mut self, path: RelPath, bytes: u64) {
         self.manifest.over_budget(path.clone(), bytes);
         self.gaps.add((
             CoverageStatus::Skipped,
             CoverageReason::OverBudget,
             Some(path),
-            Some(bytes),
+            Some(bytes.min(canon::MAX_SAFE_INTEGER)),
         ));
     }
 }
@@ -123,7 +130,7 @@ enum FileResult {
     NotCandidate,
     /// Read to the end.
     Read(OnePass),
-    /// Larger than the byte budget by the time it was read: its size.
+    /// A file the collector reads, but larger than the byte budget: its size.
     OverBudget(u64),
     /// The file system refused.
     Failed,
@@ -354,9 +361,6 @@ fn walk(plan: &mut Plan) {
                     break;
                 }
                 match entry.metadata() {
-                    Ok(metadata) if metadata.len() > MAX_FILE_BYTES => {
-                        plan.over_budget(path, metadata.len());
-                    }
                     Ok(metadata) => plan.files.push((path, metadata.len())),
                     Err(_) => plan.gaps.skipped(CoverageReason::Unreadable, Some(path)),
                 }
@@ -378,9 +382,9 @@ thread_local! {
 /// Reads one file in a single pass if its first bytes say it is a Mach-O
 /// file, and gives up after one small read otherwise.
 ///
-/// Never reads more than one byte past `budget`. The walk already set aside
-/// the files that were larger when it listed them; one that has grown since
-/// stops here and is reported the same way.
+/// A Mach-O file larger than `budget` is set aside after that one small
+/// read. One that grows while it is being read stops one byte past `budget`
+/// and is reported the same way, so the read is bounded in every case.
 fn read_file<M: ContentMatcher + ?Sized>(path: &Path, content: &M, budget: u64) -> FileResult {
     let Ok(file) = File::open(path) else { return FileResult::Failed };
     let mut bounded = (&file).take(budget.saturating_add(1));
@@ -389,14 +393,26 @@ fn read_file<M: ContentMatcher + ?Sized>(path: &Path, content: &M, budget: u64) 
         if buf.len() < needed {
             buf.resize(needed, 0);
         }
-        let sniff = |head: &[u8]| macho::sniff(head).is_some();
-        match read::one_pass(&mut bounded, buf, WINDOW, content, sniff) {
+        let mut oversize = None;
+        let wanted = |head: &[u8]| {
+            if macho::sniff(head).is_none() {
+                return false;
+            }
+            match file.metadata() {
+                Ok(metadata) if metadata.len() > budget => {
+                    oversize = Some(metadata.len());
+                    false
+                }
+                _ => true,
+            }
+        };
+        match read::one_pass(&mut bounded, buf, WINDOW, content, wanted) {
             Ok(Some(pass)) if pass.bytes > budget => match file.metadata() {
                 Ok(metadata) => FileResult::OverBudget(metadata.len().max(pass.bytes)),
                 Err(_) => FileResult::Failed,
             },
             Ok(Some(pass)) => FileResult::Read(pass),
-            Ok(None) => FileResult::NotCandidate,
+            Ok(None) => oversize.map_or(FileResult::NotCandidate, FileResult::OverBudget),
             Err(_) => FileResult::Failed,
         }
     })
@@ -511,11 +527,13 @@ fn finish(
 mod tests {
     use std::io::Write as _;
 
+    use xs_model::Pack;
+    use xs_model::pack::{Category, Layer, LoadedLayer};
+
     use super::*;
 
-    /// The byte budget must bind on what is actually read, not only on the
-    /// size the walk saw: a file can grow between the two. The oracle is the
-    /// file's length as written here.
+    /// The byte budget binds on the open file, whatever size the walk saw.
+    /// The oracle is the file's length as written here.
     #[test]
     fn a_file_over_the_budget_when_read_is_set_aside_with_its_size() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -534,9 +552,57 @@ mod tests {
                 "budget {budget}"
             );
         }
-        // A file that is not a candidate is still told apart by its head.
+        // A file the collector has no reason to read is not over any budget.
         let mut other = tempfile::NamedTempFile::new().unwrap();
         other.write_all(&[b'x'; 100]).unwrap();
         assert!(matches!(read_file(other.path(), &NoContent, 50), FileResult::NotCandidate));
+    }
+
+    /// A problem inside a bundle never fails the scan, so every record the
+    /// collector emits must have an id. Canonical JSON holds integers up to
+    /// 2^53 - 1 (RFC 7493, section 2.2); a file system can report more.
+    #[test]
+    fn an_over_budget_file_of_any_size_yields_a_record_with_an_id() {
+        let layer = Layer {
+            format: V1,
+            layer: "core".into(),
+            version: 1,
+            license: "CC-BY-4.0".into(),
+            categories: vec![Category {
+                id: "component".into(),
+                name: "Component".into(),
+                headline: false,
+            }],
+            entities: vec![],
+            rules: vec![],
+        };
+        let pack = Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"") }]).unwrap();
+        let matchers = Matchers::build(&pack);
+        let dir = tempfile::tempdir().unwrap();
+        let records_for = |bytes: u64| {
+            let mut plan = plan(dir.path());
+            plan.over_budget(RelPath::new("Contents/MacOS/Huge").unwrap(), bytes);
+            finish(plan, Vec::new(), &matchers).0
+        };
+
+        for bytes in [(1 << 53) - 1, 1 << 53, u64::MAX] {
+            let records = records_for(bytes);
+            let sizes: Vec<Option<u64>> = records
+                .iter()
+                .filter_map(|record| match record {
+                    Record::Coverage(gap) if gap.reason == CoverageReason::OverBudget => {
+                        Some(gap.bytes)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(sizes, [Some(9_007_199_254_740_991)], "{bytes} bytes");
+            for record in &records {
+                assert!(record.id().is_ok(), "{bytes} bytes: {record:?}");
+            }
+        }
+        // The digest still tells two such files apart by their exact sizes.
+        let digest = |bytes| records_for(bytes).first().map(|record| record.subject().digest);
+        assert_ne!(digest(u64::MAX), digest(u64::MAX - 1));
     }
 }

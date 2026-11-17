@@ -475,7 +475,9 @@ pub struct CoverageRecord {
     #[serde(rename = "where", default, skip_serializing_if = "Option::is_none")]
     pub location: Option<RelPath>,
     /// The size in bytes of the input that was not covered, when the size is
-    /// the reason: a file over the per-file byte budget.
+    /// the reason: a file the collector reads, but over the per-file byte
+    /// budget. A size past the largest integer canonical JSON holds
+    /// (2^53 - 1) is stored as that integer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes: Option<u64>,
     /// How many items this record stands for.

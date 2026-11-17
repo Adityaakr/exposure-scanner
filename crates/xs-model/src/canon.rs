@@ -21,7 +21,7 @@ use serde_json::Value;
 
 /// Largest integer magnitude that survives a round trip through an IEEE 754
 /// double, which is what RFC 8785 assumes every number is.
-const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+pub const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
 /// Deepest nesting the writer accepts. The model's own types nest five levels
 /// at most; the limit only stops a hostile document from exhausting the stack.

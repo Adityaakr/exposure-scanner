@@ -187,9 +187,10 @@ impl_serde_str!(SubjectDigest, "a subject digest such as \"sha256:…\" or \"bd1
 /// directory listing it consulted, by the hash of the sorted entry names. Two
 /// bundles with equal digests therefore yield equal evidence, which is the
 /// property that makes a `contains` record reproducible by anyone holding the
-/// same artifact. A file the collector refused to read because it is over
-/// the per-file byte budget enters by its size, the one thing known about
-/// it, so the coverage record that names that size is covered too.
+/// same artifact. A file the collector reads, but refused because it is over
+/// the per-file byte budget, enters by its size, the one thing known about
+/// it, so the coverage record that names that size is covered too. A file
+/// the collector has no reason to read does not enter at all.
 ///
 /// The digest is the SHA-256 of the canonical JSON of
 /// `["bd1", [[path, entry], …]]` with paths in byte order, where `entry` is
