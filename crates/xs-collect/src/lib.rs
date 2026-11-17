@@ -10,7 +10,8 @@
 //!
 //! One collector walks a macOS application bundle ([`macos`]). Inside a
 //! bundle, the code of an Electron app (asar archives and loose scripts) is
-//! read by a part of its own.
+//! read by a part of its own. Another reads an Android package, a single
+//! file, in a pass of its own ([`android`]).
 //!
 //! Everything here is read-only. Nothing is extracted, executed or written,
 //! and symbolic links inside an artifact are never followed, so a hostile
