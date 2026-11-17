@@ -89,12 +89,12 @@ sensitive in itself.
 {
   "type": "channel",
   "subject": {"kind": "app", "platform": "macos", "id": "org.example.exposure.skeleton",
-              "version": "1.0.0", "digest": "bd1:1333…0461"},
+              "version": "1.0.0", "digest": "bd1:e387…4353"},
   "object": {"kind": "sdk", "id": "sdk/sentry", "name": "Sentry"},
   "company": "sentry", "category": "crash_reporting", "party": "unknown",
   "grade": "contains", "rungs": ["contains"],
   "confidence": "high", "witnesses": 1,
-  "evidence": ["sha256:faa8…4e08"]
+  "evidence": ["sha256:078a…5c96"]
 }
 ```
 
