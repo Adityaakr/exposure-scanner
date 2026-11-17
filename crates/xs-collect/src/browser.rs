@@ -850,6 +850,7 @@ fn asked(manifest: &Manifest) -> Asked<'_> {
             }
         }
     }
+    // Site patterns, which a browser takes only from version 3.
     let sites = [
         (ManifestKey::HostPermissions, &manifest.host_permissions),
         (ManifestKey::OptionalHostPermissions, &manifest.optional_host_permissions),

@@ -20,8 +20,8 @@
 //! host the app's own files declare, such as its update feed. Only the host
 //! is kept of a declared address, never the address itself. An access edge
 //! points at a permission: one an app asks for, from the fixed list in
-//! [`access`](crate::access), or one a browser extension's manifest asks
-//! for, from the fixed list in [`permission`](crate::permission).
+//! [`access`], or one a browser extension's manifest asks
+//! for, from the fixed list in [`permission`].
 //!
 //! Besides edges there are two more kinds. An `artifact` record carries facts
 //! about the subject itself. A `coverage` record says what was skipped or not
@@ -592,7 +592,7 @@ pub enum ObjectKind {
     /// the address it was taken from.
     Host,
     /// Something the app asks to reach, such as the camera or the contacts,
-    /// one of the fixed list in [`access`](crate::access), or something a
+    /// one of the fixed list in [`access`], or something a
     /// browser extension's manifest asks the browser for, one of the fixed
     /// list in [`permission`]. Only an access edge points at one.
     Permission,

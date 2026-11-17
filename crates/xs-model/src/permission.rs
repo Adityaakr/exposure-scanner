@@ -234,8 +234,8 @@ pub enum ManifestKey {
     ContentScripts,
     /// `optional_permissions`: what the extension may ask for while it runs.
     OptionalPermissions,
-    /// `optional_host_permissions`: the site patterns it may ask for while
-    /// it runs.
+    /// `optional_host_permissions`: the site patterns a version 3 manifest
+    /// may ask for while it runs.
     OptionalHostPermissions,
 }
 
