@@ -252,24 +252,12 @@ fn plan(root: &Path, max_entries: usize) -> Plan {
         files_read: 0,
         bytes_read: 0,
     };
-    // `walk` never follows a link. The property list is read by a fixed
-    // path, so the folder on that path must be a real one, or a link named
-    // `Contents` would stand another bundle in for this one.
-    if replaced(&plan.root.join(CONTENTS)) {
-        plan.gaps.unrecognized(CoverageReason::ParseError, rel(CONTENTS));
-    } else {
-        read_info_plist(&mut plan);
-    }
     walk(&mut plan, max_entries);
     plan
 }
 
-/// Whether something other than a real folder (a symbolic link, a file) sits
-/// where a folder belongs. A missing folder is not a replaced one.
-fn replaced(dir: &Path) -> bool {
-    fs::symlink_metadata(dir).is_ok_and(|metadata| !metadata.is_dir())
-}
-
+/// Reads the property list. Called when the walk lists it, so that a link
+/// named `Contents` cannot stand another bundle in for this one.
 fn read_info_plist(plan: &mut Plan) {
     let location = rel(INFO_PLIST);
     let path = plan.root.join(INFO_PLIST);
@@ -320,6 +308,13 @@ fn read_info_plist(plan: &mut Plan) {
 /// real folder. That listing enters the bundle digest, because evidence is
 /// drawn from it.
 ///
+/// The layout names (`Contents`, and `Frameworks` and `Info.plist` in it)
+/// are taken exactly as the listing spells them, never as a path for the
+/// file system to resolve, so a bundle gives the same evidence on a volume
+/// that ignores letter case as on one that does not. A name that differs
+/// from one of them only in case is reported, and what sits there is not
+/// treated as that part of the layout.
+///
 /// Every entry of every folder listed counts against `max_entries`. A folder
 /// with more entries than are left of that budget is skipped whole and
 /// reported as over budget, and nothing is drawn from it. The order of the
@@ -332,6 +327,9 @@ fn walk(plan: &mut Plan, max_entries: usize) {
     // Depth-first with an explicit stack: nesting is bounded by the budget,
     // not by the call stack.
     let mut pending: Vec<(PathBuf, Option<RelPath>, u32)> = vec![(plan.root.clone(), None, 0)];
+    // Whether the property list, or what replaced the folder that should
+    // hold it, has been reported on.
+    let mut plist_settled = false;
     while let Some((dir, dir_rel, depth)) = pending.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
             plan.gaps.skipped(CoverageReason::Unreadable, dir_rel);
@@ -368,10 +366,29 @@ fn walk(plan: &mut Plan, max_entries: usize) {
                 plan.gaps.skipped(CoverageReason::Unreadable, None);
                 continue;
             };
+            let miscased = [CONTENTS, FRAMEWORKS, INFO_PLIST].iter().any(|expected| {
+                let (parent, leaf) = match expected.rsplit_once('/') {
+                    Some((parent, leaf)) => (Some(parent), leaf),
+                    None => (None, *expected),
+                };
+                dir_rel.as_ref().map(RelPath::as_str) == parent
+                    && name != leaf
+                    && name.eq_ignore_ascii_case(leaf)
+            });
+            if miscased {
+                plan.gaps.skipped(CoverageReason::UnexpectedCase, Some(path.clone()));
+            }
             let Ok(kind) = kind else {
                 plan.gaps.skipped(CoverageReason::Unreadable, Some(path));
                 continue;
             };
+            if path.as_str() == INFO_PLIST {
+                plist_settled = true;
+                read_info_plist(plan);
+                if !kind.is_dir() {
+                    continue;
+                }
+            }
             if kind.is_dir() {
                 if frameworks {
                     plan.frameworks.push(name.to_string());
@@ -383,6 +400,11 @@ fn walk(plan: &mut Plan, max_entries: usize) {
                 }
                 continue;
             }
+            if path.as_str() == CONTENTS {
+                // A link or a file where the contents folder belongs.
+                plist_settled = true;
+                plan.gaps.unrecognized(CoverageReason::ParseError, Some(path.clone()));
+            }
             if path.as_str() == FRAMEWORKS {
                 // A link or a file where the frameworks folder belongs.
                 plan.gaps.unrecognized(CoverageReason::ParseError, Some(path.clone()));
@@ -391,9 +413,6 @@ fn walk(plan: &mut Plan, max_entries: usize) {
                 // Never followed. Its target, if inside the bundle, is
                 // reached by its real path.
             } else if kind.is_file() {
-                if path.as_str() == INFO_PLIST {
-                    continue; // Already read.
-                }
                 match fs::symlink_metadata(dir.join(name)) {
                     Ok(metadata) if metadata.is_file() => plan.files.push((path, metadata.len())),
                     _ => plan.gaps.skipped(CoverageReason::Unreadable, Some(path)),
@@ -408,6 +427,9 @@ fn walk(plan: &mut Plan, max_entries: usize) {
         }
         // The stack gives back the last folder first.
         pending.extend(folders.into_iter().rev());
+    }
+    if !plist_settled {
+        plan.gaps.unrecognized(CoverageReason::ParseError, rel(INFO_PLIST));
     }
     // The visit goes folder by folder, which is not path order.
     plan.files.sort_unstable();

@@ -345,6 +345,55 @@ fn a_linked_frameworks_folder_is_reported_not_listed() {
     assert_eq!(digest(&evidence), digest(&without));
 }
 
+/// "Nothing found" must never be confused with "not looked at", and the same
+/// bundle must give the same evidence on a volume that ignores letter case
+/// (the macOS default) as on one that does not (Linux CI). So a layout name
+/// in another case is reported, and nothing is drawn from it on either.
+#[test]
+fn a_layout_name_in_another_case_is_reported_and_not_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let miscased = |name: &str, from: &str, to: &str| {
+        let root = bundle(dir.path(), name);
+        fs::rename(root.join(from), root.join(to)).unwrap();
+        evidence(&root)
+    };
+    let reported = |evidence: &EvidenceSet, at: &str| {
+        let gap = gap(evidence, CoverageReason::UnexpectedCase);
+        assert_eq!(gap.status, CoverageStatus::Skipped);
+        assert_eq!(gap.location.as_ref().unwrap().as_str(), at);
+        gap.subject.id.clone()
+    };
+    let missing_plist = |evidence: &EvidenceSet| {
+        let gap = gap(evidence, CoverageReason::ParseError);
+        assert_eq!(gap.location.as_ref().unwrap().as_str(), "Contents/Info.plist");
+    };
+
+    // The frameworks folder: the app is still identified, but the Sentry
+    // framework inside is not reported as found, and the gap says why.
+    let frameworks = miscased("Frameworks.app", "Contents/Frameworks", "Contents/frameworks");
+    assert_eq!(reported(&frameworks, "Contents/frameworks"), "com.example.app");
+    assert!(edges(&frameworks).is_empty());
+    assert_eq!(coverage(&frameworks).len(), 1);
+
+    // The property list: not read, so the folder's name stands in.
+    let plist = miscased("Plist.app", "Contents/Info.plist", "Contents/info.plist");
+    assert_eq!(reported(&plist, "Contents/info.plist"), "Plist.app");
+    missing_plist(&plist);
+    assert_eq!(edges(&plist).len(), 1);
+
+    // The contents folder: neither the property list nor the frameworks.
+    let contents = miscased("Contents.app", "Contents", "contents");
+    assert_eq!(reported(&contents, "contents"), "Contents.app");
+    missing_plist(&contents);
+    assert!(edges(&contents).is_empty());
+    assert_eq!(coverage(&contents).len(), 2);
+
+    // A bundle spelled the usual way has no such record.
+    let usual = evidence(&bundle(dir.path(), "Usual.app"));
+    assert!(coverage(&usual).is_empty());
+    assert_eq!(edges(&usual).len(), 1);
+}
+
 fn gap(evidence: &EvidenceSet, reason: CoverageReason) -> &CoverageRecord {
     let gaps = coverage(evidence);
     let matching: Vec<&&CoverageRecord> = gaps.iter().filter(|gap| gap.reason == reason).collect();

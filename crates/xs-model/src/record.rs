@@ -515,6 +515,11 @@ pub enum CoverageReason {
     OverBudget,
     /// The input is damaged or not what its name says.
     ParseError,
+    /// A name differs only in letter case from one the artifact's layout
+    /// fixes, such as `contents` for `Contents`. The collector takes names
+    /// as they are stored, so what sits there was not looked at as that part
+    /// of the layout.
+    UnexpectedCase,
     /// An import format contained a record of an unknown shape.
     UnrecognizedRecord,
     /// The file system refused the read.
@@ -691,7 +696,13 @@ pub(crate) mod tests {
             "status": "skipped", "reason": "over_budget",
             "where": "Contents/MacOS/Huge", "bytes": 2_147_483_649_u64, "count": 1
         });
-        for tree in [artifact, coverage, oversized] {
+        let miscased = json!({
+            "v": 1, "kind": "coverage", "collector": "macos.bundle",
+            "subject": artifact["subject"],
+            "status": "skipped", "reason": "unexpected_case",
+            "where": "Contents/frameworks", "count": 1
+        });
+        for tree in [artifact, coverage, oversized, miscased] {
             let record: Record = serde_json::from_value(tree.clone()).unwrap();
             record.validate().unwrap();
             assert_eq!(serde_json::to_value(&record).unwrap(), tree);
