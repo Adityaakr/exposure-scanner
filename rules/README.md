@@ -12,7 +12,7 @@ rules/core/*.toml ──compile──▶ rules/dist/core.pack.json ──sign─
 | Path | What | Licence |
 |---|---|---|
 | `core/pack.toml` | Layer name, version, the fixed list of categories | CC BY 4.0 |
-| `core/entities.toml` | Companies, each with a source | CC BY 4.0 |
+| `core/entities.toml` | Companies, each with its sources and the identifiers of its own apps and hosts | CC BY 4.0 |
 | `core/sdk/*.toml` | One rule per SDK | CC BY 4.0 |
 | `dist/core.pack.json` | The compiled `core` layer | CC BY 4.0 |
 | `dist/core.pack.json.minisig` | Its detached minisign signature | — |
@@ -36,6 +36,37 @@ user's machine. No merged table is distributed. The licence texts are in
    CI runs `cargo xtask pack check`, which fails if the three disagree.
 
 Raise `version` in `core/pack.toml` whenever the compiled bytes change.
+
+## Companies
+
+`core/entities.toml` holds one entry per company. It is the project's own
+map: every entry is written from the company's own pages and cites them.
+
+| Field | What |
+|---|---|
+| `id`, `name`, `website` | The id rules refer to, the legal name, the company's site |
+| `parent` | The id of the company that owns this one. A claim names the company at the top of the chain |
+| `team_ids` | Apple Team IDs the company signs its apps with |
+| `app_ids` | App ids of the company's apps, in lowercase. An entry covers the app ids below it: `com.example` covers `com.example.Mail` and not `com.examples` |
+| `domains` | Domains the company operates. An entry covers the hosts below it, and the longest entry wins |
+| `sources` | `https://` pages that show the facts above: the legal entity, and each identifier or owner the first page does not show |
+
+The three lists of identifiers are what makes a channel first party. Who
+publishes an app is decided by its Team ID first and its app id second; whose
+a host is, by its domain. An identifier names one entity, so the compiler
+refuses one that is listed twice. Only companies that own an SDK can be
+first party to one, so only those companies need identifiers.
+
+- List a Team ID only from a page of the company that states it.
+- An app id entry is the company's own domain read backwards, or an app id
+  the company documents. Do not list a name that unrelated developers use,
+  such as `com.github`: an app id is only looked up in this list, never
+  matched against `domains`.
+- A domain that holds what a company's users publish, such as `github.io`,
+  is listed for the company that operates the hosts.
+- A host under no listed domain is reported as unmapped. That is the right
+  answer for a host nobody has sourced: do not add a domain to make a report
+  look complete.
 
 ## Boundaries
 
@@ -81,7 +112,10 @@ matched; it is reported as not understood.
 Every declared host is also reported as itself, with or without a rule: a
 tracking domain under the category `tracking_domain`, and the host of the
 update feed (`SUFeedURL` in `Contents/Info.plist`) under `update_feed`. Those
-two categories are for declared hosts; a rule does not use them. The update
+two categories are for declared hosts; a rule does not use them. Neither
+counts in a report's headline: a declared tracking domain counts through the
+rule that names it, under that rule's category. The claim names the company
+`entities.toml` lists the host's domain for, and no company otherwise. The update
 feed is reported only that way: `update_feed` is the kind of that proof, not a
 matcher a rule may list, and the compiler refuses a rule that does.
 
@@ -113,6 +147,12 @@ section 5.2).
 - A content token without a stated boundary.
 - A token claimed by two rules for the same matcher.
 - A rule or an entity without an `https://` source.
+- An entity's domain that is a suffix registries operate, such as `co.uk`,
+  or that is under no public suffix at all. An app id entry that, read
+  backwards, is not at least a registrable domain: `uk.co` would cover every
+  app of every company under `co.uk`.
+- A Team ID that is not ten uppercase letters and digits, and any Team ID,
+  app id or domain that is listed twice.
 - A rule that neither names an `entity` nor sets `component = true`.
 
 A rule may pin real artifacts in `[[fixture]]` tables (`sha256`, `url`,

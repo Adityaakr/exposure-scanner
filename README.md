@@ -12,7 +12,8 @@ nothing anywhere.
 ## Status
 
 Milestone 1 ("static truth") is in progress. This repository currently holds
-the foundation and the macOS, Electron and Android collectors:
+the foundation, the macOS, Electron and Android collectors, and the
+resolver:
 
 | Part | State |
 |---|---|
@@ -23,7 +24,8 @@ the foundation and the macOS, Electron and Android collectors:
 | macOS collector: Mach-O load commands, Objective-C class names, data and embedded-script sections, Team ID, privacy manifests, update feed | Done (below) |
 | Electron apps: npm packages listed in an asar archive or in the `Contents/Resources/app` folder, literals in the app's scripts, scope labels, breadth guard | Done |
 | `exposure scan` on an Android package (`.apk`) | Done, with four witnesses: manifest components, classes defined in the DEX files, DEX string constants, and entry names |
-| Company and party resolution, HTML report, cache | Not yet (build plan tasks 9 to 14) |
+| Resolver: the company behind an SDK or a host, the app's vendor by Team ID then app id, first or third party, headline counts | Done (below) |
+| HTML report, cache | Not yet (build plan tasks 9 to 14) |
 | Finding `.apk` files inside a folder that is scanned | Not yet: it comes with the scan scheduler (build plan task 9), which decides what one found package that cannot be read does to the rest of the scan |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
@@ -40,8 +42,8 @@ What a scan of a macOS bundle reads, and what each part is a witness of:
 | Code signature of the main executable | (a fact, not a witness) | The Apple Team ID the signature names. It is read, not verified |
 
 A declared address is cut down to its host; no URL is stored. A host is shown
-as itself and names no company yet: mapping hosts and vendors to companies is
-build plan task 10. An encrypted binary, such as an iOS app installed on a
+as itself, under the company the rule pack lists its domain for, or as
+unmapped (below). An encrypted binary, such as an iOS app installed on a
 Mac, is reported as a coverage note and its ciphertext is not searched.
 
 An Electron app is a macOS bundle too, so all of the above applies to it.
@@ -58,6 +60,47 @@ Measured on the three Electron apps this part is tested against: Logseq
 and neither among the 280 npm packages the archive lists. Bitwarden desktop
 2026.10.4 and Obsidian 1.15.1 report nothing.
 
+### Whose it is, and what counts
+
+Every SDK and every host resolves to one company or to none, and every app
+to one vendor or to none. A channel is first party when the two are the
+same.
+
+| Question | How it is answered |
+|---|---|
+| Who is behind an SDK? | The rule names the entity that operates it; the claim names the company at the top of that entity's ownership chain. A library with no network side of its own, such as an updater, is a component and names no company. |
+| Who is behind a host? | The company whose listed domain the host is under. A host under no listed domain is **unmapped**: it is shown as itself, nobody is named as its owner, and it is counted nowhere. There is no generic table of host owners. |
+| Who publishes the app? | First the Apple Team ID its code signature names, then its app id, each looked up among the identifiers the rule pack lists per company. Reversing an app id proves nothing about ownership, so an app id is not believed against a signature: an app that calls itself `com.microsoft.x` and is signed by a team the pack does not list for Microsoft has no known vendor. |
+| First or third party? | `first` when a listed identifier says the app is the company's own, or when a host that belongs to no listed company is under the domain the app id spells (`ranchero.com` for `com.ranchero.NetNewsWire-Evergreen`). `third` when the app belongs to another listed company or to nobody the pack lists. `unknown` otherwise: no company is named, or nothing identifies the vendor. |
+
+Only companies that own an SDK can be first party to one, so the pack lists
+identifiers for those companies and no others. Each claim carries a `vendor`
+block that says what the party rests on, and a vendor known by its signature
+cites the record that holds the Team ID.
+
+The headline is three counts, and there is no score:
+
+| Count | What is counted |
+|---|---|
+| `companies_contacts` | Companies with a channel at `contacts` or above. Always 0 for now: nothing in this build observes a connection. |
+| `companies_contains` | Companies whose strongest channel is `contains`. |
+| `apps_third_party` | Apps with at least one third-party channel. |
+
+Only claims in the categories advertising, analytics, attribution, profiling
+and session replay are counted, and only when they name a company. Hosting is
+not receiving: crash reporting, push delivery, payments, an update feed and a
+declared tracking domain that no rule names are in the report and in none of
+the three numbers. Each claim says whether it counts, in `headline`, so the
+numbers can be recounted from the claims.
+
+Measured on the real apps the macOS collector is tested against:
+NetNewsWire 7.2.1's update feed, on `ranchero.com`, is first party. Maccy
+2.8.0's, on `raw.githubusercontent.com`, is GitHub's and so Microsoft's: a
+third party, and not counted. App Center in AltTab 11.10.2 is a third party
+to it, in categories that are not counted. PostHog in Logseq 2.0.2 is
+analytics, and is counted: one company at `contains`, one app with a
+third-party channel.
+
 ## Use
 
 Requires the Rust toolchain pinned in `rust-toolchain.toml` (rustup installs
@@ -67,6 +110,7 @@ it on first use).
 $ cargo build --release --package exposure
 $ target/release/exposure scan tests/fixtures/macos/Skeleton.app --json report.json
 exposure: scanned 1 app (3 files, 676 bytes): 1 claim, 0 coverage notes
+exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
 ```
 
 To install the binary instead of running it from the build folder:
@@ -94,7 +138,8 @@ sensitive in itself.
   "subject": {"kind": "app", "platform": "macos", "id": "org.example.exposure.skeleton",
               "version": "1.0.0", "digest": "bd1:e387…4353"},
   "object": {"kind": "sdk", "id": "sdk/sentry", "name": "Sentry"},
-  "company": "sentry", "category": "crash_reporting", "party": "unknown",
+  "company": "sentry", "category": "crash_reporting", "headline": false,
+  "party": "third", "vendor": {"domain": "example.org"},
   "grade": "contains", "rungs": ["contains"],
   "confidence": "high", "witnesses": 1,
   "evidence": ["sha256:078a…5c96"]
@@ -105,13 +150,16 @@ sensitive in itself.
 SDK's code. It proves presence, not use: only an observed connection would
 show a live flow. The tool states graded facts and never says more than its
 evidence supports. Each id under `evidence` is a record in the same file that
-names the rule token, where it was found and how often.
+names the rule token, where it was found and how often. `vendor` says what
+`party` rests on: here the pack lists nobody as the publisher of the app, and
+all that is known is the domain its app id spells.
 
 ### Android packages
 
 ```console
 $ target/release/exposure scan tests/fixtures/android/Skeleton.apk --json report.json
 exposure: scanned 1 app (1 file, 1818 bytes): 2 claims, 0 coverage notes
+exposure: headline: 0 companies at contacts or above, 1 company at contains, 1 app with a third-party channel
 ```
 
 An `.apk` file is read once, from start to end, for its SHA-256, which is its
@@ -184,7 +232,7 @@ One Cargo workspace. A crate may depend only on crates above it in this list.
 | `xs-formats` | Bounded parsers over byte slices | std without file, network, clock or environment APIs |
 | `xs-match` | Matchers compiled from a pack; hit collection; the controls against false positives | `no_std` |
 | `xs-rules` | Pack loader and signature check; source compiler behind a tooling-only feature | std without file access |
-| `xs-derive` | Evidence and pack in, claims out | `no_std` |
+| `xs-derive` | Evidence and pack in, claims out: grades, companies, vendors, parties | `no_std` |
 | `xs-render` | Claims and evidence in, report out | `no_std` |
 | `xs-collect` | Discovery and reading. The only crate that opens files | std |
 | `exposure` (in `crates/xs-cli`) | The `exposure` binary | std |
@@ -236,4 +284,5 @@ Rule changes are described in [`rules/README.md`](rules/README.md).
 
 Code: Apache-2.0 ([`LICENSE`](LICENSE)). The project's own rules and company
 table: CC BY 4.0. Converted Exodus Privacy signatures, when added: ODbL 1.0,
-in a separate layer. See [`NOTICE`](NOTICE) and [`LICENSES/`](LICENSES).
+in a separate layer. The Public Suffix List compiled into the binary: MPL 2.0.
+See [`NOTICE`](NOTICE) and [`LICENSES/`](LICENSES).

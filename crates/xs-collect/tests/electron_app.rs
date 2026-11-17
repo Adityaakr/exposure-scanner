@@ -142,7 +142,10 @@ fn pack() -> Pack {
         name: id.into(),
         parent: None,
         website: format!("https://{id}.example/"),
-        source: format!("https://{id}.example/terms"),
+        team_ids: Vec::new(),
+        app_ids: Vec::new(),
+        domains: Vec::new(),
+        sources: vec![format!("https://{id}.example/terms")],
     };
     let token = |lit: &str, at| Token { lit: lit.into(), at };
     let rule = |id: &str, entity: &str, packages: &[&str], literals: Vec<Token>| Rule {

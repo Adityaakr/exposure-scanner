@@ -4,6 +4,13 @@
 //! * AltTab reports App Center.
 //! * NetNewsWire and Maccy report no SDK and a graded update feed.
 //!
+//! and the resolver against the same apps (build plan, task 10):
+//!
+//! * NetNewsWire's feed is on its own domain and grades first party.
+//! * Maccy's feed is hosted on GitHub: a third party, named, and outside the
+//!   headline.
+//! * App Center in AltTab is a third party to it.
+//!
 //! Real artifacts are never stored in the repository. These tests run only
 //! when the environment variable `EXPOSURE_FIXTURE_CACHE` names a folder
 //! that holds them, laid out as `tests/fixtures/README.md` describes, and
@@ -29,8 +36,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use xs_model::claim::Vendor;
 use xs_model::record::{CoverageRecord, EdgeRecord, Facts, Grade, ObjectKind, Record, Region};
-use xs_model::{Claim, Confidence, MatcherKind, Report, Sha256Digest};
+use xs_model::{Claim, Confidence, Headline, MatcherKind, Party, Report, Sha256Digest};
 
 /// One real app, pinned.
 struct Pinned {
@@ -108,11 +116,12 @@ fn scan(app: &Pinned) -> Option<Report> {
     Some(serde_json::from_slice(&output.stdout).unwrap())
 }
 
-/// The ids of the claims that name a company, with the company.
+/// The ids of the claims about SDKs that name a company, with the company.
 fn company_claims(report: &Report) -> Vec<(&str, &str)> {
     report
         .claims
         .iter()
+        .filter(|claim| claim.object.kind == ObjectKind::Sdk)
         .filter_map(|claim| Some((claim.object.id.as_str(), claim.company.as_deref()?)))
         .collect()
 }
@@ -166,9 +175,15 @@ fn coverage(report: &Report) -> Vec<&CoverageRecord> {
         .collect()
 }
 
-/// The one claim about the update feed: a host, declared, owned by nobody
-/// the scanner names.
-fn assert_feed(report: &Report, host: &str) {
+/// The vendor of an app no listed company publishes: all that is known is
+/// the domain its app id spells.
+fn unlisted(domain: &str) -> Option<Vendor> {
+    Some(Vendor { company: None, by: None, domain: Some(domain.into()), evidence: vec![] })
+}
+
+/// The one claim about the update feed: a host, declared and shown as
+/// itself, with the company the pack lists it under and the party.
+fn assert_feed(report: &Report, host: &str, company: Option<&str>, party: Party) {
     let hosts: Vec<&Claim> =
         report.claims.iter().filter(|claim| claim.object.kind == ObjectKind::Host).collect();
     assert_eq!(hosts.len(), 1, "{hosts:#?}");
@@ -178,7 +193,10 @@ fn assert_feed(report: &Report, host: &str) {
     assert_eq!(feed.grade, Grade::Declares);
     assert_eq!(feed.rungs, [Grade::Declares]);
     assert_eq!(feed.confidence, Confidence::High);
-    assert_eq!(feed.company, None);
+    assert_eq!(feed.company.as_deref(), company);
+    assert_eq!(feed.party, party);
+    // Hosting is not receiving: an update feed is in no count.
+    assert!(!feed.headline);
 
     let records = evidence(report, feed);
     assert_eq!(records.len(), 1);
@@ -209,6 +227,12 @@ fn alttab_reports_app_center() {
         assert_eq!(claim.confidence, Confidence::High);
         // `contains` can point at a dead service, and the claim says so.
         assert_eq!(claim.notes, ["retired:2025-03-31"]);
+        // The pack lists Microsoft's Team ID and app ids, and AltTab has
+        // neither: Microsoft is a third party to it.
+        assert_eq!(claim.party, Party::Third);
+        assert_eq!(claim.vendor, unlisted("lwouis.com"));
+        // Telemetry transport and crash reporting are outside the headline.
+        assert!(!claim.headline);
 
         let records = evidence(&report, claim);
         assert_eq!(records.len(), 1);
@@ -225,13 +249,16 @@ fn alttab_reports_app_center() {
 
     // AltTab sets its feed address in code, so its property list names none.
     assert!(report.claims.iter().all(|claim| claim.object.kind == ObjectKind::Sdk));
+    assert_eq!(report.headline, Headline::default());
     assert_eq!(facts(&report).name.as_deref(), Some("AltTab"));
     assert_eq!(facts(&report).team_id.as_deref(), Some("QXD7GW8FHY"));
     assert!(coverage(&report).is_empty(), "{:#?}", coverage(&report));
 }
 
 /// Spec, spike table: "NetNewsWire 7.2.1, macOS: No SDK. Update feed on its
-/// own domain".
+/// own domain, graded first party". The pack lists neither Ranchero Software
+/// nor its Team ID: the feed is first party because its host is under the
+/// domain the app id spells, `com.ranchero.NetNewsWire-Evergreen`.
 #[test]
 fn netnewswire_reports_no_sdk_and_a_graded_update_feed() {
     let Some(report) = scan(&NETNEWSWIRE) else { return };
@@ -240,20 +267,25 @@ fn netnewswire_reports_no_sdk_and_a_graded_update_feed() {
     // The crash capture library is linked into the main binary here; it
     // and the updater have no network side of their own.
     assert_eq!(components(&report), ["sdk/plcrashreporter", "sdk/sparkle"]);
-    assert_feed(&report, "ranchero.com");
+    assert_feed(&report, "ranchero.com", None, Party::First);
+    assert_eq!(claim(&report, "ranchero.com").vendor, unlisted("ranchero.com"));
+    assert_eq!(report.headline, Headline::default());
     assert_eq!(facts(&report).team_id.as_deref(), Some("M8L2WTLA8W"));
     assert!(coverage(&report).is_empty(), "{:#?}", coverage(&report));
 }
 
 /// Spec, spike table: "Maccy 2.8.0, macOS: No SDK. Update feed hosted on
-/// GitHub".
+/// GitHub". The host is GitHub's and GitHub is Microsoft's; the app is
+/// `org.p0deje.Maccy`, nobody the pack lists.
 #[test]
 fn maccy_reports_no_sdk_and_a_graded_update_feed() {
     let Some(report) = scan(&MACCY) else { return };
 
     assert_eq!(company_claims(&report), []);
     assert_eq!(components(&report), ["sdk/sparkle"]);
-    assert_feed(&report, "raw.githubusercontent.com");
+    assert_feed(&report, "raw.githubusercontent.com", Some("microsoft"), Party::Third);
+    assert_eq!(claim(&report, "raw.githubusercontent.com").vendor, unlisted("p0deje.org"));
+    assert_eq!(report.headline, Headline::default());
     assert_eq!(facts(&report).team_id.as_deref(), Some("MN3X4648SC"));
     assert!(coverage(&report).is_empty(), "{:#?}", coverage(&report));
 }

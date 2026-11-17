@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use xs_model::record::{Grade, Record};
-use xs_model::{Confidence, Report};
+use xs_model::{Confidence, Headline, Party, Report};
 
 const FIXTURE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/macos/Skeleton.app");
@@ -91,6 +91,11 @@ fn the_fixture_bundle_yields_one_claim() {
     assert_eq!(claim.object.name, "Sentry");
     assert_eq!(claim.company.as_deref(), Some("sentry"));
     assert_eq!(claim.category, "crash_reporting");
+    // Nobody the pack lists publishes the fixture, so Sentry is a third
+    // party to it. Crash reporting is outside the headline.
+    assert_eq!(claim.party, Party::Third);
+    assert!(!claim.headline);
+    assert_eq!(report.headline, Headline::default());
     assert_eq!(claim.subject.id, "org.example.exposure.skeleton");
     assert_eq!(claim.subject.version.as_deref(), Some("1.0.0"));
     assert_eq!(claim.grade, Grade::Contains);
@@ -263,6 +268,7 @@ fn the_terminal_summary_names_no_app_and_no_path() {
     let summary = stderr(&output);
     assert!(summary.contains("scanned 1 app"), "{summary}");
     assert!(summary.contains("1 claim"), "{summary}");
+    assert!(summary.contains("headline: 0 companies at contacts or above"), "{summary}");
     assert!(!summary.contains("Diary") && !summary.contains("diary"), "{summary}");
     assert!(!summary.contains(text(dir.path())), "{summary}");
 }

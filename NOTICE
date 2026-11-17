@@ -15,6 +15,12 @@ Data in this repository is licensed separately from the code:
       database under the Open Database License 1.0 (LICENSES/ODbL-1.0.txt),
       kept in their own file and never merged with other layers.
 
+The scanner is built with the Public Suffix List (https://publicsuffix.org/),
+which it uses to cut a host name down to its registrable domain. The list is
+compiled into the binary, unmodified, through the `psl` crate, and is under
+the Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/). Its source
+form is https://publicsuffix.org/list/public_suffix_list.dat.
+
 A report produced by the scanner is not a derivative database of either
 layer. A report that draws on the Exodus layer carries a notice of that
 source.

@@ -1,7 +1,7 @@
 # The project's own rule layer. Data in this directory is licensed CC BY 4.0
 # (see ../README.md).
 layer = "core"
-version = 3
+version = 4
 license = "CC-BY-4.0"
 
 # The fixed list of categories. Only the five marked `headline` count in a
@@ -67,9 +67,10 @@ name = "Update feed"
 headline = false
 
 # A domain a privacy manifest lists under NSPrivacyTrackingDomains. It is
-# shown as the app declares it. Whether it counts in the headline is decided
-# when the resolver maps hosts to companies; until then it names no company
-# and counts nowhere.
+# shown as the app declares it, under the company that operates it when
+# entities.toml lists the domain. It does not count in the headline by
+# itself: only endpoints a rule names count, and a rule that names the host
+# reports it under the rule's own category.
 [[category]]
 id = "tracking_domain"
 name = "Declared tracking domain"

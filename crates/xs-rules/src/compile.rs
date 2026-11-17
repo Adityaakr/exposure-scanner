@@ -4,7 +4,8 @@
 //!
 //! * `pack.toml` — the layer's name, version and licence, and the fixed list
 //!   of categories;
-//! * `entities.toml` — the companies rules may name, each with a source;
+//! * `entities.toml` — the companies rules may name, each with its sources
+//!   and the identifiers its own apps and hosts are recognised by;
 //! * `sdk/<name>.toml` — one rule per SDK.
 //!
 //! [`compile`] turns them into one compiled layer: canonical JSON, sorted by
@@ -25,6 +26,10 @@
 //! * Content tokens must state their boundary; there is no default.
 //! * No two rules may claim the same token for the same matcher.
 //! * Every rule and every entity must cite an `https://` source.
+//! * A domain listed for an entity must sit under a public suffix and may
+//!   not be one that registries operate, such as `co.uk`: that is nobody's
+//!   own domain. A listed app id must read backwards as such a domain, so
+//!   that no entry covers the names of a whole registry.
 //! * A rule names an entity or declares `component = true`, never neither, so
 //!   a forgotten `entity` line cannot silently hide a company.
 
@@ -155,9 +160,8 @@ pub fn compile(files: &[SourceFile<'_>]) -> Result<Compiled, Vec<Problem>> {
             "entities.toml" => {
                 if let Some(source) = parse::<EntitiesSource>(file, &mut problems) {
                     entities = source.entities;
-                    for entity in &entities {
-                        check_https(file.path, "website", &entity.website, &mut problems);
-                        check_https(file.path, "source", &entity.source, &mut problems);
+                    for entity in &mut entities {
+                        check_entity(file.path, entity, &mut problems);
                     }
                 }
             }
@@ -254,6 +258,69 @@ fn check_https(file: &str, field: &str, url: &str, problems: &mut Problems) {
     if !well_formed {
         problems.add(file, format!("{field} `{url}` must be an https:// URL"));
     }
+}
+
+/// Checks one entity and puts its lists in canonical order.
+fn check_entity(file: &str, entity: &mut Entity, problems: &mut Problems) {
+    let id = &entity.id;
+    check_https(file, "website", &entity.website, problems);
+    if entity.sources.is_empty() {
+        problems.add(file, format!("entity `{id}` must cite at least one source"));
+    }
+    for source in &entity.sources {
+        check_https(file, "source", source, problems);
+    }
+    for domain in &entity.domains {
+        match public_suffix(domain) {
+            None => problems
+                .add(file, format!("entity `{id}`: domain `{domain}` is under no public suffix")),
+            Some(suffix) if suffix.as_bytes() == domain.as_bytes() && !is_private(&suffix) => {
+                problems.add(
+                    file,
+                    format!(
+                        "entity `{id}`: domain `{domain}` is a public suffix; it belongs to a \
+                         registry, not to a company"
+                    ),
+                );
+            }
+            Some(_) => {}
+        }
+    }
+    for app_id in &entity.app_ids {
+        // `com.example.mail` read backwards is `mail.example.com`.
+        let mut labels: Vec<&str> = app_id.split('.').collect();
+        labels.reverse();
+        let host = labels.join(".");
+        let registrable = public_suffix(&host).is_some() && psl::domain(host.as_bytes()).is_some();
+        if !registrable {
+            problems.add(
+                file,
+                format!(
+                    "entity `{id}`: app id `{app_id}` read backwards (`{host}`) is no domain \
+                     under a public suffix; an entry must be at least as long as a registrable \
+                     domain, such as `com.example`"
+                ),
+            );
+        }
+    }
+    // Canonical order: the bytes must not depend on the order of a list. A
+    // value listed twice is left in for the structural check to name.
+    entity.team_ids.sort();
+    entity.app_ids.sort();
+    entity.domains.sort();
+    entity.sources.sort();
+    entity.sources.dedup();
+}
+
+/// The public suffix `host` ends in, if the Public Suffix List knows one.
+fn public_suffix(host: &str) -> Option<psl::Suffix<'_>> {
+    psl::suffix(host.as_bytes()).filter(psl::Suffix::is_known)
+}
+
+/// Whether a company operates this suffix for its customers or services,
+/// such as `githubusercontent.com`, as opposed to a registry.
+fn is_private(suffix: &psl::Suffix<'_>) -> bool {
+    matches!(suffix.typ(), Some(psl::Type::Private))
 }
 
 /// Turns one rule file into a [`Rule`], reporting every lint it trips.
@@ -486,11 +553,12 @@ fn lower_token(
 /// top-level name.
 fn is_bare_registrable_domain(token: &str) -> bool {
     let host = token.strip_prefix('.').unwrap_or(token).to_ascii_lowercase();
+    let Some(suffix) = public_suffix(&host) else { return false };
     let host = host.as_bytes();
-    let Some(suffix) = psl::suffix(host).filter(psl::Suffix::is_known) else { return false };
-    match suffix.typ() {
-        Some(psl::Type::Private) => suffix.as_bytes() == host,
-        _ => psl::domain(host).is_some_and(|domain| domain.as_bytes() == host),
+    if is_private(&suffix) {
+        suffix.as_bytes() == host
+    } else {
+        psl::domain(host).is_some_and(|domain| domain.as_bytes() == host)
     }
 }
 

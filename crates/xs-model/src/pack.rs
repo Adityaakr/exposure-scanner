@@ -63,6 +63,11 @@ pub struct Category {
 }
 
 /// A company.
+///
+/// Besides naming the company, an entry says how its own apps and hosts are
+/// recognised: by the Apple Team ID in a code signature, by app id, and by
+/// domain. Those identifiers are what makes a channel first party, so each
+/// belongs to exactly one entity of a pack.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Entity {
@@ -75,9 +80,21 @@ pub struct Entity {
     pub parent: Option<String>,
     /// The company's own website.
     pub website: String,
+    /// The Apple Team IDs the company signs its apps with.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub team_ids: Vec<String>,
+    /// App ids of the company's apps, in lowercase. An entry stands for
+    /// itself and for every app id below it: `com.example` covers
+    /// `com.example.Mail` and not `com.examples`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub app_ids: Vec<String>,
+    /// Domains the company operates. An entry stands for itself and for
+    /// every host below it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub domains: Vec<String>,
     /// Where the facts in this entry come from. Mandatory: an entry without a
     /// source cannot be checked or disputed.
-    pub source: String,
+    pub sources: Vec<String>,
 }
 
 /// How to recognise one SDK.
@@ -146,6 +163,12 @@ pub enum PackError {
     BadId(&'static str, String),
     /// The same id is defined twice. Payload: what kind of id, and the id.
     Duplicate(&'static str, String),
+    /// A Team ID, app id or domain listed for an entity is malformed.
+    /// Payload: what kind of identifier, and the identifier.
+    BadIdentifier(&'static str, String),
+    /// A Team ID, app id or domain is listed twice. It names one entity.
+    /// Payload: what kind of identifier, and the identifier.
+    SharedIdentifier(&'static str, String),
     /// A reference does not resolve. Payload: the referring item, what kind
     /// of thing it refers to, and the missing id.
     Dangling(String, &'static str, String),
@@ -169,6 +192,10 @@ impl fmt::Display for PackError {
             Self::NoLayers => f.write_str("a rule pack needs at least one layer"),
             Self::BadId(kind, id) => write!(f, "malformed {kind} id `{id}`"),
             Self::Duplicate(kind, id) => write!(f, "{kind} `{id}` is defined more than once"),
+            Self::BadIdentifier(kind, id) => write!(f, "malformed {kind} `{id}`"),
+            Self::SharedIdentifier(kind, id) => {
+                write!(f, "{kind} `{id}` is listed more than once; it can name only one entity")
+            }
             Self::Dangling(from, kind, id) => write!(f, "`{from}` refers to unknown {kind} `{id}`"),
             Self::ParentCycle(id) => write!(f, "entity `{id}` is its own ancestor"),
             Self::BadText(item, field) => {
@@ -219,6 +246,38 @@ pub fn is_category_id(id: &str) -> bool {
     is_slug(id, '_')
 }
 
+/// Whether `id` has the shape of an Apple Team ID: ten uppercase letters and
+/// digits.
+#[must_use]
+pub fn is_team_id(id: &str) -> bool {
+    id.len() == 10 && id.bytes().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+}
+
+/// Whether `id` can be listed as an app id of an entity: lowercase labels of
+/// letters, digits, hyphens and underscores, joined by single dots. At least
+/// two labels, so that no entry can cover a whole top-level name such as
+/// `com`.
+#[must_use]
+pub fn is_app_id_entry(id: &str) -> bool {
+    id.len() <= text::MAX_ID_BYTES
+        && id.split('.').count() >= 2
+        && id.split('.').all(|label| {
+            !label.is_empty()
+                && label.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'-' | b'_')
+                })
+        })
+}
+
+/// Whether `domain` can be listed as a domain of an entity: a host name of at
+/// least two labels, in the one form records store hosts in.
+#[must_use]
+pub fn is_domain_entry(domain: &str) -> bool {
+    text::is_host(domain) && domain.contains('.')
+}
+
 /// Position of an item: which layer, and where in that layer's list.
 type Position = (usize, usize);
 
@@ -229,6 +288,10 @@ pub struct Pack {
     categories: BTreeMap<String, Position>,
     entities: BTreeMap<String, Position>,
     rules: BTreeMap<String, Position>,
+    /// The entity each listed Team ID, app id and domain belongs to.
+    team_ids: BTreeMap<String, Position>,
+    app_ids: BTreeMap<String, Position>,
+    domains: BTreeMap<String, Position>,
 }
 
 impl Pack {
@@ -250,6 +313,9 @@ impl Pack {
             categories: BTreeMap::new(),
             entities: BTreeMap::new(),
             rules: BTreeMap::new(),
+            team_ids: BTreeMap::new(),
+            app_ids: BTreeMap::new(),
+            domains: BTreeMap::new(),
         };
         pack.index()?;
         pack.check_references()?;
@@ -289,8 +355,38 @@ impl Pack {
                 }
                 check_text(&entity.id, "name", &entity.name)?;
                 check_text(&entity.id, "website", &entity.website)?;
-                check_text(&entity.id, "source", &entity.source)?;
-                insert_unique(&mut self.entities, "entity", &entity.id, (layer_index, index))?;
+                if entity.sources.is_empty() {
+                    return Err(PackError::BadText(entity.id.clone(), "source"));
+                }
+                for source in &entity.sources {
+                    check_text(&entity.id, "source", source)?;
+                }
+                let position = (layer_index, index);
+                insert_unique(&mut self.entities, "entity", &entity.id, position)?;
+                // An identifier names one entity, in whichever layer it is
+                // listed. Were two to claim it, who an app belongs to would
+                // depend on the order they were read in.
+                list_identifiers(
+                    &mut self.team_ids,
+                    "team id",
+                    is_team_id,
+                    &entity.team_ids,
+                    position,
+                )?;
+                list_identifiers(
+                    &mut self.app_ids,
+                    "app id",
+                    is_app_id_entry,
+                    &entity.app_ids,
+                    position,
+                )?;
+                list_identifiers(
+                    &mut self.domains,
+                    "domain",
+                    is_domain_entry,
+                    &entity.domains,
+                    position,
+                )?;
             }
             for (index, rule) in layer.rules.iter().enumerate() {
                 if !is_rule_id(&rule.id) {
@@ -414,6 +510,59 @@ impl Pack {
         Some(current)
     }
 
+    fn entity_at(&self, &(layer, index): &Position) -> Option<&Entity> {
+        self.layers.get(layer)?.layer.entities.get(index)
+    }
+
+    /// The entity that lists this Apple Team ID.
+    #[must_use]
+    pub fn entity_by_team_id(&self, team_id: &str) -> Option<&Entity> {
+        self.entity_at(self.team_ids.get(team_id)?)
+    }
+
+    /// The entity that lists `app_id` or an app id above it. The longest
+    /// listed entry wins, and letter case is ignored: `com.example.mail`
+    /// listed by one entity takes `com.example.Mail.Helper` from another
+    /// that lists `com.example`.
+    #[must_use]
+    pub fn entity_by_app_id(&self, app_id: &str) -> Option<&Entity> {
+        let app_id = app_id.to_ascii_lowercase();
+        let mut candidate = app_id.as_str();
+        loop {
+            if let Some(position) = self.app_ids.get(candidate) {
+                return self.entity_at(position);
+            }
+            // Drop the last label and try the app id above.
+            candidate = candidate.rsplit_once('.')?.0;
+        }
+    }
+
+    /// The entity that lists `host` or a domain above it. The longest listed
+    /// entry wins.
+    #[must_use]
+    pub fn entity_by_host(&self, host: &str) -> Option<&Entity> {
+        let mut candidate = host;
+        loop {
+            if let Some(position) = self.domains.get(candidate) {
+                return self.entity_at(position);
+            }
+            // Drop the first label and try the domain above.
+            candidate = candidate.split_once('.')?.1;
+        }
+    }
+
+    /// Whether the pack lists a Team ID for the company with this id, under
+    /// the company itself or under an entity it owns. Only then does a
+    /// signature by a team the pack does not list say that an app is not
+    /// that company's.
+    #[must_use]
+    pub fn lists_team_ids(&self, company_id: &str) -> bool {
+        self.team_ids
+            .values()
+            .filter_map(|position| self.entity_at(position))
+            .any(|entity| self.company_of(&entity.id).is_some_and(|top| top.id == company_id))
+    }
+
     /// Every rule, in id order.
     pub fn rules(&self) -> impl Iterator<Item = &Rule> {
         self.rules.keys().filter_map(|id| self.rule(id))
@@ -434,6 +583,26 @@ fn insert_unique(
 ) -> Result<(), PackError> {
     if index.insert(id.to_string(), position).is_some() {
         return Err(PackError::Duplicate(kind, id.to_string()));
+    }
+    Ok(())
+}
+
+/// Records that the entity at `position` lists each of `listed`, which are
+/// identifiers of one `kind`.
+fn list_identifiers(
+    index: &mut BTreeMap<String, Position>,
+    kind: &'static str,
+    well_formed: fn(&str) -> bool,
+    listed: &[String],
+    position: Position,
+) -> Result<(), PackError> {
+    for identifier in listed {
+        if !well_formed(identifier) {
+            return Err(PackError::BadIdentifier(kind, identifier.clone()));
+        }
+        if index.insert(identifier.clone(), position).is_some() {
+            return Err(PackError::SharedIdentifier(kind, identifier.clone()));
+        }
     }
     Ok(())
 }
@@ -508,14 +677,20 @@ pub(crate) mod tests {
                     name: "Firebase".into(),
                     parent: Some("google".into()),
                     website: "https://firebase.google.com/".into(),
-                    source: "https://firebase.google.com/terms".into(),
+                    team_ids: vec![],
+                    app_ids: vec!["com.google.firebase".into()],
+                    domains: vec!["firebase.google.com".into(), "firebaseio.com".into()],
+                    sources: vec!["https://firebase.google.com/terms".into()],
                 },
                 Entity {
                     id: "google".into(),
                     name: "Google LLC".into(),
                     parent: None,
                     website: "https://about.google/".into(),
-                    source: "https://about.google/".into(),
+                    team_ids: vec!["EQHXZ8M8AV".into()],
+                    app_ids: vec!["com.google".into()],
+                    domains: vec!["google.com".into()],
+                    sources: vec!["https://about.google/".into()],
                 },
             ],
             rules: vec![
@@ -581,6 +756,128 @@ pub(crate) mod tests {
         assert_eq!(pack.company_of("firebase").unwrap().id, "google");
         assert_eq!(pack.company_of("google").unwrap().id, "google");
         assert!(pack.company_of("nobody").is_none());
+    }
+
+    #[test]
+    fn a_team_id_names_the_entity_that_lists_it() {
+        let pack = pack_of(layer()).unwrap();
+        assert_eq!(pack.entity_by_team_id("EQHXZ8M8AV").unwrap().id, "google");
+        assert!(pack.entity_by_team_id("ABCDE12345").is_none());
+        // A Team ID is an exact value: no other spelling of it is one.
+        assert!(pack.entity_by_team_id("eqhxz8m8av").is_none());
+        assert!(pack.entity_by_team_id("EQHXZ8M8A").is_none());
+    }
+
+    #[test]
+    fn an_app_id_belongs_to_the_longest_entry_at_or_above_it() {
+        let pack = pack_of(layer()).unwrap();
+        let owner = |app_id| pack.entity_by_app_id(app_id).map(|entity| entity.id.as_str());
+        assert_eq!(owner("com.google"), Some("google"));
+        assert_eq!(owner("com.google.Chrome"), Some("google"));
+        assert_eq!(owner("COM.Google.Chrome.helper"), Some("google"), "case is ignored");
+        assert_eq!(owner("com.google.firebase.quickstart"), Some("firebase"), "longest wins");
+        // An entry covers what is below it on a label boundary, nothing else.
+        assert_eq!(owner("com.googleplex.app"), None);
+        assert_eq!(owner("com.google-fan.app"), None);
+        assert_eq!(owner("com"), None);
+        assert_eq!(owner("org.google.Chrome"), None);
+        assert_eq!(owner(""), None);
+    }
+
+    #[test]
+    fn a_host_belongs_to_the_longest_domain_at_or_above_it() {
+        let pack = pack_of(layer()).unwrap();
+        let owner = |host| pack.entity_by_host(host).map(|entity| entity.id.as_str());
+        assert_eq!(owner("google.com"), Some("google"));
+        assert_eq!(owner("dl.google.com"), Some("google"));
+        assert_eq!(owner("firebase.google.com"), Some("firebase"), "longest wins");
+        assert_eq!(owner("console.firebase.google.com"), Some("firebase"));
+        assert_eq!(owner("app.firebaseio.com"), Some("firebase"));
+        assert_eq!(owner("notgoogle.com"), None);
+        assert_eq!(owner("google.com.evil.example"), None);
+        assert_eq!(owner("com"), None);
+        assert_eq!(owner(""), None);
+    }
+
+    #[test]
+    fn a_company_lists_team_ids_through_the_entities_it_owns() {
+        let mut layer = layer();
+        assert!(pack_of(layer.clone()).unwrap().lists_team_ids("google"));
+        assert!(!pack_of(layer.clone()).unwrap().lists_team_ids("firebase"), "not a company");
+        assert!(!pack_of(layer.clone()).unwrap().lists_team_ids("nobody"));
+
+        // Only the subsidiary lists one: it still counts for the company.
+        layer.entities[0].team_ids = layer.entities[1].team_ids.split_off(0);
+        assert!(pack_of(layer.clone()).unwrap().lists_team_ids("google"));
+        layer.entities[0].team_ids.clear();
+        assert!(!pack_of(layer).unwrap().lists_team_ids("google"));
+    }
+
+    #[test]
+    fn rejects_malformed_and_shared_identifiers() {
+        for bad in ["eqhxz8m8av", "EQHXZ8M8A", "EQHXZ8M8AVX", "EQHXZ8M8A-", ""] {
+            assert_eq!(
+                broken(|l| l.entities[1].team_ids = vec![bad.into()]),
+                PackError::BadIdentifier("team id", bad.into())
+            );
+        }
+        for bad in ["com", "com.Google", "com..google", "com.google.", ".com.google", "com google"]
+        {
+            assert_eq!(
+                broken(|l| l.entities[1].app_ids = vec![bad.into()]),
+                PackError::BadIdentifier("app id", bad.into())
+            );
+        }
+        for bad in ["com", "Google.com", "google.com.", "https://google.com", "google.com/x"] {
+            assert_eq!(
+                broken(|l| l.entities[1].domains = vec![bad.into()]),
+                PackError::BadIdentifier("domain", bad.into())
+            );
+        }
+        // One identifier, one entity.
+        assert_eq!(
+            broken(|l| l.entities[0].team_ids = vec!["EQHXZ8M8AV".into()]),
+            PackError::SharedIdentifier("team id", "EQHXZ8M8AV".into())
+        );
+        assert_eq!(
+            broken(|l| l.entities[0].app_ids.push("com.google".into())),
+            PackError::SharedIdentifier("app id", "com.google".into())
+        );
+        assert_eq!(
+            broken(|l| l.entities[1].domains.push("firebaseio.com".into())),
+            PackError::SharedIdentifier("domain", "firebaseio.com".into())
+        );
+        assert_eq!(
+            broken(|l| l.entities[1].domains.push("google.com".into())),
+            PackError::SharedIdentifier("domain", "google.com".into())
+        );
+    }
+
+    #[test]
+    fn an_entity_needs_a_source() {
+        assert_eq!(
+            broken(|l| l.entities[0].sources.clear()),
+            PackError::BadText("firebase".into(), "source")
+        );
+        assert_eq!(
+            broken(|l| l.entities[0].sources.push(String::new())),
+            PackError::BadText("firebase".into(), "source")
+        );
+    }
+
+    #[test]
+    fn an_entity_without_identifiers_reads_and_writes_as_before() {
+        let mut layer = layer();
+        for entity in &mut layer.entities {
+            entity.team_ids.clear();
+            entity.app_ids.clear();
+            entity.domains.clear();
+        }
+        let json = crate::canon::to_string(&layer).unwrap();
+        assert!(
+            !json.contains("team_ids") && !json.contains("app_ids") && !json.contains("domains")
+        );
+        assert_eq!(serde_json::from_str::<Layer>(&json).unwrap(), layer);
     }
 
     #[test]

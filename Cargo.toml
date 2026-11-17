@@ -44,12 +44,17 @@ plist = { version = "~1.10.4", default-features = false, features = [
 # The caller hands it a hard output limit, which is how the inflate budget is
 # enforced on a hostile archive (design report, section 4.8).
 miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }
+# The Public Suffix List, compiled into the build as a table. It cuts a host
+# down to its registrable domain for the resolver, and backs a lint of the
+# rule compiler. The crate is `no_std` and reads nothing at run time: no
+# file, no network (the spike's public-suffix library pulled in an HTTP
+# client, which is what deny.toml exists to stop).
+psl = "2.1.256"
 rayon = "1.12.0"
 lexopt = "0.3.2"
 
 # Developer tooling and tests only. None of these reach the `exposure` binary.
 toml = { version = "1.2.1", default-features = false, features = ["parse", "serde"] }
-psl = "2.1.256"
 minisign = "0.10.0"
 object = { version = "0.41.0", default-features = false, features = ["read_core", "elf", "macho", "std"] }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
