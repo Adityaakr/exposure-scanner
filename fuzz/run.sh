@@ -20,9 +20,14 @@ cp "$fixture" "$seeds/apk/"
 unzip -q "$fixture" 'classes*.dex' -d "$seeds/dex"
 unzip -q "$fixture" AndroidManifest.xml -d "$seeds/android_manifest"
 
+# Build for the compiler's own host. cargo-fuzz defaults to the triple it was
+# built for, and its prebuilt Linux binary is a musl one: that target is not
+# installed and cannot carry the address sanitizer.
+host="$(rustc -vV | sed -n 's/^host: //p')"
+
 for target in zip dex android_manifest apk; do
     mkdir -p "corpus/$target"
     echo "== $target: $seconds s"
-    cargo fuzz run "$target" "corpus/$target" "$seeds/$target" -- \
+    cargo fuzz run --target "$host" "$target" "corpus/$target" "$seeds/$target" -- \
         -max_total_time="$seconds" -print_final_stats=1
 done
