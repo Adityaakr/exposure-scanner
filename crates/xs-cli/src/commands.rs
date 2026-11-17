@@ -85,7 +85,7 @@ fn plural(count: u64, noun: &str) -> String {
 /// `exposure scan`
 pub(crate) fn scan(args: &args::Scan) -> Result<()> {
     let pack = built_in_pack()?;
-    let matchers = Matchers::build(&pack);
+    let matchers = Matchers::build(&pack).map_err(|error| error.to_string())?;
     let options = xs_collect::ScanOptions { threads: args.threads };
     let outcome =
         xs_collect::scan(&args.paths, &matchers, options).map_err(|error| error.to_string())?;

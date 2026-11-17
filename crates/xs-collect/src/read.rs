@@ -8,9 +8,12 @@
 //!   file that gets truncated raises SIGBUS).
 //! * **One pass.** The same bytes feed the SHA-256 and the matcher. Reading
 //!   is the dominant cost, so nothing reads a file twice.
-//! * **Carry.** The last `longest token − 1` bytes of each window are repeated
-//!   at the start of the next, so a literal that straddles two windows is
-//!   still found, and the result does not depend on where windows fall.
+//! * **Carry.** The last bytes of each window are repeated at the start of
+//!   the next, as many as the matcher asks for: the longest token minus one,
+//!   so a literal that straddles two windows is still found, plus the few
+//!   bytes around a literal that its boundary rule looks at. The matcher is
+//!   also told which window is the last. With both, the result does not
+//!   depend on where windows fall.
 
 use std::io::{self, Read};
 
@@ -38,11 +41,7 @@ pub struct OnePass {
 /// The buffer size [`one_pass`] needs for a given matcher and window.
 #[must_use]
 pub fn buffer_len<M: ContentMatcher + ?Sized>(matcher: &M, window: usize) -> usize {
-    carry_len(matcher).saturating_add(window.max(HEAD))
-}
-
-fn carry_len<M: ContentMatcher + ?Sized>(matcher: &M) -> usize {
-    matcher.max_token_len().saturating_sub(1)
+    matcher.overlap().saturating_add(window.max(HEAD))
 }
 
 /// Reads until `buf` is full or the stream ends. A short count means the end
@@ -82,8 +81,8 @@ pub fn one_pass<M: ContentMatcher + ?Sized>(
     wanted: impl FnOnce(&[u8]) -> bool,
 ) -> io::Result<Option<OnePass>> {
     let window = window.max(HEAD);
-    let carry_max = carry_len(matcher);
-    if buf.len() < carry_max.saturating_add(window) {
+    let overlap = matcher.overlap();
+    if buf.len() < overlap.saturating_add(window) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "scratch buffer is too small"));
     }
 
@@ -107,43 +106,52 @@ pub fn one_pass<M: ContentMatcher + ?Sized>(
         let filled = carry + got;
         let Some(view) = buf.get(..filled) else { break };
         hasher.update(view.get(carry..).unwrap_or_default());
-        matcher.scan(view, carry, &mut hits);
         bytes += got as u64;
 
-        if got < window {
-            // A short window is the end of the stream; no further read needed.
+        // A short window is the end of the stream. A stream that ends on a
+        // window edge is only found out by the next read, which returns
+        // nothing; its last window then holds the carry alone, and the
+        // matcher still has to see it to judge what ended at that edge.
+        let last = got < window;
+        matcher.scan(view, carry, last, &mut hits);
+        if last {
             break;
         }
-        let keep = carry_max.min(filled);
+        let keep = overlap.min(filled);
         buf.copy_within(filled - keep..filled, 0);
         carry = keep;
         got = read_full(reader, buf.get_mut(carry..carry + window).unwrap_or_default())?;
-        if got == 0 {
-            break;
-        }
     }
     Ok(Some(OnePass { sha256: hasher.finish(), bytes, hits }))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::io::Cursor;
+    use std::sync::Mutex;
 
-    use xs_match::{NoContent, PatternId};
+    use proptest::prelude::*;
+    use xs_match::{Matchers, NoContent, PatternId};
+    use xs_model::Pack;
+    use xs_model::matcher::{Boundary, MatcherKind};
+    use xs_model::pack::{Category, Layer, LoadedLayer, Rule, Token};
+    use xs_model::record::{Scope, V1};
 
     use super::*;
 
     /// A naive substring matcher that honours the carry contract. It is the
     /// simplest possible reference: any windowing mistake in `one_pass` shows
-    /// up as a wrong count.
+    /// up as a wrong count. Its literals have no boundary rule, so it asks
+    /// for the longest one minus one and counts what ends after the carry.
     struct Naive(Vec<&'static [u8]>);
 
     impl ContentMatcher for Naive {
-        fn max_token_len(&self) -> usize {
-            self.0.iter().map(|pattern| pattern.len()).max().unwrap_or(0)
+        fn overlap(&self) -> usize {
+            self.0.iter().map(|pattern| pattern.len()).max().unwrap_or(0).saturating_sub(1)
         }
 
-        fn scan(&self, window: &[u8], carry: usize, out: &mut HitAcc) {
+        fn scan(&self, window: &[u8], carry: usize, _last: bool, out: &mut HitAcc) {
             for (index, pattern) in self.0.iter().enumerate() {
                 for (start, candidate) in window.windows(pattern.len()).enumerate() {
                     if candidate == *pattern && start + pattern.len() > carry {
@@ -319,5 +327,160 @@ mod tests {
         let mut buf = vec![0; buffer_len(&NoContent, 64)];
         let error = one_pass(&mut Failing, &mut buf, 64, &NoContent, |_| true).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    /// Records every call, to check what a matcher is promised.
+    struct Recording {
+        overlap: usize,
+        calls: Mutex<Vec<(Vec<u8>, usize, bool)>>,
+    }
+
+    impl ContentMatcher for Recording {
+        fn overlap(&self) -> usize {
+            self.overlap
+        }
+
+        fn scan(&self, window: &[u8], carry: usize, last: bool, _out: &mut HitAcc) {
+            self.calls.lock().unwrap().push((window.to_vec(), carry, last));
+        }
+    }
+
+    /// The contract of `ContentMatcher`, from the caller's side.
+    #[test]
+    fn a_matcher_sees_every_byte_once_fresh_the_overlap_repeated_and_one_last_window() {
+        let window = 32;
+        for overlap in [0, 1, 5, 31, 32, 33, 80] {
+            for len in [0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 96, 200] {
+                let data = corpus(len.max(32))[..len].to_vec();
+                let matcher = Recording { overlap, calls: Mutex::new(Vec::new()) };
+                run(&data, window, &matcher);
+                let calls = matcher.calls.into_inner().unwrap();
+
+                let mut seen: Vec<u8> = Vec::new();
+                for (index, (bytes, carry, last)) in calls.iter().enumerate() {
+                    let context = format!("overlap {overlap} len {len} call {index}");
+                    // The carry is the last `overlap` bytes read so far, or
+                    // all of them while there are fewer.
+                    assert_eq!(*carry, overlap.min(seen.len()), "{context}");
+                    assert_eq!(&bytes[..*carry], &seen[seen.len() - carry..], "{context}");
+                    seen.extend_from_slice(&bytes[*carry..]);
+                    // Only the final call is the last one.
+                    assert_eq!(*last, index + 1 == calls.len(), "{context}");
+                    // Every window but the last is full.
+                    assert!(*last || bytes.len() - carry == window, "{context}");
+                }
+                assert_eq!(seen, data, "overlap {overlap} len {len}");
+                assert!(!calls.is_empty());
+            }
+        }
+    }
+
+    /// A pack with one rule whose script literals are `tokens`.
+    fn script_pack(tokens: &[(&str, Boundary)]) -> Pack {
+        let rule = Rule {
+            id: "sdk/scripted".into(),
+            name: "Scripted".into(),
+            entity: None,
+            category: "component".into(),
+            sources: vec![],
+            notes: vec![],
+            matchers: BTreeMap::from([(
+                MatcherKind::ContentLiteral,
+                tokens.iter().map(|&(lit, at)| Token { lit: lit.into(), at }).collect(),
+            )]),
+            min_distinct: BTreeMap::new(),
+        };
+        let layer = Layer {
+            format: V1,
+            layer: "core".into(),
+            version: 1,
+            license: "CC-BY-4.0".into(),
+            categories: vec![Category {
+                id: "component".into(),
+                name: "Component".into(),
+                headline: false,
+            }],
+            entities: vec![],
+            rules: vec![rule],
+        };
+        Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"") }]).unwrap()
+    }
+
+    const SCRIPT_TOKENS: [(&str, Boundary); 4] = [
+        ("us.i.posthog.com", Boundary::Host),
+        ("i.posthog.com", Boundary::Host),
+        ("sentry.javascript.", Boundary::Word),
+        ("posthog", Boundary::None),
+    ];
+
+    /// The real engine through the real reader: a boundary byte that lies in
+    /// the next window, or a stream that ends on a window edge, changes
+    /// nothing.
+    #[test]
+    fn the_engine_finds_anchored_literals_at_every_window_size() {
+        let pack = script_pack(&SCRIPT_TOKENS);
+        let matchers = Matchers::build(&pack).unwrap();
+        let engine = matchers.content(MatcherKind::ContentLiteral, Scope::AppCode);
+
+        let script = b"api_host:\"https://us.i.posthog.com\",name:`sentry.javascript.${n}`,\
+            decoy:\"us.i.posthog.community\",other:\"sentry.javascript.browser\";posthog";
+        let mut data = script.to_vec();
+        data.resize(512, b' ');
+        data.extend_from_slice(b"sentry.javascript.");
+        let found = |pass: &OnePass| -> Vec<u32> {
+            (0..4).map(|index| pass.hits.count(PatternId(index))).collect()
+        };
+
+        let whole = run(&data, data.len() * 2, engine);
+        // Both hosts in the first literal, one template, and `posthog`
+        // inside the host, inside the decoy and alone. The decoy host and
+        // the longer identifier are not hits.
+        assert_eq!(found(&whole), [1, 1, 2, 3]);
+        for window in (HEAD..=96).chain([255, 256, 257, 511, 512, 513, 530, 531, 2000]) {
+            let chunked = run(&data, window, engine);
+            assert_eq!(chunked.hits, whole.hits, "window {window}");
+            assert_eq!(chunked.sha256, whole.sha256, "window {window}");
+        }
+
+        // A file of a runtime scope is hashed with an engine that looks for
+        // nothing.
+        let idle = matchers.content(MatcherKind::ContentLiteral, Scope::Runtime);
+        let hashed = run(&data, 64, idle);
+        assert!(hashed.hits.is_empty());
+        assert_eq!(hashed.sha256, whole.sha256);
+        assert_eq!(buffer_len(idle, 64), 64);
+    }
+
+    proptest! {
+        /// Build plan, task 5: "Chunked and whole-buffer scans agree on
+        /// random input", here through the reader, with short reads.
+        #[test]
+        fn engine_hits_through_the_reader_equal_a_whole_buffer_scan(
+            pieces in prop::collection::vec(
+                prop_oneof![
+                    prop::sample::select(&SCRIPT_TOKENS[..]).prop_map(|(lit, _)| lit.as_bytes().to_vec()),
+                    prop::collection::vec(prop::sample::select(&b"ab.-_ /\"\xc3"[..]), 0..6),
+                    prop::collection::vec(any::<u8>(), 0..40),
+                ],
+                0..80,
+            ),
+            window in HEAD..160usize,
+            step in 1..200usize,
+        ) {
+            let data = pieces.concat();
+            let pack = script_pack(&SCRIPT_TOKENS);
+            let matchers = Matchers::build(&pack).unwrap();
+            let engine = matchers.content(MatcherKind::ContentLiteral, Scope::AppCode);
+
+            let mut expected = HitAcc::new();
+            engine.scan(&data, 0, true, &mut expected);
+
+            let mut buf = vec![0x55; buffer_len(engine, window)];
+            let mut reader = Trickle { data: &data, step };
+            let pass = one_pass(&mut reader, &mut buf, window, engine, |_| true).unwrap().unwrap();
+            prop_assert_eq!(pass.hits, expected);
+            prop_assert_eq!(pass.sha256, Sha256Digest::of(&data));
+            prop_assert_eq!(pass.bytes, data.len() as u64);
+        }
     }
 }

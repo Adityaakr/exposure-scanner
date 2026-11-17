@@ -37,6 +37,29 @@ user's machine. No merged table is distributed. The licence texts are in
 
 Raise `version` in `core/pack.toml` whenever the compiled bytes change.
 
+## Boundaries
+
+A token is a literal plus one boundary, which says how the literal must sit
+in its surroundings to count. Matching looks at bytes and is case-sensitive.
+The start and the end of a value or a file count as boundaries.
+
+| Boundary | The token hits when |
+|---|---|
+| `exact` | the value equals the literal |
+| `prefix` | the value starts with the literal |
+| `word` | the byte before and the byte after are not an ASCII letter, digit or underscore. `sentry.javascript.` hits in `"sentry.javascript."` and in `sentry.javascript.${name}`, and not in `sentry.javascript.browser` |
+| `host` | the literal is a whole hostname or the parent of one. The byte before is a dot or not a hostname byte (ASCII letter, digit, hyphen, underscore); after it the name ends, so no hostname byte follows, and no dot that a hostname byte follows. `i.posthog.com` hits in `us.i.posthog.com` and `i.posthog.com.`, and not in `xi.posthog.com` or `i.posthog.com.evil.example` |
+| `none` | the literal occurs anywhere |
+
+`exact` and `prefix` are about a whole value, such as a class name or a
+folder name. The other three are searched for inside a value or in the bytes
+of a file. Write a `host` token so that it starts and ends with a letter or a
+digit: one that starts or ends with a dot cannot sit on a hostname boundary.
+
+`min_distinct = { macho_token = 2 }` in a `[match]` table says that at least
+two different `macho_token` tokens of the rule must hit in one file before
+any of them counts.
+
 ## What the compiler refuses
 
 These lints exist because of failures seen on real apps (design report,

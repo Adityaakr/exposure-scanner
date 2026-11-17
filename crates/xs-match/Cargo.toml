@@ -10,6 +10,10 @@ publish.workspace = true
 
 [dependencies]
 xs-model.workspace = true
+aho-corasick.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true
