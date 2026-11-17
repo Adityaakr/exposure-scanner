@@ -136,10 +136,18 @@ impl Record {
     /// Returns the first violated invariant.
     pub fn validate(&self) -> Result<(), RecordError> {
         self.subject().validate()?;
+        // What was not read is evidence of nothing, and was not looked at
+        // and found wanting either.
+        let read = self.subject().digest != SubjectDigest::Unread;
         match self {
-            Self::Edge(record) => record.validate(),
-            Self::Artifact(record) => record.validate(),
-            Self::Coverage(record) => record.validate(),
+            Self::Coverage(record) if read || record.status == CoverageStatus::Skipped => {
+                record.validate()
+            }
+            Self::Edge(record) if read => record.validate(),
+            Self::Artifact(record) if read => record.validate(),
+            Self::Edge(_) | Self::Artifact(_) | Self::Coverage(_) => {
+                Err(RecordError::UnreadSubject)
+            }
         }
     }
 }
@@ -157,6 +165,10 @@ pub enum RecordError {
     ObjectRuleMismatch,
     /// A count of zero says nothing was seen, which is not evidence.
     ZeroCount,
+    /// The record draws on the content of an artifact that was not read.
+    /// About such a subject there can only be a `coverage` record that says
+    /// it was skipped.
+    UnreadSubject,
 }
 
 impl fmt::Display for RecordError {
@@ -171,6 +183,10 @@ impl fmt::Display for RecordError {
                  one of the built-in declaration rules",
             ),
             Self::ZeroCount => f.write_str("count must be at least 1"),
+            Self::UnreadSubject => f.write_str(
+                "the subject was not read, so the only record about it is a coverage record \
+                 that says it was skipped",
+            ),
         }
     }
 }
@@ -613,6 +629,9 @@ pub enum CoverageReason {
     Unreadable,
     /// The format is known but this build has no reader for it.
     UnsupportedFormat,
+    /// The input changed while it was being read, so what was read of it
+    /// belongs to no one version of it.
+    Changed,
 }
 
 #[cfg(test)]
@@ -845,5 +864,40 @@ pub(crate) mod tests {
             record.validate().unwrap();
             assert_eq!(serde_json::to_value(&record).unwrap(), tree);
         }
+    }
+
+    /// An artifact that could not be read has no hash, and nothing can be
+    /// said about its content: not that it holds something, not what it is,
+    /// and not that it was looked at and not understood.
+    #[test]
+    fn an_unread_subject_carries_only_records_that_say_it_was_skipped() {
+        let subject = json!({
+            "kind": "app", "platform": "android", "id": "locked.apk", "digest": "unread"
+        });
+        let skipped = |reason: &str, count: u32| {
+            json!({
+                "v": 1, "kind": "coverage", "collector": "android.apk", "subject": subject,
+                "status": "skipped", "reason": reason, "count": count
+            })
+        };
+        for tree in [skipped("unreadable", 1), skipped("changed", 2)] {
+            let record: Record = serde_json::from_value(tree.clone()).unwrap();
+            record.validate().unwrap();
+            assert_eq!(serde_json::to_value(&record).unwrap(), tree);
+        }
+
+        let refused =
+            |tree: serde_json::Value| serde_json::from_value::<Record>(tree).unwrap().validate();
+        let mut unrecognized = skipped("parse_error", 1);
+        unrecognized["status"] = json!("unrecognized");
+        assert_eq!(refused(unrecognized), Err(RecordError::UnreadSubject));
+        let artifact = json!({
+            "v": 1, "kind": "artifact", "collector": "android.apk", "subject": subject,
+            "facts": {"files_scanned": 0, "bytes_scanned": 0}
+        });
+        assert_eq!(refused(artifact), Err(RecordError::UnreadSubject));
+        let mut edge: serde_json::Value = serde_json::from_str(BITWARDEN_JSON).unwrap();
+        edge["subject"]["digest"] = json!("unread");
+        assert_eq!(refused(edge), Err(RecordError::UnreadSubject));
     }
 }

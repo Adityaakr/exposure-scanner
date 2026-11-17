@@ -150,13 +150,22 @@ pub enum SubjectDigest {
     Sha256(Sha256Digest),
     /// `bd1:` — bundle digest, version 1. See [`BundleManifest`].
     Bundle(Sha256Digest),
+    /// `unread` — a single-file artifact that could not be read to its end
+    /// as one file, so it has no hash. Nothing is known of its content, and
+    /// the only record that may be about it is a `coverage` record that says
+    /// it was not read.
+    Unread,
 }
+
+/// The text form of [`SubjectDigest::Unread`].
+const UNREAD: &str = "unread";
 
 impl fmt::Display for SubjectDigest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Sha256(digest) => write!(f, "sha256:{digest}"),
             Self::Bundle(digest) => write!(f, "bd1:{digest}"),
+            Self::Unread => f.write_str(UNREAD),
         }
     }
 }
@@ -165,9 +174,12 @@ impl FromStr for SubjectDigest {
     type Err = DigestParseError;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        const EXPECTED: &str = "\"sha256:\" or \"bd1:\" followed by 64 lowercase hex characters";
+        const EXPECTED: &str =
+            "\"sha256:\" or \"bd1:\" followed by 64 lowercase hex characters, or \"unread\"";
         let parse = |hex| Sha256Digest::from_hex(hex).ok_or(DigestParseError::new(EXPECTED));
-        if let Some(hex) = text.strip_prefix("sha256:") {
+        if text == UNREAD {
+            Ok(Self::Unread)
+        } else if let Some(hex) = text.strip_prefix("sha256:") {
             parse(hex).map(Self::Sha256)
         } else if let Some(hex) = text.strip_prefix("bd1:") {
             parse(hex).map(Self::Bundle)
@@ -177,7 +189,7 @@ impl FromStr for SubjectDigest {
     }
 }
 
-impl_serde_str!(SubjectDigest, "a subject digest such as \"sha256:…\" or \"bd1:…\"");
+impl_serde_str!(SubjectDigest, "a subject digest such as \"sha256:…\", \"bd1:…\" or \"unread\"");
 
 /// The inputs a collector read from a directory artifact, from which the
 /// bundle digest `bd1` is computed.
@@ -330,6 +342,18 @@ mod tests {
         assert_eq!(bundle.to_string(), alloc::format!("bd1:{ABC}"));
         assert!(ABC.parse::<SubjectDigest>().is_err());
         assert!(alloc::format!("md5:{ABC}").parse::<SubjectDigest>().is_err());
+    }
+
+    #[test]
+    fn an_unread_artifact_has_a_digest_that_is_no_hash() {
+        let unread: SubjectDigest = "unread".parse().unwrap();
+        assert_eq!(unread, SubjectDigest::Unread);
+        assert_eq!(unread.to_string(), "unread");
+        // It is a word of its own, not a scheme that takes a hash.
+        for other in ["unread:", "Unread", " unread", "unread ", ""] {
+            assert!(other.parse::<SubjectDigest>().is_err(), "{other:?}");
+        }
+        assert!(alloc::format!("unread:{ABC}").parse::<SubjectDigest>().is_err());
     }
 
     fn path(text: &str) -> RelPath {

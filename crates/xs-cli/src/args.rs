@@ -8,16 +8,19 @@ use lexopt::prelude::*;
 /// Shown by `--help` and after a usage error.
 pub(crate) const USAGE: &str = "\
 usage:
-  exposure scan PATH... [--json FILE] [--threads N]
+  exposure scan [PATH...] [--json FILE] [--threads N]
   exposure report FILE [--json FILE]
   exposure rules show
   exposure rules verify PACK --sig SIGNATURE
   exposure --help | --version
 
 commands:
-  scan     Read the apps at each PATH (a macOS .app bundle, a folder of
-           bundles, or an Android .apk file) and report which SDKs they ship.
-           Nothing is changed, executed or sent anywhere.
+  scan     Read the apps at each PATH (a macOS .app bundle, an Android .apk
+           file, or a folder that holds either) and report which SDKs they
+           ship. Without a PATH, on macOS: the apps installed in /Applications
+           and in your own Applications folder. An app that cannot be read is
+           reported as such and does not stop the scan. Nothing is changed,
+           executed or sent anywhere.
   report   Derive the report again from the evidence saved in FILE.
   rules    Show the built-in rule pack, or verify a signed pack file.
 
@@ -41,6 +44,7 @@ pub(crate) enum Command {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Scan {
+    /// What to scan. Empty means the apps installed on this machine.
     pub(crate) paths: Vec<PathBuf>,
     pub(crate) json: Option<PathBuf>,
     pub(crate) threads: usize,
@@ -94,9 +98,6 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
     match command.to_str() {
         Some("scan") => {
             reject("--sig", signature.is_some(), "scan")?;
-            if rest.is_empty() {
-                return Err(String::from("scan needs at least one PATH"));
-            }
             Ok(Command::Scan(Scan { paths: rest, json, threads: threads.unwrap_or(0) }))
         }
         Some("report") => {
@@ -181,6 +182,18 @@ mod tests {
     }
 
     #[test]
+    fn scan_without_a_path_is_a_scan_of_the_installed_apps() {
+        assert_eq!(
+            parse_words(&["scan"]),
+            Ok(Command::Scan(Scan { paths: vec![], json: None, threads: 0 }))
+        );
+        assert_eq!(
+            parse_words(&["scan", "--threads", "2", "--json", "out.json"]),
+            Ok(Command::Scan(Scan { paths: vec![], json: Some("out.json".into()), threads: 2 }))
+        );
+    }
+
+    #[test]
     fn a_path_that_looks_like_an_option_can_follow_a_double_dash() {
         assert_eq!(
             parse_words(&["scan", "--", "--odd.app"]),
@@ -211,7 +224,6 @@ mod tests {
     fn mistakes_are_usage_errors() {
         for words in [
             &[][..],
-            &["scan"],
             &["scan", "x.app", "--threads", "0"],
             &["scan", "x.app", "--threads", "many"],
             &["scan", "x.app", "--threads"],

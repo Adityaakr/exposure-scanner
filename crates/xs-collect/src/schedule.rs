@@ -1,4 +1,4 @@
-//! Running one task per item on a thread pool.
+//! The scan's schedule: one task per item on a thread pool, largest first.
 //!
 //! Design report, section 6.2 decision 5: **one task per file, largest files
 //! first, with `with_max_len(1)`**. Rayon's default splitting hands a whole
@@ -8,8 +8,15 @@
 //! 3.5 s). Forcing one item per task lets idle threads steal the big files
 //! one at a time.
 //!
+//! Largest first, because the sizes are very uneven: on the laptop the
+//! design was measured on, half of all bytes sat in 12 of 11,789 files. A
+//! large file that started last would be read alone, on one thread, after
+//! every other thread had run out of work.
+//!
 //! Workers share nothing mutable and results come back in input order, so
-//! which thread ran what, and when, cannot reach the output.
+//! which thread ran what, and when, cannot reach the output. Neither can the
+//! order of the queue: it decides when a file is read, never what is made of
+//! it.
 
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
@@ -58,6 +65,32 @@ impl Pool {
     {
         self.0.install(|| items.par_iter().with_max_len(1).map(&task).collect())
     }
+
+    /// Puts `jobs` in the order they are to be started in, largest first,
+    /// then applies `task` to the work of each, one task per job, and
+    /// returns the results in that order.
+    ///
+    /// Jobs of one size are started in the order of their work, so the queue
+    /// is the same whatever order the jobs were listed in.
+    pub fn largest_first<W, R, F>(&self, jobs: &mut [Job<W>], task: F) -> Vec<R>
+    where
+        W: Ord + Sync,
+        R: Send,
+        F: Fn(&W) -> R + Sync,
+    {
+        jobs.sort_unstable_by(|a, b| b.size.cmp(&a.size).then_with(|| a.work.cmp(&b.work)));
+        self.map(jobs, |job| task(&job.work))
+    }
+}
+
+/// One item of the scan's queue: a piece of work and how large it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Job<W> {
+    /// How many bytes the work is expected to read. It only orders the
+    /// queue, so a size that is no longer true costs time, not correctness.
+    pub size: u64,
+    /// What to do.
+    pub work: W,
 }
 
 #[cfg(test)]
@@ -80,6 +113,27 @@ mod tests {
         assert_eq!(Pool::new(1).unwrap().threads(), 1);
         assert_eq!(Pool::new(3).unwrap().threads(), 3);
         assert!(Pool::new(0).unwrap().threads() >= 1);
+    }
+
+    /// The queue is a function of the jobs alone: largest first, and jobs of
+    /// one size by their work, whatever order they were listed in.
+    #[test]
+    fn jobs_are_started_largest_first_whatever_order_they_were_listed_in() {
+        let pool = Pool::new(3).unwrap();
+        let listed = [(5, 'c'), (900, 'x'), (5, 'a'), (0, 'z'), (70, 'm'), (5, 'b'), (900, 'w')];
+        let queue = |order: &[usize]| {
+            let mut jobs: Vec<Job<char>> = order
+                .iter()
+                .map(|&index| Job { size: listed[index].0, work: listed[index].1 })
+                .collect();
+            let results = pool.largest_first(&mut jobs, |work| work.to_ascii_uppercase());
+            (jobs.iter().map(|job| job.work).collect::<String>(), results)
+        };
+        let expected = (String::from("wxmabcz"), vec!['W', 'X', 'M', 'A', 'B', 'C', 'Z']);
+        assert_eq!(queue(&[0, 1, 2, 3, 4, 5, 6]), expected);
+        assert_eq!(queue(&[6, 5, 4, 3, 2, 1, 0]), expected);
+        assert_eq!(queue(&[3, 0, 6, 2, 5, 1, 4]), expected);
+        assert_eq!(pool.largest_first(&mut [] as &mut [Job<char>], |work| *work), Vec::new());
     }
 
     /// The regression test for the splitting trap.

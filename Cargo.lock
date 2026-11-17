@@ -951,6 +951,7 @@ version = "0.1.0"
 dependencies = [
  "minisign",
  "object",
+ "serde_json",
  "xs-model",
  "xs-rules",
 ]

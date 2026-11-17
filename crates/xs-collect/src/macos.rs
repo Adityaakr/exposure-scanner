@@ -32,11 +32,11 @@
 //! that name a place, and the property list parser's own budgets. What a
 //! budget cuts off becomes an `over_budget` coverage record.
 //!
-//! The work is split in three so that reading can be scheduled per file
-//! across all bundles at once (design report, section 6.2):
+//! The work is split in three so that the scan can schedule reading per
+//! file across all artifacts at once (design report, section 6.2):
 //!
 //! 1. **plan** (per bundle): list the files, read the small property list.
-//! 2. **read** (per file, largest first): one pass for hash and matches.
+//! 2. **read** (per file): one pass for hash and matches.
 //! 3. **finish** (per bundle, pure): turn what was read into records.
 
 use std::cell::RefCell;
@@ -58,10 +58,8 @@ use xs_model::record::{
 use xs_model::{MatcherKind, RelPath, Sha256Digest, canon, text};
 
 use self::binary::{Binary, BinaryFindings};
-use crate::ScanStats;
 use crate::electron;
 use crate::read::{self, OnePass, Sink, WINDOW};
-use crate::schedule::Pool;
 
 mod binary;
 
@@ -188,7 +186,7 @@ impl Gaps {
 }
 
 /// What is known about a bundle before its files are read.
-struct Plan {
+pub(crate) struct Plan {
     root: PathBuf,
     /// The bundle folder's own name, used as the app id only when the
     /// property list gives none.
@@ -205,6 +203,12 @@ struct Plan {
 }
 
 impl Plan {
+    /// The sizes of the files to consider, as the listing saw them. A file's
+    /// place in this list is what `read` and `finish` know it by.
+    pub(crate) fn sizes(&self) -> impl Iterator<Item = u64> + '_ {
+        self.files.iter().map(|(_, size)| *size)
+    }
+
     /// Sets aside a file of `bytes` bytes, which is over [`MAX_FILE_BYTES`].
     ///
     /// The digest covers the exact size. The record carries it only up to
@@ -222,12 +226,13 @@ impl Plan {
     }
 }
 
-/// One file to read: which bundle, which file in its plan, and how large.
-struct Job {
-    bundle: usize,
-    file: usize,
-    size: u64,
-}
+/// What reading one file of a bundle produced, for `finish` to take in.
+///
+/// A scan holds one of these per file it listed until the last file is
+/// read, and most files of a bundle are not ones the collector reads. So
+/// such a file costs a word here, and only a file that was read has a
+/// result behind it.
+pub(crate) struct FileRead(Option<Box<FileResult>>);
 
 /// What reading one file produced.
 enum FileResult {
@@ -261,62 +266,27 @@ enum FileResult {
     Failed,
 }
 
-/// Scans `bundles` and returns their records with the scan's totals.
+/// Lists the bundle at `root` and reads its property list.
 ///
-/// A problem inside a bundle never fails the scan; it becomes a `coverage`
-/// record.
-pub fn collect(
-    bundles: &[PathBuf],
-    matchers: &Matchers<'_>,
-    pool: &Pool,
-) -> (Vec<Record>, ScanStats) {
-    // Listing is stat-bound and independent per bundle.
-    let plans: Vec<Plan> = pool.map(bundles, |root| plan(root, MAX_ENTRIES));
+/// A bundle that cannot be listed is not an error: it yields a plan with no
+/// files, and the record that says so.
+pub(crate) fn plan(root: &Path) -> Plan {
+    plan_within(root, MAX_ENTRIES)
+}
 
-    // One task per file across all bundles, largest first, so the few files
-    // that hold most of the bytes start at once on separate threads.
-    let mut jobs: Vec<Job> = plans
-        .iter()
-        .enumerate()
-        .flat_map(|(bundle, plan)| {
-            plan.files.iter().enumerate().map(move |(file, (_, size))| Job {
-                bundle,
-                file,
-                size: *size,
-            })
-        })
-        .collect();
-    jobs.sort_by(|a, b| {
-        b.size.cmp(&a.size).then(a.bundle.cmp(&b.bundle)).then(a.file.cmp(&b.file))
-    });
-
-    let results: Vec<FileResult> = pool.map(&jobs, |job| {
-        let found = plans.get(job.bundle).and_then(|plan| Some((plan, plan.files.get(job.file)?)));
-        match found {
-            Some((plan, (path, _))) => {
-                read_file(&plan.root.join(path.as_str()), path, matchers, MAX_FILE_BYTES)
-            }
-            None => FileResult::Failed,
+/// Reads one file of a planned bundle, the one at place `file` of
+/// [`Plan::sizes`]: one pass for its hash and for what is found in it.
+pub(crate) fn read(plan: &Plan, file: usize, matchers: &Matchers<'_>) -> FileRead {
+    let result = match plan.files.get(file) {
+        Some((path, _)) => {
+            read_file(&plan.root.join(path.as_str()), path, matchers, MAX_FILE_BYTES)
         }
-    });
-
-    let mut per_bundle: Vec<Vec<(usize, FileResult)>> = plans.iter().map(|_| Vec::new()).collect();
-    for (job, result) in jobs.iter().zip(results) {
-        if let Some(list) = per_bundle.get_mut(job.bundle) {
-            list.push((job.file, result));
-        }
-    }
-
-    let mut records = Vec::new();
-    let mut stats = ScanStats::default();
-    for (plan, results) in plans.into_iter().zip(per_bundle) {
-        let (bundle_records, files, bytes) = finish(plan, results, matchers);
-        stats.artifacts += 1;
-        stats.files += files;
-        stats.bytes += bytes;
-        records.extend(bundle_records);
-    }
-    (records, stats)
+        None => FileResult::Failed,
+    };
+    FileRead(match result {
+        FileResult::NotCandidate => None,
+        result => Some(Box::new(result)),
+    })
 }
 
 fn rel(path: &str) -> Option<RelPath> {
@@ -325,7 +295,7 @@ fn rel(path: &str) -> Option<RelPath> {
 
 /// Lists a bundle, at most `max_entries` directory entries of it, and reads
 /// its property list.
-fn plan(root: &Path, max_entries: usize) -> Plan {
+fn plan_within(root: &Path, max_entries: usize) -> Plan {
     let folder_name =
         root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let mut plan = Plan {
@@ -744,10 +714,14 @@ fn declared_host(text: &str, reduce: impl Fn(&str) -> Option<String>) -> Option<
     reduce(text).filter(|host| text::is_host(host))
 }
 
-/// Turns a plan and what was read into records. Pure.
-fn finish(
+/// Turns a plan and what was read into records, with the number of files
+/// and of bytes that were read. Pure.
+///
+/// `results` pairs a file's place in [`Plan::sizes`] with what `read` made
+/// of it, in any order.
+pub(crate) fn finish(
     mut plan: Plan,
-    results: Vec<(usize, FileResult)>,
+    results: Vec<(usize, FileRead)>,
     matchers: &Matchers<'_>,
 ) -> (Vec<Record>, u64, u64) {
     // The code of an Electron app: its archives and loose scripts.
@@ -757,10 +731,10 @@ fn finish(
     }
     let mut binaries: Vec<(RelPath, BinaryFindings)> = Vec::new();
     let mut manifests: Vec<(RelPath, Result<Vec<String>, FormatError>)> = Vec::new();
-    for (file, result) in results {
-        let Some((path, _)) = plan.files.get(file) else { continue };
+    for (file, FileRead(result)) in results {
+        let (Some((path, _)), Some(result)) = (plan.files.get(file), result) else { continue };
         let path = path.clone();
-        match result {
+        match *result {
             FileResult::NotCandidate => {}
             FileResult::Binary { sha256, bytes, found } => {
                 plan.manifest.file(path.clone(), sha256);
@@ -1216,7 +1190,7 @@ mod tests {
         let shuffled = vec![5, 2, 7, 0, 4, 1, 6, 3];
         for order in [forward, backward, shuffled] {
             let dir = tree(&names, order.iter().copied());
-            let under = |max_entries| listed(&plan(dir.path(), max_entries));
+            let under = |max_entries| listed(&plan_within(dir.path(), max_entries));
             // Everything fits.
             assert_eq!(under(12), expect(&names, &[]), "{order:?}");
             // One entry is left when `c` is reached, and it holds two.
@@ -1256,13 +1230,13 @@ mod tests {
         let dir = tree(&names, 0..names.len());
 
         // Listed in full, the file is found: no record about it missing.
-        let listed = plan(dir.path(), 4);
+        let listed = plan_within(dir.path(), 4);
         assert!(!gaps(&listed).iter().any(|(path, ..)| path == "Contents"), "{:?}", gaps(&listed));
         assert_eq!(listed.files_read, 1);
 
         // One entry at the top leaves one, and `Contents` holds three.
         assert_eq!(
-            gaps(&plan(dir.path(), 2)),
+            gaps(&plan_within(dir.path(), 2)),
             [("Contents".to_string(), CoverageStatus::Skipped, CoverageReason::OverBudget)]
         );
 
@@ -1270,7 +1244,7 @@ mod tests {
         let contents = dir.path().join("Contents");
         fs::set_permissions(&contents, fs::Permissions::from_mode(0o000)).unwrap();
         let unreadable = fs::read_dir(&contents).is_err();
-        let found = gaps(&plan(dir.path(), 4));
+        let found = gaps(&plan_within(dir.path(), 4));
         fs::set_permissions(&contents, fs::Permissions::from_mode(0o755)).unwrap();
         // Running as root, permissions do not bind and there is nothing to test.
         if unreadable {
@@ -1283,7 +1257,7 @@ mod tests {
         // A listing that completes without the file is what "missing" means.
         fs::remove_file(contents.join("Info.plist")).unwrap();
         assert_eq!(
-            gaps(&plan(dir.path(), 4)),
+            gaps(&plan_within(dir.path(), 4)),
             [(
                 "Contents/Info.plist".to_string(),
                 CoverageStatus::Unrecognized,
@@ -1309,11 +1283,11 @@ mod tests {
             };
             // 10 entries at the top, 10 in `f0` and 10 in `f1` leave 5.
             assert_eq!(
-                listed(&plan(dir.path(), 35)),
+                listed(&plan_within(dir.path(), 35)),
                 expect(&[], &["f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9"]),
                 "reversed: {reversed}"
             );
-            assert_eq!(listed(&plan(dir.path(), 110)), expect(&[], &[]));
+            assert_eq!(listed(&plan_within(dir.path(), 110)), expect(&[], &[]));
         }
     }
 
@@ -1344,8 +1318,9 @@ mod tests {
         ];
         let dir = tree(&frameworks, 0..frameworks.len());
         let without = tree(&["Contents/"], 0..1);
-        let records =
-            |root: &Path, max_entries| finish(plan(root, max_entries), Vec::new(), &matchers).0;
+        let records = |root: &Path, max_entries| {
+            finish(plan_within(root, max_entries), Vec::new(), &matchers).0
+        };
         let edges = |records: &[Record]| {
             records.iter().filter(|record| matches!(record, Record::Edge(_))).count()
         };
@@ -1417,7 +1392,7 @@ mod tests {
         let matchers = Matchers::build(&pack).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let records_for = |bytes: u64| {
-            let mut plan = plan(dir.path(), MAX_ENTRIES);
+            let mut plan = plan_within(dir.path(), MAX_ENTRIES);
             plan.over_budget(RelPath::new("Contents/MacOS/Huge").unwrap(), bytes);
             finish(plan, Vec::new(), &matchers).0
         };

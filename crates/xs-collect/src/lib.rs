@@ -17,6 +17,17 @@
 //! and symbolic links inside an artifact are never followed, so a hostile
 //! bundle cannot point the scanner at files outside itself.
 //!
+//! **One schedule for the whole scan** (design report, section 6.2). The
+//! files of every bundle and every package go into one list, largest first,
+//! and each is one task ([`schedule`]). The few files that hold most of the
+//! bytes therefore start at once on separate threads, whichever artifacts
+//! they belong to. A file is read once, in windows of 1 MiB ([`read`]), so
+//! what a scan holds in memory does not grow with the size of what it reads.
+//!
+//! **One artifact cannot fail the scan.** What cannot be read, of an
+//! artifact or of a file in it, becomes a `coverage` record that says so,
+//! and every other artifact is scanned as if it had not been there.
+//!
 //! **Determinism while parallel** (design report, section 6.4). A file's
 //! result is a function of its bytes and the rule pack alone. Results are
 //! gathered in input order and enter an [`EvidenceSet`], which is keyed by
@@ -31,12 +42,17 @@ pub mod macos;
 pub mod read;
 pub mod schedule;
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
 use xs_match::Matchers;
 use xs_model::EvidenceSet;
 use xs_model::evidence::EvidenceError;
+use xs_model::record::{CoverageReason, Record};
+
+use crate::discover::Artifacts;
+use crate::schedule::{Job, Pool};
 
 /// How to run a scan.
 #[derive(Debug, Clone, Copy, Default)]
@@ -57,7 +73,8 @@ pub struct ScanOutcome {
 /// Totals of one scan.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ScanStats {
-    /// Artifacts scanned.
+    /// Artifacts scanned. One that could not be read at all is not among
+    /// them; a `coverage` record stands for it.
     pub artifacts: u64,
     /// Files read and hashed.
     pub files: u64,
@@ -69,6 +86,9 @@ pub struct ScanStats {
 /// they become `coverage` records and the scan carries on.
 #[derive(Debug)]
 pub enum ScanError {
+    /// No path was given, and this build does not know where the system it
+    /// runs on keeps installed apps.
+    NoInstalledApps,
     /// A path given on the command line does not exist or cannot be read.
     Path {
         /// The path as given.
@@ -88,11 +108,15 @@ pub enum ScanError {
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NoInstalledApps => f.write_str(
+                "no PATH was given, and installed apps are only looked for on macOS; name the \
+                 apps or the folders to scan",
+            ),
             Self::Path { path, error } => write!(f, "cannot read {}: {error}", path.display()),
             Self::Unsupported(path) => write!(
                 f,
-                "{} is not a macOS application bundle, a folder of them or an Android package \
-                 (.apk); other artifact kinds are not supported yet",
+                "{} is not a macOS application bundle, an Android package (.apk) or a folder of \
+                 them; other artifact kinds are not supported yet",
                 path.display()
             ),
             Self::Threads(message) => write!(f, "cannot start worker threads: {message}"),
@@ -113,34 +137,123 @@ impl From<EvidenceError> for ScanError {
 
 /// Scans the artifacts found at `paths` and returns the evidence.
 ///
-/// Each path is a macOS application bundle, a folder that holds bundles, or
-/// an Android package (a file named `.apk`). A folder is not searched for
-/// packages. Giving the same artifact twice, directly or through a symbolic
-/// link, scans it once.
+/// Each path is a macOS application bundle, an Android package (a file
+/// named `.apk`) or a folder that holds either; see [`discover::artifacts`].
+/// With no path at all, the apps installed on this machine are scanned; see
+/// [`discover::installed`]. Giving the same artifact twice, directly or
+/// through a symbolic link, scans it once.
 ///
 /// # Errors
 ///
-/// Fails if a path does not exist or is not scannable, if an Android
-/// package cannot be read to its end or changes while it is read, or if the
-/// worker threads cannot be started. Unreadable or malformed files inside
-/// an artifact do not fail the scan.
+/// Fails if a path does not exist or is not scannable, if no path is given
+/// on a system whose installed apps this build cannot find, or if the worker
+/// threads cannot be started. Nothing that happens once reading has begun
+/// fails the scan: an artifact, or a file inside one, that is unreadable or
+/// malformed is reported in a `coverage` record.
 pub fn scan(
     paths: &[PathBuf],
     matchers: &Matchers<'_>,
     options: ScanOptions,
 ) -> Result<ScanOutcome, ScanError> {
-    let found = discover::artifacts(paths)?;
-    let pool = schedule::Pool::new(options.threads).map_err(ScanError::Threads)?;
-    let (mut records, mut stats) = macos::collect(&found.bundles, matchers, &pool);
-    let (package_records, package_stats) = android::collect(&found.packages, matchers, &pool)?;
-    records.extend(package_records);
-    stats.artifacts += package_stats.artifacts;
-    stats.files += package_stats.files;
-    stats.bytes += package_stats.bytes;
+    let found = if paths.is_empty() { discover::installed()? } else { discover::artifacts(paths)? };
+    let pool = Pool::new(options.threads).map_err(ScanError::Threads)?;
+    let (records, stats) = collect(&found, matchers, &pool);
 
     let mut evidence = EvidenceSet::new();
     for record in records {
         evidence.insert(record)?;
     }
     Ok(ScanOutcome { evidence, stats })
+}
+
+/// One read of the scan: a file of a bundle, or a package.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Work {
+    /// The file at place `file` of the plan of bundle number `bundle`.
+    File { bundle: usize, file: usize },
+    /// The package at this place in the list of packages found.
+    Package(usize),
+}
+
+/// What one read produced.
+enum Done {
+    File(macos::FileRead),
+    Package(android::Package),
+}
+
+/// Reads `found` on `pool` and returns the records with the scan's totals.
+///
+/// Three steps: every bundle is listed, which only looks at names and
+/// sizes; every file to read, of whatever artifact, is read as a task of
+/// its own, largest first; and what was read is turned into records, one
+/// artifact at a time, which touches no file.
+fn collect(found: &Artifacts, matchers: &Matchers<'_>, pool: &Pool) -> (Vec<Record>, ScanStats) {
+    // Listing is stat-bound and independent per bundle.
+    let plans: Vec<macos::Plan> = pool.map(&found.bundles, |root| macos::plan(root));
+
+    let mut jobs: Vec<Job<Work>> = Vec::new();
+    for (bundle, plan) in plans.iter().enumerate() {
+        let files = plan.sizes().enumerate();
+        jobs.extend(files.map(|(file, size)| Job { size, work: Work::File { bundle, file } }));
+    }
+    for (index, path) in found.packages.iter().enumerate() {
+        // A package that cannot even be measured is found out when it is
+        // read; where it stands in the queue until then does not matter.
+        let size = std::fs::metadata(path).map_or(0, |metadata| metadata.len());
+        jobs.push(Job { size, work: Work::Package(index) });
+    }
+    let done = pool.largest_first(&mut jobs, |work| match *work {
+        Work::File { bundle, file } => {
+            plans.get(bundle).map(|plan| Done::File(macos::read(plan, file, matchers)))
+        }
+        Work::Package(index) => {
+            found.packages.get(index).map(|path| Done::Package(android::read(path, matchers)))
+        }
+    });
+
+    let mut stats = ScanStats::default();
+    let mut records = Vec::new();
+    let mut per_bundle: Vec<Vec<(usize, macos::FileRead)>> =
+        plans.iter().map(|_| Vec::new()).collect();
+    // Packages that were not read are told apart by name and reason alone,
+    // so those that share both are counted in one record.
+    let mut unread: BTreeMap<(String, CoverageReason), u32> = BTreeMap::new();
+    for (job, done) in jobs.iter().zip(done) {
+        match (job.work, done) {
+            (Work::File { bundle, file }, Some(Done::File(result))) => {
+                if let Some(results) = per_bundle.get_mut(bundle) {
+                    results.push((file, result));
+                }
+            }
+            (
+                Work::Package(_),
+                Some(Done::Package(android::Package::Scanned { records: scanned, bytes })),
+            ) => {
+                stats.artifacts += 1;
+                stats.files += 1;
+                stats.bytes += bytes;
+                records.extend(scanned);
+            }
+            (Work::Package(index), Some(Done::Package(android::Package::Unread(reason)))) => {
+                if let Some(path) = found.packages.get(index) {
+                    let count = unread.entry((android::unread_name(path), reason)).or_insert(0);
+                    *count = count.saturating_add(1);
+                }
+            }
+            // A job names a place in the lists it was made from, and a read
+            // gives back the kind of result its job asks for.
+            (Work::File { .. } | Work::Package(_), _) => {}
+        }
+    }
+    for (plan, results) in plans.into_iter().zip(per_bundle) {
+        let (finished, files, bytes) = macos::finish(plan, results, matchers);
+        stats.artifacts += 1;
+        stats.files += files;
+        stats.bytes += bytes;
+        records.extend(finished);
+    }
+    for ((name, reason), count) in unread {
+        records.push(android::unread(name, reason, count));
+    }
+    (records, stats)
 }

@@ -28,13 +28,21 @@
 //! 3. The same pass compares what step 1 read with the bytes it now sees at
 //!    those offsets. If they differ, the file changed while it was being
 //!    read: the entries that were read and the hash may be of different
-//!    versions, so the package has no identity to report under, and the
-//!    scan fails as it does for a file that cannot be read.
+//!    versions, so the package has no identity to report under.
 //!
 //! Every byte evidence is drawn from is therefore a byte the digest covers:
 //! equal digests give equal evidence, which is what lets anyone holding the
 //! same file reproduce a `contains` record (project spec, "Evidence
 //! format").
+//!
+//! # A package that cannot be read
+//!
+//! A package that cannot be opened or read to its end, or that changes while
+//! it is read, has no hash, so nothing can be said about what it holds. It
+//! does not fail the scan, which may cover many other apps: it becomes one
+//! `coverage` record that says the package was skipped and why. With no
+//! hash, the subject of that record has the digest `unread` and is told from
+//! other packages by the name of its file, the one thing known about it.
 //!
 //! # Budgets
 //!
@@ -61,7 +69,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use xs_formats::dex::{self, Dex};
 use xs_formats::zip::{self, Entry};
@@ -75,8 +83,6 @@ use xs_model::record::{
 use xs_model::{MatcherKind, RelPath, Sha256Digest, Sha256Stream, SubjectDigest, text};
 
 use crate::read::WINDOW;
-use crate::schedule::Pool;
-use crate::{ScanError, ScanStats};
 
 /// Most DEX files read from one package. Android loads `classes.dex`,
 /// `classes2.dex` and so on; the largest apps ship around a hundred.
@@ -327,16 +333,48 @@ impl Expected<'_> {
     }
 }
 
-/// Reads exactly `length` bytes at `offset`.
-fn read_at(reader: &mut (impl Read + Seek), offset: u64, length: usize) -> io::Result<Vec<u8>> {
+/// Why a package could not be read as one file.
+#[derive(Debug)]
+enum Unread {
+    /// The file system refused.
+    Refused(io::Error),
+    /// The file was not one and the same from the first read of it to the
+    /// last: it grew, shrank or was replaced.
+    Changed,
+}
+
+impl Unread {
+    /// What a coverage record says of a package that was not read.
+    const fn reason(&self) -> CoverageReason {
+        match self {
+            Self::Refused(_) => CoverageReason::Unreadable,
+            Self::Changed => CoverageReason::Changed,
+        }
+    }
+}
+
+impl From<io::Error> for Unread {
+    fn from(error: io::Error) -> Self {
+        Self::Refused(error)
+    }
+}
+
+impl From<Unread> for io::Error {
+    fn from(unread: Unread) -> Self {
+        match unread {
+            Unread::Refused(error) => error,
+            Unread::Changed => Self::other("the package changed while it was being read"),
+        }
+    }
+}
+
+/// Reads exactly `length` bytes at `offset`. A file that ends before that
+/// is shorter than the size the plan was made for.
+fn read_at(reader: &mut (impl Read + Seek), offset: u64, length: usize) -> Result<Vec<u8>, Unread> {
     reader.seek(SeekFrom::Start(offset))?;
     let mut bytes = Vec::new();
     reader.take(length as u64).read_to_end(&mut bytes)?;
-    if bytes.len() == length {
-        Ok(bytes)
-    } else {
-        Err(io::Error::from(io::ErrorKind::UnexpectedEof))
-    }
+    if bytes.len() == length { Ok(bytes) } else { Err(Unread::Changed) }
 }
 
 /// Reads `reader` from its start to its end in windows, at most `limit`
@@ -373,43 +411,17 @@ struct Scanned {
     bytes: u64,
 }
 
-/// Scans the packages at `paths` and returns their records with the scan's
-/// totals.
-///
-/// A problem inside a package never fails the scan; it becomes a `coverage`
-/// record.
-///
-/// # Errors
-///
-/// Fails if a package cannot be opened or read to its end, or changes while
-/// it is read. Its digest is its identity, so without one there is no
-/// subject to report anything about, and saying nothing would pass for
-/// "nothing found".
-pub fn collect(
-    paths: &[PathBuf],
-    matchers: &Matchers<'_>,
-    pool: &Pool,
-) -> Result<(Vec<Record>, ScanStats), ScanError> {
-    let fail = |path: &Path, error| ScanError::Path { path: path.to_path_buf(), error };
-    // One task per package, largest first.
-    let mut jobs: Vec<(u64, &Path)> = Vec::with_capacity(paths.len());
-    for path in paths {
-        let size = std::fs::metadata(path).map_err(|error| fail(path, error))?.len();
-        jobs.push((size, path));
-    }
-    jobs.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
-
-    let results = pool.map(&jobs, |(_, path)| scan_file(path, matchers));
-    let mut records = Vec::new();
-    let mut stats = ScanStats::default();
-    for ((_, path), result) in jobs.iter().zip(results) {
-        let scanned = result.map_err(|error| fail(path, error))?;
-        stats.artifacts += 1;
-        stats.files += 1;
-        stats.bytes += scanned.bytes;
-        records.extend(scanned.records);
-    }
-    Ok((records, stats))
+/// What became of one package.
+pub(crate) enum Package {
+    /// It was read from start to end: its records and its length.
+    Scanned {
+        /// Every record about the package.
+        records: Vec<Record>,
+        /// How many bytes were read and hashed.
+        bytes: u64,
+    },
+    /// It has no hash, for this reason. See [`unread`].
+    Unread(CoverageReason),
 }
 
 thread_local! {
@@ -417,17 +429,60 @@ thread_local! {
     static SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
-fn scan_file(path: &Path, matchers: &Matchers<'_>) -> io::Result<Scanned> {
-    let mut file = File::open(path)?;
-    let file_bytes = file.metadata()?.len();
-    scan_with_scratch(&mut file, file_bytes, matchers)
+/// Reads the package at `path` in one pass.
+///
+/// A problem inside a package becomes a `coverage` record among its records.
+/// A package that cannot be opened or read to its end, or that changes while
+/// it is read, comes back as [`Package::Unread`]: its digest is its
+/// identity, so without one there is nothing to report its content under.
+pub(crate) fn read(path: &Path, matchers: &Matchers<'_>) -> Package {
+    let scanned = File::open(path).map_err(Unread::from).and_then(|mut file| {
+        let file_bytes = file.metadata()?.len();
+        scan_with_scratch(&mut file, file_bytes, matchers)
+    });
+    match scanned {
+        Ok(Scanned { records, bytes }) => Package::Scanned { records, bytes },
+        Err(unread) => Package::Unread(unread.reason()),
+    }
+}
+
+/// The name a package that was not read is reported under: the name of its
+/// file. Nothing of its content is known, so there is no app id and no hash,
+/// and saying which file it was is what lets a reader act on the record.
+pub(crate) fn unread_name(path: &Path) -> String {
+    let name = path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
+    let name = text::clean(&name, text::MAX_ID_BYTES);
+    if name.is_empty() { String::from(UNIDENTIFIED) } else { name }
+}
+
+/// The record that says `count` packages named `name` were skipped because
+/// of `reason`. Packages that share a name and a reason share the record,
+/// which counts them: a record's id is its content, so two records that say
+/// the same would be one.
+pub(crate) fn unread(name: String, reason: CoverageReason, count: u32) -> Record {
+    Record::Coverage(CoverageRecord {
+        v: V1,
+        collector: Collector::AndroidApk,
+        subject: Subject {
+            kind: SubjectKind::App,
+            platform: Platform::Android,
+            id: name,
+            version: None,
+            digest: SubjectDigest::Unread,
+        },
+        status: CoverageStatus::Skipped,
+        reason,
+        location: None,
+        bytes: None,
+        count,
+    })
 }
 
 fn scan_with_scratch(
     reader: &mut (impl Read + Seek),
     file_bytes: u64,
     matchers: &Matchers<'_>,
-) -> io::Result<Scanned> {
+) -> Result<Scanned, Unread> {
     SCRATCH.with_borrow_mut(|buffer| {
         if buffer.len() < WINDOW {
             buffer.resize(WINDOW, 0);
@@ -437,7 +492,7 @@ fn scan_with_scratch(
 }
 
 /// Scans one package read from `reader`, which holds `file_bytes` bytes,
-/// and returns its records: what [`collect`] does for each file.
+/// and returns its records: what a scan does for each package file.
 ///
 /// For a caller that holds a package somewhere other than in a file of its
 /// own, such as a test or a fuzz target with the bytes in memory.
@@ -452,7 +507,7 @@ pub fn scan_reader(
     file_bytes: u64,
     matchers: &Matchers<'_>,
 ) -> io::Result<Vec<Record>> {
-    scan_with_scratch(reader, file_bytes, matchers).map(|scanned| scanned.records)
+    Ok(scan_with_scratch(reader, file_bytes, matchers)?.records)
 }
 
 /// Reads one package from `reader`, which holds `file_bytes` bytes, and
@@ -462,7 +517,7 @@ fn scan_package(
     file_bytes: u64,
     buffer: &mut [u8],
     matchers: &Matchers<'_>,
-) -> io::Result<Scanned> {
+) -> Result<Scanned, Unread> {
     // The end of the file first: the end record, then the directory.
     let tail_bytes = usize::try_from(file_bytes).unwrap_or(usize::MAX).min(zip::MAX_TAIL_BYTES);
     let tail_offset = file_bytes.saturating_sub(tail_bytes as u64);
@@ -505,7 +560,7 @@ fn scan_package(
         // The directory, the entries and the hash may each be of a
         // different version of the file. There is nothing to report that
         // would be true of any one of them.
-        return Err(io::Error::other("the package changed while it was being read"));
+        return Err(Unread::Changed);
     }
     let entries = captures.into_iter().map(|capture| capture.finish(matchers)).collect();
     let digest = SubjectDigest::Sha256(sha256);
@@ -1606,10 +1661,10 @@ mod tests {
 
     /// Evidence comes only from bytes the digest covers. If the end of the
     /// file is not what the plan was made from, the package changed under
-    /// the scanner, and the scan of it fails. There is no moment at which a
+    /// the scanner, and it is not read. There is no moment at which a
     /// replacement gives a mix of the two files.
     #[test]
-    fn a_package_that_changes_while_it_is_read_fails_the_scan() {
+    fn a_package_that_changes_while_it_is_read_is_not_read() {
         let pack = tracker_pack();
         let matchers = Matchers::build(&pack).unwrap();
         let before = tracker_apk();
@@ -1631,7 +1686,7 @@ mod tests {
             let mut buffer = vec![0; 64];
             scan_package(&mut reader, before.len() as u64, &mut buffer, &matchers)
                 .map(|scanned| scanned.records)
-                .map_err(|error| error.to_string())
+                .map_err(|unread| unread.reason())
         };
 
         // Never replaced, and replaced before the first read.
@@ -1643,33 +1698,39 @@ mod tests {
         assert_eq!(artifact(&replaced).subject.digest, digest_after);
 
         // Replaced after any number of reads: the result is one file or the
-        // other, whole, or the scan of the package fails.
-        let mut failed = 0;
+        // other, whole, or the package is reported as changed.
+        let mut noticed = 0;
         for reads_left in 1..200 {
             match run(reads_left) {
                 Ok(records) => assert!(
                     records == stable || records == replaced,
                     "a mix of two files after {reads_left} reads"
                 ),
-                Err(error) => {
-                    failed += 1;
-                    assert_eq!(error, "the package changed while it was being read");
+                Err(reason) => {
+                    noticed += 1;
+                    assert_eq!(reason, CoverageReason::Changed);
                 }
             }
         }
-        assert!(failed > 10, "the replacement was noticed {failed} times");
+        assert!(noticed > 10, "the replacement was noticed {noticed} times");
 
         // A file that grew, or shrank, is noticed too.
         let mut grown = before.clone();
         grown.extend_from_slice(b"more");
-        let mut buffer = vec![0; 64];
-        let outcome =
-            scan_package(&mut Cursor::new(&grown), before.len() as u64, &mut buffer, &matchers);
-        assert!(outcome.is_err());
+        let shrunk = &before[..before.len() - 1];
+        for now in [&grown[..], shrunk, b"short"] {
+            let mut buffer = vec![0; 64];
+            let outcome =
+                scan_package(&mut Cursor::new(now), before.len() as u64, &mut buffer, &matchers);
+            assert!(matches!(outcome, Err(Unread::Changed)), "{} bytes", now.len());
+        }
+        // A caller with a reader of its own is told in words.
+        let error = scan_reader(&mut Cursor::new(&grown), before.len() as u64, &matchers);
+        assert_eq!(error.unwrap_err().to_string(), "the package changed while it was being read");
     }
 
     #[test]
-    fn read_errors_fail_the_scan_of_the_package() {
+    fn a_read_error_leaves_the_package_unread() {
         struct Failing;
         impl Read for Failing {
             fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
@@ -1684,12 +1745,9 @@ mod tests {
         let pack = tracker_pack();
         let matchers = Matchers::build(&pack).unwrap();
         let mut buffer = vec![0; 64];
-        let error = scan_package(&mut Failing, 100, &mut buffer, &matchers).err().unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-        // A file shorter than its size says.
-        let error =
-            scan_package(&mut Cursor::new(b"short"), 100, &mut buffer, &matchers).err().unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        let unread = scan_package(&mut Failing, 100, &mut buffer, &matchers).err().unwrap();
+        assert_eq!(unread.reason(), CoverageReason::Unreadable);
+        assert_eq!(io::Error::from(unread).kind(), io::ErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -1709,31 +1767,52 @@ mod tests {
         assert!(!region.agrees_with(19, b"8"));
     }
 
-    /// Scanning files on disk: one task per package, results in a set.
+    /// Reading a file on disk, and what is made of one that cannot be read.
     #[test]
-    fn packages_on_disk_are_scanned_and_an_unreadable_one_fails_the_scan() {
+    fn a_package_on_disk_is_read_and_one_that_is_not_there_is_unread() {
         let dir = tempfile::tempdir().unwrap();
-        let clean = ZipBuilder::new()
-            .deflated(MANIFEST, &testkit::manifest("org.example.clean", "1", &[]))
-            .finish();
         std::fs::write(dir.path().join("tracker.apk"), tracker_apk()).unwrap();
-        std::fs::write(dir.path().join("clean.apk"), &clean).unwrap();
-        let paths = [dir.path().join("clean.apk"), dir.path().join("tracker.apk")];
 
         let pack = tracker_pack();
         let matchers = Matchers::build(&pack).unwrap();
-        let pool = Pool::new(2).unwrap();
-        let (records, stats) = collect(&paths, &matchers, &pool).unwrap();
-        assert_eq!(stats.artifacts, 2);
-        assert_eq!(stats.files, 2);
-        assert_eq!(stats.bytes, (clean.len() + tracker_apk().len()) as u64);
+        let Package::Scanned { records, bytes } = read(&dir.path().join("tracker.apk"), &matchers)
+        else {
+            panic!("a readable package was not read");
+        };
+        assert_eq!(bytes, tracker_apk().len() as u64);
         assert_eq!(edges(&records).len(), 4);
-        assert_eq!(records.len(), 6);
 
-        let missing = [dir.path().join("clean.apk"), dir.path().join("gone.apk")];
-        assert!(matches!(
-            collect(&missing, &matchers, &pool),
-            Err(ScanError::Path { path, .. }) if path.ends_with("gone.apk")
-        ));
+        let gone = dir.path().join("gone.apk");
+        assert!(matches!(read(&gone, &matchers), Package::Unread(CoverageReason::Unreadable)));
+        // A folder opens and then refuses to be read.
+        assert!(matches!(read(dir.path(), &matchers), Package::Unread(CoverageReason::Unreadable)));
+    }
+
+    /// The one record about a package that was not read: no hash, the name
+    /// of its file, and nothing about its content.
+    #[test]
+    fn an_unread_package_is_reported_by_the_name_of_its_file() {
+        assert_eq!(
+            unread_name(Path::new("/home/someone/Downloads/Some App 1.2.apk")),
+            "Some App 1.2.apk"
+        );
+        // A name is hostile text like any other, and may be no text at all.
+        assert_eq!(unread_name(Path::new("/tmp/a\u{1b}[2Jb.apk")), "a\u{fffd}[2Jb.apk");
+        assert_eq!(unread_name(Path::new("/")), UNIDENTIFIED);
+        let long = format!("/tmp/{}.apk", "n".repeat(300));
+        assert!(unread_name(Path::new(&long)).len() <= text::MAX_ID_BYTES);
+
+        let record = unread(String::from("locked.apk"), CoverageReason::Unreadable, 2);
+        record.validate().unwrap();
+        assert_eq!(
+            serde_json::to_value(&record).unwrap(),
+            serde_json::json!({
+                "v": 1, "kind": "coverage", "collector": "android.apk",
+                "subject": {
+                    "kind": "app", "platform": "android", "id": "locked.apk", "digest": "unread"
+                },
+                "status": "skipped", "reason": "unreadable", "count": 2
+            })
+        );
     }
 }

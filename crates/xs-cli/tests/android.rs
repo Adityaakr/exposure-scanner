@@ -258,10 +258,13 @@ fn one_report_whatever_the_input_order_and_thread_count() {
             assert!(scan(order, threads) == reference, "{name} order, {threads} threads");
         }
     }
-    // A folder is searched for bundles only: the packages in it are scanned
-    // when they are named.
-    let in_folder: Report = serde_json::from_str(&scan(&[dir.path()], 4)).unwrap();
-    assert!(in_folder.claims.is_empty() && in_folder.evidence.is_empty(), "folder scan");
+    // A folder is searched for packages as well as for bundles: naming it
+    // is the same as naming every package in it.
+    let in_folder = scan(&[dir.path()], 4);
+    let named = scan(&sorted[..4], 4);
+    assert!(in_folder == named, "folder scan");
+    let parsed: Report = serde_json::from_str(&in_folder).unwrap();
+    assert_eq!(parsed.claims.len(), 3);
 }
 
 /// Evidence depends on the bytes of the artifact and nothing else: not on
@@ -330,22 +333,79 @@ fn a_file_that_is_not_a_package_is_reported_not_passed_over() {
     assert!(stderr(&output).contains("an Android package (.apk)"), "{}", stderr(&output));
 }
 
+/// One app that cannot be read does not cost the scan the others (build
+/// plan, task 9). It has no hash, so the report says under the name of its
+/// file that it was skipped, and says nothing about what it holds.
 #[test]
-fn a_package_that_cannot_be_read_fails_the_scan_with_its_path() {
+fn a_package_that_cannot_be_read_is_reported_and_the_others_are_scanned() {
     use std::os::unix::fs::PermissionsExt as _;
 
     let dir = tempfile::tempdir().unwrap();
+    let open = variant(dir.path(), "open.apk", "org.example.open", "io.sentry.Sentry");
+    let without = scan(&[&open], 2);
     let locked = variant(dir.path(), "locked.apk", "org.example.locked", "io.sentry.Sentry");
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
     let readable = fs::read(&locked).is_ok();
-    let output = exposure(&["scan", text(&locked)]);
+    let named = exposure(&["scan", text(&locked), text(&open)]);
+    let found = exposure(&["scan", text(dir.path())]);
+    let alone = exposure(&["scan", text(&locked)]);
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
     // Running as root, permissions do not bind and there is nothing to test.
-    if !readable {
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty(), "no report without the package");
-        assert!(stderr(&output).contains("locked.apk"), "{}", stderr(&output));
+    if readable {
+        return;
     }
+
+    // Named or found in a folder, it is the same scan.
+    assert!(stdout(&named) == stdout(&found));
+    let summary = stderr(&named);
+    assert!(
+        summary.contains("scanned 1 app") && summary.contains("1 claim, 1 coverage note"),
+        "{summary}"
+    );
+    let report: Report = serde_json::from_str(&stdout(&named)).unwrap();
+    let before: Report = serde_json::from_str(&without).unwrap();
+    assert_eq!(report.claims, before.claims);
+    assert_eq!(report.evidence.len(), before.evidence.len() + 1);
+    let gaps: Vec<_> = report
+        .evidence
+        .iter()
+        .filter_map(|(_, record)| match record {
+            Record::Coverage(gap) => Some(serde_json::to_value(gap).unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        gaps,
+        [serde_json::json!({
+            "v": 1, "collector": "android.apk",
+            "subject": {
+                "kind": "app", "platform": "android", "id": "locked.apk", "digest": "unread"
+            },
+            "status": "skipped", "reason": "unreadable", "count": 1
+        })]
+    );
+    assert!(!stdout(&named).contains("org.example.locked"), "nothing of its content is known");
+
+    // By itself it is still a scan, of nothing: the report says what was
+    // skipped, and saved evidence gives the same report again.
+    let summary = stderr(&alone);
+    assert!(summary.contains("scanned 0 apps (0 files, 0 bytes): 0 claims, 1 coverage note"));
+    let saved = dir.path().join("scan.json");
+    fs::write(&saved, stdout(&alone)).unwrap();
+    assert!(stdout(&exposure(&["report", text(&saved)])) == stdout(&alone));
+}
+
+/// A package that is not there was never an app to skip: a path that does
+/// not exist is a mistake in the command, and is refused before any reading.
+#[test]
+fn a_path_that_does_not_exist_is_still_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let open = variant(dir.path(), "open.apk", "org.example.open", "io.sentry.Sentry");
+    let missing = dir.path().join("missing.apk");
+    let output = exposure(&["scan", text(&open), text(&missing)]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "no report");
+    assert!(stderr(&output).contains("missing.apk"), "{}", stderr(&output));
 }
 
 #[test]
