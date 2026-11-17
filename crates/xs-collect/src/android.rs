@@ -826,7 +826,10 @@ mod tests {
                     name: (*id).into(),
                     parent: None,
                     website: "https://example.com/".into(),
-                    source: "https://example.com/".into(),
+                    team_ids: Vec::new(),
+                    app_ids: Vec::new(),
+                    domains: Vec::new(),
+                    sources: vec!["https://example.com/".into()],
                 })
                 .collect(),
             rules,
