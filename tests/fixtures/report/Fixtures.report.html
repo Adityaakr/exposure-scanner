@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-FfPh1a5CrdCRxQbdjeFLYRUqW9y5h2BrjEWQB+KVgiU='; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Exposure report</title>
+<style>
+:root {
+  --page: #ffffff;
+  --ink: #1b1f24;
+  --soft-ink: #57606a;
+  --rule: #d8dee4;
+  --panel: #f6f8fa;
+  --link: #0b57b7;
+  --mark: #fff8c5;
+  --declares-bg: #e7ecf1; --declares-ink: #3d4752;
+  --contains-bg: #fff1cc; --contains-ink: #6f4a00;
+  --contacts-bg: #ffe2d1; --contacts-ink: #8a3200;
+  --confirmed-bg: #fbdcdc; --confirmed-ink: #8b1a1a;
+  --access-bg: #e3ecfb; --access-ink: #1d4a8f;
+  --counted-bg: #1b1f24; --counted-ink: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #14171b;
+    --ink: #e6e9ed;
+    --soft-ink: #9aa4af;
+    --rule: #333a42;
+    --panel: #1d2127;
+    --link: #7fb2f5;
+    --mark: #4a4210;
+    --declares-bg: #2b323a; --declares-ink: #c5cdd6;
+    --contains-bg: #4a3a0c; --contains-ink: #f5d98a;
+    --contacts-bg: #54290f; --contacts-ink: #ffc29e;
+    --confirmed-bg: #561c1c; --confirmed-ink: #ffb8b8;
+    --access-bg: #1c3157; --access-ink: #b5cdf7;
+    --counted-bg: #e6e9ed; --counted-ink: #14171b;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+  max-width: 58rem;
+  background: var(--page);
+  color: var(--ink);
+  font: 1rem/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3, h4, h5, p, ul, dl, pre, table { margin: 0; }
+h1 { font-size: 2.1rem; line-height: 1.2; letter-spacing: -0.01em; }
+h2 { font-size: 1.45rem; line-height: 1.25; margin-bottom: 0.75rem; padding-top: 0.5rem; }
+h3 { font-size: 1.15rem; line-height: 1.3; }
+h4 { font-size: 1rem; }
+h5 { font-size: 1rem; }
+p + p, p + ul, ul + p, p + dl, p + div, div + p { margin-top: 0.75rem; }
+a { color: var(--link); }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.875em;
+}
+code { background: var(--panel); border-radius: 0.25rem; padding: 0.05rem 0.3rem; }
+section { margin-top: 2.5rem; }
+
+.top { border-bottom: 1px solid var(--rule); padding-bottom: 1.5rem; }
+.kicker {
+  color: var(--soft-ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lede { font-size: 1.1rem; margin-top: 0.75rem; max-width: 46rem; }
+.private { color: var(--soft-ink); font-size: 0.9rem; max-width: 46rem; }
+.toc { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; padding: 0.9rem 0; font-size: 0.9rem; }
+.toc a { text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+
+.counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.75rem; }
+.count { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 1rem 1.1rem; }
+.count .n { font-size: 2.4rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.count .label { font-weight: 600; margin-top: 0.25rem; }
+.count .sub { color: var(--soft-ink); font-size: 0.85rem; margin-top: 0.35rem; }
+#summary h3 { margin-top: 1.5rem; margin-bottom: 0.5rem; }
+.lead { font-size: 1.25rem; font-weight: 600; }
+.found { list-style: none; margin-top: 0.75rem; padding: 0; }
+.found li { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 0.7rem 1rem 0.8rem; }
+.found li + li { margin-top: 0.5rem; }
+.found p + p { margin-top: 0.3rem; }
+.thing strong { font-size: 1.05rem; }
+.owner { color: var(--soft-ink); font-size: 0.9rem; }
+.where { font-size: 0.9rem; }
+.zero { font-weight: 600; }
+.note, .meta, .none { color: var(--soft-ink); font-size: 0.9rem; }
+.none { background: var(--panel); border-radius: 0.5rem; padding: 0.75rem 1rem; }
+.totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  list-style: none;
+  margin-top: 0.9rem;
+  padding: 0;
+  font-size: 0.9rem;
+}
+.totals li { background: var(--panel); border-radius: 1rem; padding: 0.15rem 0.7rem; }
+
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border-bottom: 1px solid var(--rule); padding: 0.5rem 0.75rem 0.5rem 0; text-align: left; vertical-align: top; }
+th { color: var(--soft-ink); font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.ladder td:first-child, .ladder td:nth-child(2) { white-space: nowrap; }
+.terms { margin-top: 1.25rem; }
+.terms dt { font-weight: 600; margin-top: 0.6rem; }
+.terms dd { margin: 0; color: var(--soft-ink); font-size: 0.925rem; }
+
+.grade, .tag {
+  border-radius: 0.3rem;
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 0.45rem;
+  vertical-align: 0.08em;
+  white-space: nowrap;
+}
+.grade { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+.g-declares { background: var(--declares-bg); color: var(--declares-ink); }
+.g-contains { background: var(--contains-bg); color: var(--contains-ink); }
+.g-contacts { background: var(--contacts-bg); color: var(--contacts-ink); }
+.g-confirmed { background: var(--confirmed-bg); color: var(--confirmed-ink); }
+.g-requested, .g-granted, .g-used { background: var(--access-bg); color: var(--access-ink); }
+.tag { background: var(--panel); color: var(--soft-ink); font-weight: 500; }
+.tag.counted, .tag.uncounted { border: 1px solid var(--counted-bg); font-weight: 600; }
+.tag.counted { background: var(--counted-bg); color: var(--counted-ink); }
+.tag.uncounted { background: none; color: var(--ink); }
+
+.company { border-top: 2px solid var(--ink); margin-top: 2rem; padding-top: 1rem; }
+.company > .meta { margin-top: 0.25rem; }
+.app { margin-top: 1.25rem; }
+.app > .meta { margin-top: 0.15rem; }
+.publisher { color: var(--soft-ink); font-size: 0.9rem; margin-top: 0.15rem; }
+.finding {
+  border: 1px solid var(--rule);
+  border-radius: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.9rem 1.1rem 1rem;
+}
+.finding:target, .record:target { background: var(--mark); }
+.graded { margin-top: 0.4rem; }
+.facts {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  gap: 0.2rem 1rem;
+  margin-top: 0.6rem;
+  font-size: 0.9rem;
+}
+.facts dt { color: var(--soft-ink); }
+.facts dd { margin: 0; min-width: 0; }
+.evidence-head { font-size: 0.9rem; font-weight: 600; margin-top: 0.9rem; }
+.evidence { list-style: none; margin-top: 0.4rem; padding: 0; }
+.evidence li { background: var(--panel); border-radius: 0.4rem; padding: 0.6rem 0.8rem 0.7rem; }
+.evidence li + li { margin-top: 0.5rem; }
+.evidence code { background: none; padding: 0; }
+.what { font-weight: 600; font-size: 0.9rem; }
+.evidence .facts { margin-top: 0.3rem; }
+
+.limits { padding-left: 1.2rem; }
+.limits li + li { margin-top: 0.5rem; }
+#coverage h3, #records h3 { margin-top: 1.5rem; margin-bottom: 0.4rem; }
+#records h3 + .meta { margin-bottom: 0.5rem; }
+.record { border: 1px solid var(--rule); border-radius: 0.5rem; margin-top: 0.6rem; padding: 0.6rem 0.8rem; }
+.record-head { font-size: 0.85rem; }
+.record-head code { background: none; padding: 0; }
+pre { margin-top: 0.4rem; white-space: pre-wrap; }
+
+@media (max-width: 34rem) {
+  body { padding: 1.25rem 0.9rem 3rem; }
+  h1 { font-size: 1.7rem; }
+  .facts { grid-template-columns: 1fr; gap: 0; }
+  .facts dt { margin-top: 0.4rem; }
+}
+@media print {
+  :root {
+    --page: #ffffff; --ink: #000000; --soft-ink: #444444; --rule: #bbbbbb; --panel: #f2f2f2;
+    --link: #000000; --mark: #ffffff;
+    --declares-bg: #eeeeee; --declares-ink: #000000;
+    --contains-bg: #eeeeee; --contains-ink: #000000;
+    --contacts-bg: #eeeeee; --contacts-ink: #000000;
+    --confirmed-bg: #eeeeee; --confirmed-ink: #000000;
+    --access-bg: #eeeeee; --access-ink: #000000;
+    --counted-bg: #000000; --counted-ink: #ffffff;
+  }
+  @page { margin: 16mm 14mm; }
+  body { font-size: 10pt; max-width: none; padding: 0; }
+  .toc { display: none; }
+  a { text-decoration: none; }
+  section { margin-top: 1.6rem; }
+  h2, h3, h4, h5 { break-after: avoid; }
+  .count, .finding, .record, .evidence li, .found li, tr { break-inside: avoid; }
+  .scroll { overflow: visible; }
+  .grade, .tag { border: 1px solid #888888; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+<p class="kicker">Device exposure scan</p>
+<h1>Exposure report</h1>
+<p class="lede">Which companies have a channel to your data through the apps that were scanned, and the evidence for each one. Every finding states how strong its evidence is and links to the raw record behind it.</p>
+<p class="private">This file was made on your device and lists apps you use, so treat it as private. It loads nothing from the network and runs no script.</p>
+</header>
+<nav class="toc">
+<a href="#summary">Summary</a>
+<a href="#reading">How to read it</a>
+<a href="#findings">Findings</a>
+<a href="#coverage">Coverage</a>
+<a href="#limits">Limits</a>
+<a href="#records">Records</a>
+<a href="#about">About</a>
+</nav>
+<main>
+<section id="summary">
+<h2>Summary</h2>
+<h3>What was found</h3>
+<p class="lead">5 findings in 3 of 3 apps scanned.</p>
+<p class="note">Each entry is one thing the scan found and the apps it is in, with what is in the most apps first. An app's name links to its finding further down, which shows the evidence.</p>
+<ul class="found">
+<li>
+<p class="thing"><strong>Sentry</strong> <span class="tag">Crash reporting</span></p>
+<p class="owner">Functional Software, Inc. (Sentry)</p>
+<p class="fact"><span class="grade g-contains">contains</span> ships in 3 of 3 apps</p>
+<p class="where">In <a href="#f-c606554f70326e31474b5a98b99c610cec1d381190e534fa355e06e528ce30ac">ElectronSkeleton</a>, <a href="#f-898645fdb677a58f33e217cd971a0611720c3194cacbf704edf996890c7403db">Skeleton (Android)</a>, <a href="#f-2fc3cee02feee2e8db8c7eaa9879b54c28ac4f8e6ac3783a84be89276050b8a6">Skeleton (macOS)</a></p>
+<p><span class="tag uncounted">not counted</span></p>
+</li>
+<li>
+<p class="thing"><strong>PostHog</strong> <span class="tag">Analytics</span></p>
+<p class="owner">PostHog Inc.</p>
+<p class="fact"><span class="grade g-contains">contains</span> ships in 2 of 3 apps</p>
+<p class="where">In <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a>, <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a></p>
+<p><span class="tag counted">counted</span></p>
+</li>
+</ul>
+<h3>The three headline counts</h3>
+<p class="note">These three numbers do not count every finding. They count the findings that name a company in the categories Advertising, Analytics, Attribution, Profiling and Session replay. Every other finding, such as crash reporting or an update feed, is in the list above and in the findings below, and in none of these numbers. There is no score.</p>
+<div class="counts">
+<div class="count"><p class="n">0</p><p class="label">companies with a recorded connection</p><p class="sub">Grade <code>contacts</code> or above: a connection to the company was recorded.</p></div>
+<div class="count"><p class="n">1</p><p class="label">company whose code the scanned apps ship</p><p class="sub">Strongest grade <code>contains</code>: the code is present. Presence is not use.</p></div>
+<div class="count"><p class="n">2</p><p class="label">apps with a third-party channel</p><p class="sub">A counted finding names a company that is not the app's own publisher.</p></div>
+</div>
+<ul class="totals">
+<li>3 apps scanned</li>
+<li>5 findings</li>
+<li>2 companies named</li>
+<li>0 coverage notes</li>
+<li>12 evidence records</li>
+</ul>
+</section>
+<section id="reading">
+<h2>How to read this report</h2>
+<p>Each finding is a graded fact about what an app's files hold. The grade says what kind of evidence there is, and a finding takes the highest grade its evidence reaches. No finding says what an app or a company intends.</p>
+<div class="scroll">
+<table class="ladder">
+<thead><tr><th scope="col">Grade</th><th scope="col">In a word</th><th scope="col">What it shows</th></tr></thead>
+<tbody>
+<tr><td><span class="grade g-declares">declares</span></td><td>declares</td><td>The app&#39;s own files name this endpoint, for example as the address of its update feed or as a domain in its privacy manifest. A declaration is not an observed connection.</td></tr>
+<tr><td><span class="grade g-contains">contains</span></td><td>ships</td><td>The app ships this code. That shows the code is present, not that it runs or sends anything.</td></tr>
+<tr><td><span class="grade g-contacts">contacts</span></td><td>contacted</td><td>The operating system or a capture recorded a connection.</td></tr>
+<tr><td><span class="grade g-confirmed">confirmed</span></td><td>confirmed</td><td>The receiver&#39;s own records list the app as a sender, or a payload was inspected.</td></tr>
+</tbody>
+</table>
+</div>
+<dl class="terms">
+<dt>Confidence</dt>
+<dd>How unlikely it is that a marker matched by coincidence. High for a name read from a structured table, medium for text in the app's own code or in a binary's data, low for text inside a bundled library. It is not a score.</dd>
+<dt>Kinds of evidence</dt>
+<dd>How many independent kinds of marker agree, such as a class name and an entry in the app's manifest.</dd>
+<dt>First party, third party</dt>
+<dd>First party: the company is the app's own publisher. Third party: it is someone else.</dd>
+<dt>Component</dt>
+<dd>A library with no network side of its own, such as an updater. It names no company.</dd>
+<dt>Unmapped host</dt>
+<dd>A host the app declares that the rule pack lists under no company. It is shown as itself and nobody is named as its owner.</dd>
+</dl>
+</section>
+<section id="findings">
+<h2>Findings by company</h2>
+<p>Companies with a finding that counts in the summary come first, then the others, each in alphabetical order.</p>
+<section class="company">
+<h3>PostHog Inc. <span class="tag counted">counted in the summary</span></h3>
+<p class="meta">2 apps · 2 findings · strongest grade <span class="grade g-contains">contains</span></p>
+<div class="app">
+<h4>ElectronSkeleton</h4>
+<p class="meta"><code>org.example.exposure.electron-skeleton</code> · version 1.0.0 · macOS · build <code>bd1:7d5e1488d08a…</code></p>
+<p class="publisher">Publisher: not a company the rule pack lists. Its app id spells the domain <code>example.org</code>, which is what the app says of itself.</p>
+<div class="finding" id="f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">
+<h5>PostHog <span class="tag">Analytics</span></h5>
+<p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<dl class="facts">
+<dt>Rule</dt><dd><code>sdk/posthog</code></dd>
+<dt>Confidence</dt><dd>medium: text found in the app's own code or in a binary's data.</dd>
+<dt>Kinds of evidence</dt><dd>1 kind.</dd>
+<dt>Party</dt><dd>Third party: PostHog Inc. is not this app's publisher.</dd>
+<dt>In the summary</dt><dd>Counted.</dd>
+</dl>
+<p class="evidence-head">Evidence: 1 record</p>
+<ul class="evidence">
+<li><p class="what">Text in a script</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>app.posthog.com</code></dd>
+<dt>Found in</dt><dd><code>Contents/Resources/app.asar</code>, in the contents of its files</dd>
+<dt>Example</dt><dd><code>main.js</code></dd>
+<dt>Count</dt><dd>1 file</dd>
+<dt>Kind of file</dt><dd>the app's own code</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-19326b8ab37f26675dbddb06366e72f901cbf62bd6ddbe840a7333b47b57857c">sha256:19326b8ab37f…</a></dd>
+</dl>
+</li>
+</ul>
+</div>
+</div>
+<div class="app">
+<h4>Skeleton</h4>
+<p class="meta"><code>org.example.exposure.skeleton</code> · version 1.0.0 · Android · build <code>sha256:7cdeda1cfd33…</code></p>
+<p class="publisher">Publisher: not a company the rule pack lists. Its app id spells the domain <code>example.org</code>, which is what the app says of itself.</p>
+<div class="finding" id="f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">
+<h5>PostHog <span class="tag">Analytics</span></h5>
+<p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<dl class="facts">
+<dt>Rule</dt><dd><code>sdk/posthog</code></dd>
+<dt>Confidence</dt><dd>high: a name read from a structured table, or the app's own declaration.</dd>
+<dt>Kinds of evidence</dt><dd>2 independent kinds agree.</dd>
+<dt>Party</dt><dd>Third party: PostHog Inc. is not this app's publisher.</dd>
+<dt>In the summary</dt><dd>Counted.</dd>
+</dl>
+<p class="evidence-head">Evidence: 2 records</p>
+<ul class="evidence">
+<li><p class="what">Classes defined in the app&#39;s code</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>com.posthog.android.</code></dd>
+<dt>Found in</dt><dd><code>classes2.dex</code>, in the table of classes the file defines</dd>
+<dt>Example</dt><dd><code>com.posthog.android.PostHogAndroid</code></dd>
+<dt>Count</dt><dd>1 match</dd>
+<dt>Kind of file</dt><dd>the app's own code</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-17929ab8f738ac57e1e6bd41439a0b43b3a44e47381790ea210eb1d3bc503db6">sha256:17929ab8f738…</a></dd>
+</dl>
+</li>
+<li><p class="what">A text constant in the app&#39;s code</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>us.i.posthog.com</code></dd>
+<dt>Found in</dt><dd><code>classes2.dex</code>, in the table of text constants</dd>
+<dt>Count</dt><dd>1 match</dd>
+<dt>Kind of file</dt><dd>the app's own code</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-631fd5a6a5e94cba358466cf66c03f15378cb15c252358ebfb5045c801cc5b91">sha256:631fd5a6a5e9…</a></dd>
+</dl>
+</li>
+</ul>
+</div>
+</div>
+</section>
+<section class="company">
+<h3>Functional Software, Inc. (Sentry) <span class="tag uncounted">not in the counted categories</span></h3>
+<p class="meta">3 apps · 3 findings · strongest grade <span class="grade g-contains">contains</span></p>
+<div class="app">
+<h4>ElectronSkeleton</h4>
+<p class="meta"><code>org.example.exposure.electron-skeleton</code> · version 1.0.0 · macOS · build <code>bd1:7d5e1488d08a…</code></p>
+<p class="publisher">Publisher: not a company the rule pack lists. Its app id spells the domain <code>example.org</code>, which is what the app says of itself.</p>
+<div class="finding" id="f-c606554f70326e31474b5a98b99c610cec1d381190e534fa355e06e528ce30ac">
+<h5>Sentry <span class="tag">Crash reporting</span></h5>
+<p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<dl class="facts">
+<dt>Rule</dt><dd><code>sdk/sentry</code></dd>
+<dt>Confidence</dt><dd>high: a name read from a structured table, or the app's own declaration.</dd>
+<dt>Kinds of evidence</dt><dd>2 independent kinds agree.</dd>
+<dt>Party</dt><dd>Third party: Functional Software, Inc. (Sentry) is not this app's publisher.</dd>
+<dt>In the summary</dt><dd>Not counted: Crash reporting is not one of the counted categories.</dd>
+</dl>
+<p class="evidence-head">Evidence: 3 records</p>
+<ul class="evidence">
+<li><p class="what">Text in a script</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>sentry.javascript.</code></dd>
+<dt>Found in</dt><dd><code>Contents/Resources/app.asar</code>, in the contents of its files</dd>
+<dt>Example</dt><dd><code>main.js</code></dd>
+<dt>Count</dt><dd>1 file</dd>
+<dt>Kind of file</dt><dd>the app's own code</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-19f2519c50ef1ca90a2303744ff10ceba3ccf40c3a0d21a733f0e0907ffb800d">sha256:19f2519c50ef…</a></dd>
+</dl>
+</li>
+<li><p class="what">Text in a script</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>sentry.javascript.</code></dd>
+<dt>Found in</dt><dd><code>Contents/Resources/app.asar</code>, in the contents of its files</dd>
+<dt>Example</dt><dd><code>node_modules/@sentry/electron/index.js</code></dd>
+<dt>Count</dt><dd>1 file</dd>
+<dt>Kind of file</dt><dd>a library shipped with the app</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-52ab96ae87f9230cb7eadd1c81ee66a3073ade44d30aa768b7f570ada7e8b014">sha256:52ab96ae87f9…</a></dd>
+</dl>
+</li>
+<li><p class="what">An npm package listed in the app&#39;s archive</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>@sentry/electron</code></dd>
+<dt>Found in</dt><dd><code>Contents/Resources/app.asar</code>, in the file table of the archive</dd>
+<dt>Example</dt><dd><code>node_modules/@sentry/electron/package.json</code></dd>
+<dt>Count</dt><dd>1 match</dd>
+<dt>Kind of file</dt><dd>a library shipped with the app</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-f51e0adb648691f6e3b1fdd8f5dcb13dbedd9d2eb9a9aecbfb52cc7d6e23dbfb">sha256:f51e0adb6486…</a></dd>
+</dl>
+</li>
+</ul>
+</div>
+</div>
+<div class="app">
+<h4>Skeleton</h4>
+<p class="meta"><code>org.example.exposure.skeleton</code> · version 1.0.0 · Android · build <code>sha256:7cdeda1cfd33…</code></p>
+<p class="publisher">Publisher: not a company the rule pack lists. Its app id spells the domain <code>example.org</code>, which is what the app says of itself.</p>
+<div class="finding" id="f-898645fdb677a58f33e217cd971a0611720c3194cacbf704edf996890c7403db">
+<h5>Sentry <span class="tag">Crash reporting</span></h5>
+<p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<dl class="facts">
+<dt>Rule</dt><dd><code>sdk/sentry</code></dd>
+<dt>Confidence</dt><dd>high: a name read from a structured table, or the app's own declaration.</dd>
+<dt>Kinds of evidence</dt><dd>2 independent kinds agree.</dd>
+<dt>Party</dt><dd>Third party: Functional Software, Inc. (Sentry) is not this app's publisher.</dd>
+<dt>In the summary</dt><dd>Not counted: Crash reporting is not one of the counted categories.</dd>
+</dl>
+<p class="evidence-head">Evidence: 2 records</p>
+<ul class="evidence">
+<li><p class="what">A component registered in the app&#39;s manifest</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>io.sentry.android.core.SentryInitProvider</code></dd>
+<dt>Found in</dt><dd><code>AndroidManifest.xml</code>, in the components the manifest declares</dd>
+<dt>Example</dt><dd><code>io.sentry.android.core.SentryInitProvider</code></dd>
+<dt>Count</dt><dd>1 match</dd>
+<dt>Kind of file</dt><dd>the app's own code</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-5262d4fdd1146521a747fbbc6e82e3c8ae313f06db22dd518ec98a09eee6d848">sha256:5262d4fdd114…</a></dd>
+</dl>
+</li>
+<li><p class="what">Classes defined in the app&#39;s code</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>io.sentry.</code></dd>
+<dt>Found in</dt><dd><code>classes.dex</code>, in the table of classes the file defines</dd>
+<dt>Example</dt><dd><code>io.sentry.Sentry</code></dd>
+<dt>Count</dt><dd>2 matches</dd>
+<dt>Kind of file</dt><dd>the app's own code</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-ea3b2c39dfc511215d286cd163f21fc8a9397fb31aae92d8aa2aab09cc333d24">sha256:ea3b2c39dfc5…</a></dd>
+</dl>
+</li>
+</ul>
+</div>
+</div>
+<div class="app">
+<h4>Skeleton</h4>
+<p class="meta"><code>org.example.exposure.skeleton</code> · version 1.0.0 · macOS · build <code>bd1:e3872563e3a9…</code></p>
+<p class="publisher">Publisher: not a company the rule pack lists. Its app id spells the domain <code>example.org</code>, which is what the app says of itself.</p>
+<div class="finding" id="f-2fc3cee02feee2e8db8c7eaa9879b54c28ac4f8e6ac3783a84be89276050b8a6">
+<h5>Sentry <span class="tag">Crash reporting</span></h5>
+<p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<dl class="facts">
+<dt>Rule</dt><dd><code>sdk/sentry</code></dd>
+<dt>Confidence</dt><dd>high: a name read from a structured table, or the app's own declaration.</dd>
+<dt>Kinds of evidence</dt><dd>1 kind.</dd>
+<dt>Party</dt><dd>Third party: Functional Software, Inc. (Sentry) is not this app's publisher.</dd>
+<dt>In the summary</dt><dd>Not counted: Crash reporting is not one of the counted categories.</dd>
+</dl>
+<p class="evidence-head">Evidence: 1 record</p>
+<ul class="evidence">
+<li><p class="what">A framework folder</p>
+<dl class="facts">
+<dt>Marker</dt><dd><code>Sentry.framework</code></dd>
+<dt>Found in</dt><dd><code>Contents/Frameworks</code>, in the names of the entries of the folder</dd>
+<dt>Example</dt><dd><code>Sentry.framework</code></dd>
+<dt>Count</dt><dd>1 match</dd>
+<dt>Kind of file</dt><dd>a library shipped with the app</dd>
+<dt>Grade</dt><dd><span class="grade g-contains">contains</span></dd>
+<dt>Record</dt><dd><a href="#r-078a14e8c5663a627642fa35ae37888a2e171dd5c1daad6ea5d2d1ca5fc79c96">sha256:078a14e8c566…</a></dd>
+</dl>
+</li>
+</ul>
+</div>
+</div>
+</section>
+</section>
+<section id="coverage">
+<h2>What was scanned, and what was not</h2>
+<p>Nothing found is not the same as not looked at. This section says where the scan looked, lists every app it read, and lists everything it set aside or could not interpret.</p>
+<h3>Where the scan looked</h3>
+<p class="scope">This scan covered the paths given and nothing else; the installed-app folders were not searched.</p>
+<h3>Apps scanned</h3>
+<div class="scroll">
+<table>
+<thead><tr><th scope="col">App</th><th scope="col">App id</th><th scope="col">Version</th><th scope="col">Build</th><th scope="col">Platform</th><th scope="col">Read</th><th scope="col">Findings</th><th scope="col">Not covered</th></tr></thead>
+<tbody>
+<tr><td>ElectronSkeleton</td><td><code>org.example.exposure.electron-skeleton</code></td><td>1.0.0</td><td><code>bd1:7d5e1488d08a…</code></td><td>macOS</td><td>5 files, 4.9 kB</td><td>2</td><td>nothing</td></tr>
+<tr><td>Skeleton</td><td><code>org.example.exposure.skeleton</code></td><td>1.0.0</td><td><code>sha256:7cdeda1cfd33…</code></td><td>Android</td><td>1 file, 1.8 kB</td><td>2</td><td>nothing</td></tr>
+<tr><td>Skeleton</td><td><code>org.example.exposure.skeleton</code></td><td>1.0.0</td><td><code>bd1:e3872563e3a9…</code></td><td>macOS</td><td>3 files, 676 bytes</td><td>1</td><td>nothing</td></tr>
+</tbody>
+</table>
+</div>
+<h3>Set aside, and why</h3>
+<p class="none">The scan recorded nothing it skipped and nothing it could not interpret in these apps.</p>
+</section>
+<section id="limits">
+<h2>What this report cannot tell you</h2>
+<p>This report rests on files that are on the device. It shows what an app ships and what it declares. Three things are out of reach of this scan and of every scan of a device:</p>
+<ul class="limits">
+<li><strong>What is sent.</strong> Apps encrypt their traffic, so the content of a request cannot be read from the device. No finding here says which data was sent, or that any was.</li>
+<li><strong>What companies pass on between their own servers.</strong> Sharing from one server to another never touches the device and leaves nothing on it to find.</li>
+<li><strong>What is sent through the app's own domain.</strong> An app can send data to its publisher's servers, which forward it to another company. On the device this looks like the app talking to its publisher.</li>
+</ul>
+<p>Four more limits apply to what is reported:</p>
+<ul class="limits">
+<li><strong>Presence is not use.</strong> <code>contains</code> means the code is in the app. The code may never run, and the service behind it may be retired. Only a recorded connection, at grade <code>contacts</code>, shows a live flow, and a scan of app files records none.</li>
+<li><strong>Only what has a rule is recognised.</strong> The scanner knows the SDKs its rule pack describes and no others. An app with no finding is not shown to be free of third-party code.</li>
+<li><strong>Some code hides its markers.</strong> Heavily obfuscated code, an encrypted binary, short text inside Swift code and JavaScript compiled to bytecode can each keep an SDK from being recognised. What the scan set aside is listed under <a href="#coverage">coverage</a>.</li>
+<li><strong>Names are as the files give them.</strong> An app's name, its id and the Team ID in its signature are read from the app and are not verified.</li>
+</ul>
+</section>
+<section id="records">
+<h2>Evidence records</h2>
+<p>Every record the scan produced, exactly as it is stored. The findings above link to the records they rest on. The id of a record is the SHA-256 of its text as shown here, so a record that was changed no longer matches its id.</p>
+<h3>ElectronSkeleton</h3>
+<p class="meta"><code>org.example.exposure.electron-skeleton</code> · version 1.0.0 · macOS · build <code>bd1:7d5e1488d08a…</code></p>
+<div class="record" id="r-19326b8ab37f26675dbddb06366e72f901cbf62bd6ddbe840a7333b47b57857c">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:19326b8ab37f26675dbddb06366e72f901cbf62bd6ddbe840a7333b47b57857c</code></p>
+<pre>{&quot;collector&quot;:&quot;electron.app&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/posthog&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:1,&quot;example&quot;:&quot;main.js&quot;,&quot;matcher&quot;:&quot;content_literal&quot;,&quot;region&quot;:&quot;files&quot;,&quot;scope&quot;:&quot;app_code&quot;,&quot;token&quot;:&quot;app.posthog.com&quot;,&quot;where&quot;:&quot;Contents/Resources/app.asar&quot;},&quot;rule&quot;:&quot;sdk/posthog&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;bd1:7d5e1488d08a330c8b1b5041b219f1c0f6b1c7ed9759b601dd5fa5da5cc4aebb&quot;,&quot;id&quot;:&quot;org.example.exposure.electron-skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;macos&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-19f2519c50ef1ca90a2303744ff10ceba3ccf40c3a0d21a733f0e0907ffb800d">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:19f2519c50ef1ca90a2303744ff10ceba3ccf40c3a0d21a733f0e0907ffb800d</code></p>
+<pre>{&quot;collector&quot;:&quot;electron.app&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/sentry&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:1,&quot;example&quot;:&quot;main.js&quot;,&quot;matcher&quot;:&quot;content_literal&quot;,&quot;region&quot;:&quot;files&quot;,&quot;scope&quot;:&quot;app_code&quot;,&quot;token&quot;:&quot;sentry.javascript.&quot;,&quot;where&quot;:&quot;Contents/Resources/app.asar&quot;},&quot;rule&quot;:&quot;sdk/sentry&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;bd1:7d5e1488d08a330c8b1b5041b219f1c0f6b1c7ed9759b601dd5fa5da5cc4aebb&quot;,&quot;id&quot;:&quot;org.example.exposure.electron-skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;macos&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-33ddaa3e426eaaf7f56c6f339bfd77df42c11bc189233202a6285bb89d14681a">
+<p class="record-head"><span class="tag">facts about the app</span> <code>sha256:33ddaa3e426eaaf7f56c6f339bfd77df42c11bc189233202a6285bb89d14681a</code></p>
+<pre>{&quot;collector&quot;:&quot;macos.bundle&quot;,&quot;facts&quot;:{&quot;bytes_scanned&quot;:4959,&quot;files_scanned&quot;:5,&quot;name&quot;:&quot;ElectronSkeleton&quot;,&quot;sandbox&quot;:false},&quot;kind&quot;:&quot;artifact&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;bd1:7d5e1488d08a330c8b1b5041b219f1c0f6b1c7ed9759b601dd5fa5da5cc4aebb&quot;,&quot;id&quot;:&quot;org.example.exposure.electron-skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;macos&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-52ab96ae87f9230cb7eadd1c81ee66a3073ade44d30aa768b7f570ada7e8b014">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:52ab96ae87f9230cb7eadd1c81ee66a3073ade44d30aa768b7f570ada7e8b014</code></p>
+<pre>{&quot;collector&quot;:&quot;electron.app&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/sentry&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:1,&quot;example&quot;:&quot;node_modules/@sentry/electron/index.js&quot;,&quot;matcher&quot;:&quot;content_literal&quot;,&quot;region&quot;:&quot;files&quot;,&quot;scope&quot;:&quot;dependency&quot;,&quot;token&quot;:&quot;sentry.javascript.&quot;,&quot;where&quot;:&quot;Contents/Resources/app.asar&quot;},&quot;rule&quot;:&quot;sdk/sentry&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;bd1:7d5e1488d08a330c8b1b5041b219f1c0f6b1c7ed9759b601dd5fa5da5cc4aebb&quot;,&quot;id&quot;:&quot;org.example.exposure.electron-skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;macos&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-f51e0adb648691f6e3b1fdd8f5dcb13dbedd9d2eb9a9aecbfb52cc7d6e23dbfb">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:f51e0adb648691f6e3b1fdd8f5dcb13dbedd9d2eb9a9aecbfb52cc7d6e23dbfb</code></p>
+<pre>{&quot;collector&quot;:&quot;electron.app&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/sentry&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:1,&quot;example&quot;:&quot;node_modules/@sentry/electron/package.json&quot;,&quot;matcher&quot;:&quot;npm_package&quot;,&quot;region&quot;:&quot;asar_header&quot;,&quot;scope&quot;:&quot;dependency&quot;,&quot;token&quot;:&quot;@sentry/electron&quot;,&quot;where&quot;:&quot;Contents/Resources/app.asar&quot;},&quot;rule&quot;:&quot;sdk/sentry&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;bd1:7d5e1488d08a330c8b1b5041b219f1c0f6b1c7ed9759b601dd5fa5da5cc4aebb&quot;,&quot;id&quot;:&quot;org.example.exposure.electron-skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;macos&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<h3>Skeleton</h3>
+<p class="meta"><code>org.example.exposure.skeleton</code> · version 1.0.0 · Android · build <code>sha256:7cdeda1cfd33…</code></p>
+<div class="record" id="r-034f8eee6d8b64e66ca41f4f4292951899bdfc24de3bf901a133b88ff6aaaca9">
+<p class="record-head"><span class="tag">facts about the app</span> <code>sha256:034f8eee6d8b64e66ca41f4f4292951899bdfc24de3bf901a133b88ff6aaaca9</code></p>
+<pre>{&quot;collector&quot;:&quot;android.apk&quot;,&quot;facts&quot;:{&quot;bytes_scanned&quot;:1818,&quot;files_scanned&quot;:1,&quot;name&quot;:&quot;Skeleton&quot;},&quot;kind&quot;:&quot;artifact&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;sha256:7cdeda1cfd3318e93c95825732a4f666dea116bba6899e800538818fee23da3c&quot;,&quot;id&quot;:&quot;org.example.exposure.skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;android&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-17929ab8f738ac57e1e6bd41439a0b43b3a44e47381790ea210eb1d3bc503db6">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:17929ab8f738ac57e1e6bd41439a0b43b3a44e47381790ea210eb1d3bc503db6</code></p>
+<pre>{&quot;collector&quot;:&quot;android.dex&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/posthog&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:1,&quot;example&quot;:&quot;com.posthog.android.PostHogAndroid&quot;,&quot;matcher&quot;:&quot;android_class_prefix&quot;,&quot;region&quot;:&quot;class_defs&quot;,&quot;scope&quot;:&quot;app_code&quot;,&quot;token&quot;:&quot;com.posthog.android.&quot;,&quot;where&quot;:&quot;classes2.dex&quot;},&quot;rule&quot;:&quot;sdk/posthog&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;sha256:7cdeda1cfd3318e93c95825732a4f666dea116bba6899e800538818fee23da3c&quot;,&quot;id&quot;:&quot;org.example.exposure.skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;android&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-5262d4fdd1146521a747fbbc6e82e3c8ae313f06db22dd518ec98a09eee6d848">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:5262d4fdd1146521a747fbbc6e82e3c8ae313f06db22dd518ec98a09eee6d848</code></p>
+<pre>{&quot;collector&quot;:&quot;android.manifest&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/sentry&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:1,&quot;example&quot;:&quot;io.sentry.android.core.SentryInitProvider&quot;,&quot;matcher&quot;:&quot;manifest_component&quot;,&quot;region&quot;:&quot;components&quot;,&quot;scope&quot;:&quot;app_code&quot;,&quot;token&quot;:&quot;io.sentry.android.core.SentryInitProvider&quot;,&quot;where&quot;:&quot;AndroidManifest.xml&quot;},&quot;rule&quot;:&quot;sdk/sentry&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;sha256:7cdeda1cfd3318e93c95825732a4f666dea116bba6899e800538818fee23da3c&quot;,&quot;id&quot;:&quot;org.example.exposure.skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;android&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-631fd5a6a5e94cba358466cf66c03f15378cb15c252358ebfb5045c801cc5b91">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:631fd5a6a5e94cba358466cf66c03f15378cb15c252358ebfb5045c801cc5b91</code></p>
+<pre>{&quot;collector&quot;:&quot;android.dex&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/posthog&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:1,&quot;matcher&quot;:&quot;dex_string&quot;,&quot;region&quot;:&quot;string_ids&quot;,&quot;scope&quot;:&quot;app_code&quot;,&quot;token&quot;:&quot;us.i.posthog.com&quot;,&quot;where&quot;:&quot;classes2.dex&quot;},&quot;rule&quot;:&quot;sdk/posthog&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;sha256:7cdeda1cfd3318e93c95825732a4f666dea116bba6899e800538818fee23da3c&quot;,&quot;id&quot;:&quot;org.example.exposure.skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;android&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-ea3b2c39dfc511215d286cd163f21fc8a9397fb31aae92d8aa2aab09cc333d24">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:ea3b2c39dfc511215d286cd163f21fc8a9397fb31aae92d8aa2aab09cc333d24</code></p>
+<pre>{&quot;collector&quot;:&quot;android.dex&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/sentry&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:2,&quot;example&quot;:&quot;io.sentry.Sentry&quot;,&quot;matcher&quot;:&quot;android_class_prefix&quot;,&quot;region&quot;:&quot;class_defs&quot;,&quot;scope&quot;:&quot;app_code&quot;,&quot;token&quot;:&quot;io.sentry.&quot;,&quot;where&quot;:&quot;classes.dex&quot;},&quot;rule&quot;:&quot;sdk/sentry&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;sha256:7cdeda1cfd3318e93c95825732a4f666dea116bba6899e800538818fee23da3c&quot;,&quot;id&quot;:&quot;org.example.exposure.skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;android&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<h3>Skeleton</h3>
+<p class="meta"><code>org.example.exposure.skeleton</code> · version 1.0.0 · macOS · build <code>bd1:e3872563e3a9…</code></p>
+<div class="record" id="r-078a14e8c5663a627642fa35ae37888a2e171dd5c1daad6ea5d2d1ca5fc79c96">
+<p class="record-head"><span class="tag">evidence of a finding</span> <code>sha256:078a14e8c5663a627642fa35ae37888a2e171dd5c1daad6ea5d2d1ca5fc79c96</code></p>
+<pre>{&quot;collector&quot;:&quot;macos.bundle&quot;,&quot;edge&quot;:&quot;channel&quot;,&quot;grade&quot;:&quot;contains&quot;,&quot;kind&quot;:&quot;edge&quot;,&quot;object&quot;:{&quot;id&quot;:&quot;sdk/sentry&quot;,&quot;kind&quot;:&quot;sdk&quot;},&quot;proof&quot;:{&quot;count&quot;:1,&quot;example&quot;:&quot;Sentry.framework&quot;,&quot;matcher&quot;:&quot;apple_framework&quot;,&quot;region&quot;:&quot;dir_entries&quot;,&quot;scope&quot;:&quot;dependency&quot;,&quot;token&quot;:&quot;Sentry.framework&quot;,&quot;where&quot;:&quot;Contents/Frameworks&quot;},&quot;rule&quot;:&quot;sdk/sentry&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;bd1:e3872563e3a9ed6bc37ea2d08d47f14cd5d804d7ac89bc856279bc85934e4353&quot;,&quot;id&quot;:&quot;org.example.exposure.skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;macos&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+<div class="record" id="r-351c570f4abfeabf07f5804b81a130ef21f7650dfde1c96945adc756d29a514f">
+<p class="record-head"><span class="tag">facts about the app</span> <code>sha256:351c570f4abfeabf07f5804b81a130ef21f7650dfde1c96945adc756d29a514f</code></p>
+<pre>{&quot;collector&quot;:&quot;macos.bundle&quot;,&quot;facts&quot;:{&quot;bytes_scanned&quot;:676,&quot;files_scanned&quot;:3,&quot;name&quot;:&quot;Skeleton&quot;,&quot;sandbox&quot;:false},&quot;kind&quot;:&quot;artifact&quot;,&quot;subject&quot;:{&quot;digest&quot;:&quot;bd1:e3872563e3a9ed6bc37ea2d08d47f14cd5d804d7ac89bc856279bc85934e4353&quot;,&quot;id&quot;:&quot;org.example.exposure.skeleton&quot;,&quot;kind&quot;:&quot;app&quot;,&quot;platform&quot;:&quot;macos&quot;,&quot;version&quot;:&quot;1.0.0&quot;},&quot;v&quot;:1}</pre>
+</div>
+</section>
+<section id="about">
+<h2>About this report</h2>
+<dl class="facts">
+<dt>Scanner</dt><dd>exposure 0.1.0</dd>
+<dt>Rule pack</dt><dd>core version 5, SHA-256 <code>9b3b32f784059ce651c29e26bd550ef19915bb40aac4520c6335aa3a09af6217</code></dd>
+</dl>
+<p>The same evidence, the same rule pack and the same scan scope always give this same file, byte for byte. It holds no date, no device name and no path outside an app.</p>
+</section>
+</main>
+</body>
+</html>

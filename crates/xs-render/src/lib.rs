@@ -16,13 +16,20 @@
 //! carries, so the numbers a reader sees first cannot disagree with the
 //! findings below them.
 //!
-//! The JSON document is the only renderer so far. The HTML report is task 11
-//! of the build plan.
+//! There are two renderers. [`json`] writes the document a program reads
+//! and a later render starts from. [`html`] writes the one a person reads:
+//! the same findings, grouped by company, with the records behind them, what
+//! the scan covered and what no scan can see.
 #![no_std]
 
 extern crate alloc;
 #[cfg(test)]
 extern crate std;
+
+mod html;
+mod markup;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -32,8 +39,10 @@ use serde::Serialize;
 use xs_model::canon::{self, CanonError};
 use xs_model::pack::PackRef;
 use xs_model::record::{Record, RecordId};
-use xs_model::report::{ReportSchema, Scanner};
+use xs_model::report::{ReportSchema, ScanScope, Scanner};
 use xs_model::{Claim, EvidenceSet, Headline};
+
+pub use crate::html::{CONTENT_SECURITY_POLICY, html};
 
 /// What a report says about how it was made.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +51,13 @@ pub struct ReportMeta {
     pub scanner: Scanner,
     /// The rule-pack layers the claims were derived with.
     pub packs: Vec<PackRef>,
+    /// Where the scan looked for apps and where it deliberately did not.
+    ///
+    /// The JSON document carries it, so a report rendered again from a
+    /// saved one states the same scope as the scan did. A report saved
+    /// before the document had the field has `None`, and the HTML report
+    /// then says that the scope is not on record instead of leaving it out.
+    pub scope: Option<ScanScope>,
 }
 
 /// Why a report was refused.
@@ -75,6 +91,21 @@ pub enum RenderError {
         /// The record id it cites.
         record: String,
     },
+    /// The rule pack handed to the renderer is not the one the report names,
+    /// so its names would be put on claims derived with other rules.
+    PackMismatch,
+    /// A claim names a company or a category the rule pack does not hold. The
+    /// category of an access claim is looked up in the fixed access list of
+    /// `xs_model::access` instead, or is `xs_model::permission::CATEGORY`
+    /// for a browser extension.
+    NotInPack {
+        /// The claim.
+        claim: String,
+        /// What kind of thing is named: `company` or `category`.
+        kind: &'static str,
+        /// The id that does not resolve.
+        id: String,
+    },
     /// The document has no canonical form.
     Canon(CanonError),
 }
@@ -94,6 +125,15 @@ impl fmt::Display for RenderError {
                 "claim {claim} cites record {record} for the app's vendor, which is not an \
                  artifact record of that build"
             ),
+            Self::PackMismatch => {
+                f.write_str("the rule pack is not the one the report says it was derived with")
+            }
+            Self::NotInPack { claim, kind, id } => {
+                write!(
+                    f,
+                    "claim {claim} names the {kind} `{id}`, which the rule pack does not hold"
+                )
+            }
             Self::Canon(error) => write!(f, "report has no canonical form: {error}"),
         }
     }
@@ -156,6 +196,8 @@ struct ReportRef<'a> {
     schema: ReportSchema,
     scanner: &'a Scanner,
     packs: &'a [PackRef],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<ScanScope>,
     headline: Headline,
     claims: &'a [Claim],
     evidence: &'a EvidenceSet,
@@ -180,6 +222,7 @@ pub fn json(
         schema: ReportSchema,
         scanner: &meta.scanner,
         packs: &meta.packs,
+        scope: meta.scope,
         headline: Headline::of(claims),
         claims,
         evidence,
@@ -292,6 +335,7 @@ mod tests {
                 version: 1,
                 sha256: Sha256Digest::of(b"pack").to_hex(),
             }],
+            scope: None,
         }
     }
 
@@ -314,6 +358,28 @@ mod tests {
         assert_eq!(report.evidence, evidence);
         assert_eq!(report.scanner, meta().scanner);
         assert_eq!(report.packs, meta().packs);
+        assert_eq!(report.scope, None);
+    }
+
+    /// The document carries where the scan looked, so a later render can
+    /// state it. A report without a scope has no such field at all, which
+    /// is the document as it was before the field existed.
+    #[test]
+    fn the_report_carries_the_scope_of_the_scan() {
+        let (claims, evidence, _, _) = fixture();
+        for (scope, stored) in [(ScanScope::Installed, "installed"), (ScanScope::Given, "given")] {
+            let meta = ReportMeta { scope: Some(scope), ..meta() };
+            let text = json(&claims, &evidence, &meta).unwrap();
+            let tree: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(tree["scope"], stored);
+            let report: Report = serde_json::from_str(&text).unwrap();
+            assert_eq!(report.scope, Some(scope));
+            // The scope is beside the evidence, not in it.
+            assert_eq!(report.evidence, evidence);
+        }
+        let text = json(&claims, &evidence, &meta()).unwrap();
+        let tree: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(tree.get("scope").is_none(), "{text}");
     }
 
     #[test]

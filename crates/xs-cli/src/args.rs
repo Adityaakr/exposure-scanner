@@ -8,8 +8,8 @@ use lexopt::prelude::*;
 /// Shown by `--help` and after a usage error.
 pub(crate) const USAGE: &str = "\
 usage:
-  exposure scan [PATH...] [--json FILE] [--threads N] [--no-cache]
-  exposure report FILE [--json FILE]
+  exposure scan [PATH...] [--html FILE] [--json FILE] [--threads N] [--no-cache]
+  exposure report FILE [--html FILE] [--json FILE]
   exposure rules show
   exposure rules verify PACK --sig SIGNATURE
   exposure --help | --version
@@ -36,12 +36,18 @@ commands:
            under XDG_CACHE_HOME) elsewhere. The report is the same with the
            cache and without it, and the folder can be deleted at any time.
            A scan run as root does not use it.
-  report   Derive the report again from the evidence saved in FILE.
+  report   Derive the report again from the evidence saved in FILE, a JSON
+           report of an earlier scan.
   rules    Show the built-in rule pack, or verify a signed pack file.
 
 options:
-  --json FILE   Write the JSON report to FILE (owner-readable only) instead
-                of standard output.
+  --html FILE   Write the report for reading to FILE: one HTML file that
+                runs no script and loads nothing, grouped by company, with
+                the evidence behind every finding.
+  --json FILE   Write the JSON report to FILE. With neither option the JSON
+                report goes to standard output.
+                A report lists the apps a person uses, so a report file is
+                created readable by its owner only.
   --threads N   Worker threads for scan. Default: one per core. The report
                 does not depend on it.
   --no-cache    Read every app again, and neither use nor keep the cache.
@@ -62,6 +68,7 @@ pub(crate) enum Command {
 pub(crate) struct Scan {
     /// What to scan. Empty means the apps installed on this machine.
     pub(crate) paths: Vec<PathBuf>,
+    pub(crate) html: Option<PathBuf>,
     pub(crate) json: Option<PathBuf>,
     pub(crate) threads: usize,
     pub(crate) cache: Cache,
@@ -80,6 +87,7 @@ pub(crate) enum Cache {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Report {
     pub(crate) file: PathBuf,
+    pub(crate) html: Option<PathBuf>,
     pub(crate) json: Option<PathBuf>,
 }
 
@@ -92,6 +100,7 @@ pub(crate) struct RulesVerify {
 /// Parses a command line. The error is a message for the user.
 pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
     let mut words: Vec<OsString> = Vec::new();
+    let mut html: Option<PathBuf> = None;
     let mut json: Option<PathBuf> = None;
     let mut threads: Option<usize> = None;
     let mut signature: Option<PathBuf> = None;
@@ -101,6 +110,7 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
         match arg {
             Short('h') | Long("help") => return Ok(Command::Help),
             Short('V') | Long("version") => return Ok(Command::Version),
+            Long("html") => html = Some(value(&mut parser, "--html")?.into()),
             Long("json") => json = Some(value(&mut parser, "--json")?.into()),
             Long("sig") => signature = Some(value(&mut parser, "--sig")?.into()),
             Long("no-cache") => no_cache = true,
@@ -128,18 +138,25 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
         Some("scan") => {
             reject("--sig", signature.is_some(), "scan")?;
             let cache = if no_cache { Cache::Off } else { Cache::Default };
-            Ok(Command::Scan(Scan { paths: rest, json, threads: threads.unwrap_or(0), cache }))
+            Ok(Command::Scan(Scan {
+                paths: rest,
+                html,
+                json,
+                threads: threads.unwrap_or(0),
+                cache,
+            }))
         }
         Some("report") => {
             reject("--sig", signature.is_some(), "report")?;
             reject("--threads", threads.is_some(), "report")?;
             reject("--no-cache", no_cache, "report")?;
             match <[PathBuf; 1]>::try_from(rest) {
-                Ok([file]) => Ok(Command::Report(Report { file, json })),
+                Ok([file]) => Ok(Command::Report(Report { file, html, json })),
                 Err(_) => Err(String::from("report takes exactly one FILE")),
             }
         }
         Some("rules") => {
+            reject("--html", html.is_some(), "rules")?;
             reject("--json", json.is_some(), "rules")?;
             reject("--threads", threads.is_some(), "rules")?;
             reject("--no-cache", no_cache, "rules")?;
@@ -180,6 +197,7 @@ mod tests {
     fn scan_takes_paths_and_options_in_any_order() {
         let expected = Command::Scan(Scan {
             paths: vec!["/Applications".into(), "My App.app".into()],
+            html: None,
             json: Some("out.json".into()),
             threads: 4,
             cache: Cache::Default,
@@ -212,9 +230,32 @@ mod tests {
             parse_words(&["scan", "x.app"]),
             Ok(Command::Scan(Scan {
                 paths: vec!["x.app".into()],
+                html: None,
                 json: None,
                 threads: 0,
                 cache: Cache::Default
+            }))
+        );
+    }
+
+    #[test]
+    fn a_report_for_reading_can_be_asked_for_with_or_without_the_json_one() {
+        assert_eq!(
+            parse_words(&["scan", "x.app", "--html", "report.html"]),
+            Ok(Command::Scan(Scan {
+                paths: vec!["x.app".into()],
+                html: Some("report.html".into()),
+                json: None,
+                threads: 0,
+                cache: Cache::Default
+            }))
+        );
+        assert_eq!(
+            parse_words(&["report", "--json=again.json", "saved.json", "--html=report.html"]),
+            Ok(Command::Report(Report {
+                file: "saved.json".into(),
+                html: Some("report.html".into()),
+                json: Some("again.json".into())
             }))
         );
     }
@@ -242,6 +283,7 @@ mod tests {
             parse_words(&["scan"]),
             Ok(Command::Scan(Scan {
                 paths: vec![],
+                html: None,
                 json: None,
                 threads: 0,
                 cache: Cache::Default
@@ -251,6 +293,7 @@ mod tests {
             parse_words(&["scan", "--threads", "2", "--json", "out.json"]),
             Ok(Command::Scan(Scan {
                 paths: vec![],
+                html: None,
                 json: Some("out.json".into()),
                 threads: 2,
                 cache: Cache::Default
@@ -264,6 +307,7 @@ mod tests {
             parse_words(&["scan", "--", "--odd.app"]),
             Ok(Command::Scan(Scan {
                 paths: vec!["--odd.app".into()],
+                html: None,
                 json: None,
                 threads: 0,
                 cache: Cache::Default
@@ -275,7 +319,7 @@ mod tests {
     fn the_other_commands_parse() {
         assert_eq!(
             parse_words(&["report", "saved.json"]),
-            Ok(Command::Report(Report { file: "saved.json".into(), json: None }))
+            Ok(Command::Report(Report { file: "saved.json".into(), html: None, json: None }))
         );
         assert_eq!(parse_words(&["rules", "show"]), Ok(Command::RulesShow));
         assert_eq!(
@@ -301,6 +345,7 @@ mod tests {
             &["report", "a.json", "--no-cache"],
             &["rules", "show", "--no-cache"],
             &["scan", "x.app", "--sig", "s"],
+            &["scan", "x.app", "--html"],
             &["report"],
             &["report", "a.json", "b.json"],
             &["report", "a.json", "--threads", "2"],
@@ -309,6 +354,7 @@ mod tests {
             &["rules", "verify", "p.json"],
             &["rules", "show", "extra"],
             &["rules", "show", "--json", "x"],
+            &["rules", "show", "--html", "x"],
             &["update"],
             &["diff", "a", "b"],
         ] {

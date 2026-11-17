@@ -930,8 +930,10 @@ dependencies = [
 name = "xs-render"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
  "serde_json",
+ "xs-derive",
  "xs-model",
 ]
 

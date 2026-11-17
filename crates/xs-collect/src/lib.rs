@@ -67,11 +67,11 @@ use std::path::{Path, PathBuf};
 use xs_match::Matchers;
 use xs_model::EvidenceSet;
 use xs_model::evidence::EvidenceError;
+pub use xs_model::report::ScanScope;
 
 pub use crate::cache::CacheError;
 use crate::cache::{Cache, Collected, Kind, Slot, State};
 use crate::discover::Artifacts;
-pub use crate::discover::ScanScope;
 use crate::schedule::{Job, Pool};
 
 /// How to run a scan.

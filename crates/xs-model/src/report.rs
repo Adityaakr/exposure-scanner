@@ -3,13 +3,14 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::fmt;
 
 use serde::{Deserialize, Serialize};
 
 use crate::claim::{Claim, Party};
 use crate::evidence::EvidenceSet;
 use crate::pack::PackRef;
-use crate::record::{EdgeType, Grade};
+use crate::record::{Browser, EdgeType, Grade};
 
 /// The schema tag of a report file. Serializes as `"exposure-report/1"` and
 /// refuses to read anything else.
@@ -48,8 +49,8 @@ impl<'de> Deserialize<'de> for ReportSchema {
 /// again later from the evidence alone.
 ///
 /// The document holds no timestamp, no host name and no path outside an
-/// artifact: the same evidence and the same rule pack give the same bytes on
-/// any machine.
+/// artifact: the same evidence, the same rule pack and the same scope give
+/// the same bytes on any machine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Report {
@@ -59,6 +60,11 @@ pub struct Report {
     pub scanner: Scanner,
     /// The rule-pack layers that were in use.
     pub packs: Vec<PackRef>,
+    /// Where the scan looked for apps. It is a fact about the scan and not
+    /// about any app, so it is a field of the report and no evidence record
+    /// holds it. A report written before the field existed has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ScanScope>,
     /// The three counts a reader sees first. They are a tally of `claims`
     /// and say nothing the claims do not.
     pub headline: Headline,
@@ -66,6 +72,51 @@ pub struct Report {
     pub claims: Vec<Claim>,
     /// The evidence the claims cite, keyed by record id.
     pub evidence: EvidenceSet,
+}
+
+/// Where a scan looked for apps, and where it deliberately did not.
+///
+/// A report stores which of the two it was and never a sentence, so the
+/// words a reader sees are always the scanner's own. They are the same on
+/// every machine and for every user: the fixed folders are named, the
+/// user's own as `~/Applications` whether or not it exists, and a path the
+/// user gave never is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanScope {
+    /// No path was given: the installed-app folders and the profile folders
+    /// of the browsers were searched, and `/System/Applications` was not.
+    Installed,
+    /// Paths were given: what they name was scanned and nothing else. The
+    /// installed-app folders were not searched.
+    Given,
+}
+
+impl fmt::Display for ScanScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Installed => {
+                f.write_str(
+                    "the apps installed in /Applications and ~/Applications; \
+                     /System/Applications (Apple's own apps on the sealed system volume) was \
+                     not searched: name the folder to scan it; the extensions installed in your \
+                     profiles of ",
+                )?;
+                for (index, browser) in Browser::ALL.iter().enumerate() {
+                    if index + 1 == Browser::ALL.len() {
+                        f.write_str(" and ")?;
+                    } else if index > 0 {
+                        f.write_str(", ")?;
+                    }
+                    f.write_str(browser.name())?;
+                }
+                Ok(())
+            }
+            Self::Given => f.write_str(
+                "the paths given and nothing else; the installed-app folders were not searched",
+            ),
+        }
+    }
 }
 
 /// The headline of a report: three counts, and no score (project spec,
@@ -248,6 +299,39 @@ mod tests {
         let mut access = claim("com.example.a", 1, "acme", Grade::Used);
         access.edge = EdgeType::Access;
         assert_eq!(counts(Headline::of(&[access])), (0, 0, 0));
+    }
+
+    /// A report as `scope` makes it, with nothing else in it.
+    fn report_text(scope: &str) -> String {
+        alloc::format!(
+            "{{\"schema\":\"exposure-report/1\",\"scanner\":{{\"name\":\"exposure\",\
+             \"version\":\"0.1.0\"}},\"packs\":[],{scope}\"headline\":{{\
+             \"companies_contacts\":0,\"companies_contains\":0,\"apps_third_party\":0}},\
+             \"claims\":[],\"evidence\":{{}}}}"
+        )
+    }
+
+    /// The scope is one of two fixed values in the file, so a report cannot
+    /// bring words of its own, and a report from before the field existed
+    /// is still read and written back without it.
+    #[test]
+    fn a_report_names_its_scope_and_one_without_it_is_still_read() {
+        for (stored, scope) in [("installed", ScanScope::Installed), ("given", ScanScope::Given)] {
+            let text = report_text(&alloc::format!("\"scope\":\"{stored}\","));
+            let report: Report = serde_json::from_str(&text).unwrap();
+            assert_eq!(report.scope, Some(scope));
+            assert_eq!(serde_json::to_string(&report).unwrap(), text);
+        }
+
+        let older = report_text("");
+        let report: Report = serde_json::from_str(&older).unwrap();
+        assert_eq!(report.scope, None);
+        assert_eq!(serde_json::to_string(&report).unwrap(), older);
+
+        for refused in ["\"/Users/someone/Apps\"", "\"Installed\"", "7"] {
+            let text = report_text(&alloc::format!("\"scope\":{refused},"));
+            assert!(serde_json::from_str::<Report>(&text).is_err(), "{refused}");
+        }
     }
 
     #[test]

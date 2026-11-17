@@ -31,7 +31,7 @@ collectors, the resolver, the scan scheduler and the results cache:
 | Results cache: an app that has not changed since an earlier scan is not read again; private, deletable, off with `--no-cache`; the report is the same with it and without | Done (below) |
 | Automatic eviction of removed apps from the results cache | Not yet (follow-up); until then, delete the cache folder |
 | Browser extensions: the extensions in your profiles of Chromium-family browsers and Firefox, and what each manifest asks the browser for | Done (below) |
-| HTML report | Not yet (build plan tasks 11, 13 and 14) |
+| HTML report: findings grouped by company, the records behind each, coverage, and what a scan cannot see | Done (below) |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
 
@@ -158,16 +158,63 @@ $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exp
 ```
 
 ```
-exposure scan [PATH...] [--json FILE] [--threads N]   scan .app bundles, .apk files, extensions, or folders of them
-              [--no-cache]                            without the cache
-exposure report FILE [--json FILE]                    derive the report again from saved evidence
-exposure rules show                                   list the built-in rule pack
-exposure rules verify PACK --sig SIGNATURE            check a signed pack file offline
+exposure scan [PATH...] [--html FILE] [--json FILE] [--threads N]   scan .app bundles, .apk files, extensions, or folders of them
+              [--no-cache]                                        without the cache
+exposure report FILE [--html FILE] [--json FILE]                    derive the report again from saved evidence
+exposure rules show                                                 list the built-in rule pack
+exposure rules verify PACK --sig SIGNATURE                          check a signed pack file offline
 ```
 
-Without `--json` the report goes to standard output. A report file is
-created readable by its owner only, because the list of apps a person uses is
-sensitive in itself.
+`--html FILE` writes the report for reading and `--json FILE` the one a
+program reads; both can be asked for at once. With neither, the JSON report
+goes to standard output. A report file is created readable by its owner
+only, because the list of apps a person uses is sensitive in itself.
+
+### The report for reading
+
+```console
+$ target/release/exposure scan /Applications --html report.html --json report.json
+$ target/release/exposure report report.json --html again.html   # the same page, from the saved evidence
+```
+
+One HTML file that opens in any browser, also on a phone, and has a layout
+for print. A sample,
+the page for the three fixtures of this repository, is
+[`tests/fixtures/report/Fixtures.report.html`](tests/fixtures/report/Fixtures.report.html).
+It holds:
+
+| Part | What it says |
+|---|---|
+| Summary | What was found, first: one sentence with the totals, then each thing found once (an SDK or a declared host, under its company or under none) with its category, its grade as a fact with a count (`ships in 10 of 16 apps`), the apps as links to their findings (two apps of one name are told apart by platform, then version, then build), and whether it is counted. Then the three headline counts, said to count the counted categories only; when findings exist and all three counts are zero, the page says why: no finding added to them, and what a count needs. Then the totals. No score. |
+| How to read it | What each grade shows and does not show, in one word each: declares, ships, contacted, confirmed; and, when the scan found what an app may access, the access grades too (may access). |
+| Findings by company | Companies with a counted finding first, then the others by name. Under each, the apps, and for each finding its grade, its confidence, how many kinds of evidence agree, whether the company is the app's publisher, and each record it rests on in words: the marker, the file, the table, an example, a count. Components and unmapped hosts come after the companies, under no company. Findings about what an app may access are not channels to a company and have a part of their own, by app, shown when there is one. A company with no counted finding is tagged as outside the counted categories, as visibly as a counted one. |
+| Coverage | Where the scan looked, and where it deliberately did not. Every app that was read, with what was read of it, also the apps with no finding. Then everything that was skipped or not understood, and why. |
+| Limits | What no scan of a device can see: what is inside encrypted traffic, what companies pass on between their own servers, and what an app sends through its own domain. And that presence is not use, and that only what has a rule is recognised. |
+| Evidence records | Every record of the scan as it is stored. A finding links to its records, and the SHA-256 of a record's text is its id. |
+
+The wording follows one rule: graded facts, and nothing about what an app or
+a company intends.
+
+App names, versions, class names and paths are chosen by whoever built the
+app, so the page is built to stay inert whatever they hold:
+
+| Guard | How it is enforced |
+|---|---|
+| Every value is escaped | The writer takes markup only as text that is part of the program. Any other string can enter as character data alone, escaped. An attribute value is fixed text, or an anchor made of a hash; no string from a file can be one. |
+| No script | The page holds none, and its content security policy, `default-src 'none'`, allows none. |
+| Nothing is loaded | No image, no font, no link that leaves the page. The one stylesheet is in the page, and the policy admits it by its hash, so an inline style or a second stylesheet would not apply. |
+| The same bytes | No date, no device name, no path outside an app, and no path you gave. The same evidence, rule pack and scope give the same file. |
+
+Where a scan looked is not evidence about any app, so no record holds it.
+The JSON report carries it beside the evidence, in its `scope` field, as
+`installed` or `given`. So the page `exposure report` renders from a saved
+report is the page of the scan, byte for byte, with the same statement of
+where the scan looked. A JSON report saved before the field existed is
+still read; its page says that the scope is not on record.
+
+A test scans a bundle and a package whose app names, ids, versions and class
+names are markup, reads the page back with a reader stricter than a browser,
+and requires the same elements as the page of two harmless apps.
 
 ### What is scanned
 
@@ -191,8 +238,10 @@ a documented omission: name that folder to scan it. Every scan without a
 `PATH` states the omission in its scope line, the last line of the summary on
 standard error. It is not a coverage record, which differs from the design
 report (section 4.8), which asked for one: a coverage record needs an app as
-its subject, and a folder is not one. The scope line is fixed text. It is
-not part of the JSON report, and it never holds a path you gave.
+its subject, and a folder is not one. The scope line is fixed text, and it
+never holds a path you gave. The JSON report records which of the two scopes
+the scan had, in its `scope` field, outside the evidence records. The HTML
+report states the scope too, at the top of its coverage section.
 
 ```console
 $ target/release/exposure scan --json report.json
@@ -516,8 +565,8 @@ than left to discipline.
 | Property | How it is enforced | Checked by |
 |---|---|---|
 | **Private.** A scan opens no socket. | No crate that can open one is allowed into the dependency graph. The lint lists ban the socket, process, clock and environment APIs. | `cargo deny check`; `cargo xtask no-network`: the binary imports no socket function, and the scan runs in a network namespace with no interfaces, under `strace`, and under a macOS sandbox that denies the network, each time without the cache, with an empty one and with a full one. Each check is paired with a control program that must be caught. |
-| **Deterministic.** Same evidence and rule pack, same bytes. | Derivation and rendering live in `no_std` crates that cannot read a clock, a file or the environment and have no randomly seeded map. Records hold paths inside the artifact only. Evidence is a set keyed by content hash. | One report across input orders, thread counts, install locations and cache states (off, empty, full, damaged); the committed fixture report must be reproduced byte for byte on Linux and macOS. |
-| **Honest.** Every finding shows its grade and the raw record behind it. | The renderer refuses a claim that cites a record the report does not carry. | A test deletes a cited record and expects the render to fail. |
+| **Deterministic.** Same evidence, rule pack and scan scope, same bytes. | Derivation and rendering live in `no_std` crates that cannot read a clock, a file or the environment and have no randomly seeded map. Records hold paths inside the artifact only. Evidence is a set keyed by content hash. | One report across input orders, thread counts, install locations and cache states (off, empty, full, damaged); the committed fixture report must be reproduced byte for byte on Linux and macOS. |
+| **Honest.** Every finding shows its grade and the raw record behind it. | The renderers refuse a claim that cites a record the report does not carry. The HTML report carries every record, and each finding links to its own. | A test deletes a cited record and expects the render to fail. Another reads the page back and finds, for every claim, its grade, its confidence and each cited record as stored. |
 | **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary or archive that large is reported with its size instead. Of a Mach-O file only the headers and at most 1 MiB of load commands per architecture are held in memory, whatever its size. Symbolic links are never followed. The file table of an asar archive is not trusted: an entry that overlaps another or reaches past the end of the archive is counted as a gap and not read, and a header in a shape no archive writer produces is refused whole. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. The zip, DEX and manifest parsers and the Android collector also run under libFuzzer, 60 s each (`fuzz/run.sh`). |
 | **Rules are data.** A rule pack cannot run code. | A rule is a literal plus one boundary from a fixed list. The scanner only loads a compiled pack whose signature verifies against a key built into the binary; it contains no parser for rule sources. | A tampered pack is refused; the pack compiler's lints are tested. |
 | **Finds what is there / does not cry wolf.** | Several independent witnesses per SDK, with controls against coincidental hits (below). | Each control has its own tests, and a property test checks that cutting a file into windows never changes what is found. The canary and the negative corpus arrive with the collectors. |
@@ -550,7 +599,7 @@ One Cargo workspace. A crate may depend only on crates above it in this list.
 | `xs-match` | Matchers compiled from a pack; hit collection; the controls against false positives | `no_std` |
 | `xs-rules` | Pack loader and signature check; source compiler behind a tooling-only feature | std without file access |
 | `xs-derive` | Evidence and pack in, claims out: grades, companies, vendors, parties | `no_std` |
-| `xs-render` | Claims and evidence in, report out | `no_std` |
+| `xs-render` | Claims and evidence in, report out: the JSON document and the HTML page | `no_std` |
 | `xs-collect` | Discovery, reading and the results cache, one module per collector. The only crate that opens files | std |
 | `exposure` (in `crates/xs-cli`) | The `exposure` binary | std |
 | `xtask` | Developer tooling. Never shipped | anything |

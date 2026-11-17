@@ -6,7 +6,7 @@ use std::path::Path;
 
 use xs_match::Matchers;
 use xs_model::record::Record;
-use xs_model::report::Scanner;
+use xs_model::report::{ScanScope, Scanner};
 use xs_model::{EvidenceSet, Headline, Pack, Report};
 use xs_render::ReportMeta;
 use xs_rules::{SignedLayer, TRUSTED_KEYS};
@@ -70,22 +70,66 @@ fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
     file.write_all(report.as_bytes()).map_err(fail)
 }
 
+/// Where a command writes its reports.
+#[derive(Clone, Copy)]
+struct Outputs<'a> {
+    /// The file for the report a person reads, if one was asked for.
+    html: Option<&'a Path>,
+    /// The file for the JSON report, if one was asked for.
+    json: Option<&'a Path>,
+}
+
 /// A rendered report, and what the terminal summary says about it.
 struct Rendered {
     /// The JSON document.
-    text: String,
+    json: String,
+    /// The HTML document, when one was asked for.
+    html: Option<String>,
     /// How many claims it holds.
     claims: usize,
     /// Its headline counts.
     headline: Headline,
 }
 
-/// Derives claims from `evidence` and renders the JSON report.
-fn render(evidence: &EvidenceSet, pack: &Pack, scanner: Scanner) -> Result<Rendered> {
+/// Derives claims from `evidence` and renders the reports `outputs` asks
+/// for. Both documents are rendered from the same claims.
+///
+/// `scope` is where the scan looked. Both documents carry it, so the page
+/// rendered from a saved JSON report is the page of the scan.
+fn render(
+    evidence: &EvidenceSet,
+    pack: &Pack,
+    scanner: Scanner,
+    scope: Option<ScanScope>,
+    outputs: Outputs<'_>,
+) -> Result<Rendered> {
     let claims = xs_derive::derive(evidence, pack).map_err(|error| error.to_string())?;
-    let meta = ReportMeta { scanner, packs: pack.refs() };
-    let text = xs_render::json(&claims, evidence, &meta).map_err(|error| error.to_string())?;
-    Ok(Rendered { text, claims: claims.len(), headline: Headline::of(&claims) })
+    let meta = ReportMeta { scanner, packs: pack.refs(), scope };
+    let json = xs_render::json(&claims, evidence, &meta).map_err(|error| error.to_string())?;
+    let html = match outputs.html {
+        Some(_) => Some(
+            xs_render::html(&claims, evidence, &meta, pack).map_err(|error| error.to_string())?,
+        ),
+        None => None,
+    };
+    Ok(Rendered { json, html, claims: claims.len(), headline: Headline::of(&claims) })
+}
+
+/// Writes the reports where `outputs` says. The JSON report goes to
+/// standard output only when no file at all was asked for: someone who asks
+/// for the report to read does not want the other one on the terminal.
+///
+/// Nothing is written unless every report was rendered, so a refused report
+/// leaves no half of itself behind.
+fn deliver_all(report: &Rendered, outputs: Outputs<'_>) -> Result<()> {
+    if let (Some(html), Some(path)) = (&report.html, outputs.html) {
+        deliver(html, Some(path))?;
+    }
+    match (outputs.json, outputs.html) {
+        (Some(path), _) => deliver(&report.json, Some(path)),
+        (None, None) => deliver(&report.json, None),
+        (None, Some(_)) => Ok(()),
+    }
 }
 
 fn plural(count: u64, noun: &str) -> String {
@@ -107,8 +151,9 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
     let options = xs_collect::ScanOptions { threads: args.threads, cache: cache_dir.as_deref() };
     let outcome =
         xs_collect::scan(&args.paths, &matchers, options).map_err(|error| error.to_string())?;
-    let report = render(&outcome.evidence, &pack, this_scanner())?;
-    deliver(&report.text, args.json.as_deref())?;
+    let outputs = Outputs { html: args.html.as_deref(), json: args.json.as_deref() };
+    let report = render(&outcome.evidence, &pack, this_scanner(), Some(outcome.scope), outputs)?;
+    deliver_all(&report, outputs)?;
 
     let gaps =
         outcome.evidence.iter().filter(|(_, record)| matches!(record, Record::Coverage(_))).count();
@@ -168,8 +213,9 @@ pub(crate) fn report(args: &args::Report) -> Result<()> {
     let saved: Report = serde_json::from_slice(&bytes).map_err(|error| fail(&error))?;
     let pack = built_in_pack()?;
     // The evidence was gathered by the scanner the file names; keep that.
-    let report = render(&saved.evidence, &pack, saved.scanner)?;
-    deliver(&report.text, args.json.as_deref())
+    let outputs = Outputs { html: args.html.as_deref(), json: args.json.as_deref() };
+    let report = render(&saved.evidence, &pack, saved.scanner, saved.scope, outputs)?;
+    deliver_all(&report, outputs)
 }
 
 /// `exposure rules show`

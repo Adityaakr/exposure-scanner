@@ -18,6 +18,14 @@ macro_rules! claim_digest {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name(Sha256Digest);
 
+        impl $name {
+            /// The underlying digest.
+            #[must_use]
+            pub const fn digest(&self) -> &Sha256Digest {
+                &self.0
+            }
+        }
+
         impl fmt::Display for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "sha256:{}", self.0)
