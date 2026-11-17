@@ -40,7 +40,8 @@
 //! takes its place, so that a reader never sees half of one. A file holds
 //! the app's records, the hash of the state above, the hash of its own
 //! content, and the hashes of the app's path and of each folder above it
-//! whose search finds the app. It holds no path and no list of the app's
+//! whose search finds the app, and the same of the link the app was found
+//! through, if it was. It holds no path and no list of the app's
 //! files. The state is kept as its hash, because that is all a comparison
 //! needs (the spec's trust rule 5: store the minimum).
 //!
@@ -497,8 +498,15 @@ impl Cache {
         Ok(Self { dir: dir.to_path_buf(), context: context.finish(), owner: user, opened })
     }
 
-    /// The place in the cache of the artifact at `path` in `state`.
-    pub(crate) fn slot(&self, kind: Kind, path: &Path, state: State) -> Slot<'_> {
+    /// The place in the cache of the artifact at `path` in `state`, which
+    /// a search of each of `reached_from` finds.
+    pub(crate) fn slot<'p>(
+        &self,
+        kind: Kind,
+        path: &Path,
+        reached_from: impl IntoIterator<Item = &'p Path>,
+        state: State,
+    ) -> Slot<'_> {
         let key = Key::of(kind, path);
         let mut valid_for = Sha256Stream::new();
         valid_for.update(b"exposure cache state\0");
@@ -508,10 +516,7 @@ impl Cache {
         Slot {
             cache: self,
             key,
-            reached_from: crate::discover::reached_from(path, kind == Kind::Bundle)
-                .into_iter()
-                .map(path_digest)
-                .collect(),
+            reached_from: reached_from.into_iter().map(path_digest).collect(),
             valid_for: valid_for.finish(),
             newest: state.newest,
         }

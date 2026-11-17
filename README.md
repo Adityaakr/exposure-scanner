@@ -214,7 +214,10 @@ in a folder created for its owner only:
 A file holds the records about one app, the same records the report shows,
 and hashes: of the four things above, of the file's own content, and of the
 app's path and each folder above it whose search finds the app (its parent,
-and the folder above that unless the parent is a bundle). It holds no path
+and the folder above that unless the parent is a bundle). For an app found
+through a link in a folder, as Nix installs apps in `/Applications`, the same
+goes for the link's path, so the app's entry is removed once the link points
+elsewhere or is gone. It holds no path
 and no list of the app's files. The folder can be deleted at any time; the
 next scan reads everything and fills it again.
 

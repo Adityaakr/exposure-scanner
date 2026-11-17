@@ -279,7 +279,9 @@ fn collect<'c>(
     // Listing is stat-bound and independent per artifact.
     let bundles: Vec<Listed<'c, macos::Plan>> = pool.map(&found.bundles, |bundle| {
         let plan = macos::plan(bundle);
-        let slot = cache.map(|cache| cache.slot(Kind::Bundle, bundle, plan.state()));
+        let slot = cache.map(|cache| {
+            cache.slot(Kind::Bundle, bundle, found.reached_from(bundle, true), plan.state())
+        });
         Listed::new(plan, slot)
     });
     let packages: Vec<Listed<'c, u64>> = pool.map(&found.packages, |path| {
@@ -288,7 +290,9 @@ fn collect<'c>(
         let metadata = fs::metadata(path).ok();
         let size = metadata.as_ref().map_or(0, fs::Metadata::len);
         let state = metadata.as_ref().map(State::of_file);
-        let slot = cache.zip(state).map(|(cache, state)| cache.slot(Kind::Package, path, state));
+        let slot = cache.zip(state).map(|(cache, state)| {
+            cache.slot(Kind::Package, path, found.reached_from(path, false), state)
+        });
         Listed::new(size, slot)
     });
 

@@ -6,7 +6,7 @@
 //! They are found either below the paths a scan is given ([`artifacts`]) or,
 //! when it is given none, where macOS keeps installed apps ([`installed`]).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -82,6 +82,26 @@ pub struct Artifacts {
     /// folder of installed apps that exists. Whatever was in one and is not
     /// among the artifacts is not there any more.
     pub roots: BTreeSet<PathBuf>,
+    /// Where a search of a folder found each artifact, by its canonical
+    /// path: the path in the folder, which may be a link to it.
+    pub found_at: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+}
+
+impl Artifacts {
+    /// The paths whose search finds the artifact at the canonical path
+    /// `artifact`, a bundle if `bundle` and else a package: those that
+    /// find it where it is, and those that find it where this search found
+    /// it, through a link.
+    pub(crate) fn reached_from<'a>(
+        &'a self,
+        artifact: &'a Path,
+        bundle: bool,
+    ) -> BTreeSet<&'a Path> {
+        let found_at = self.found_at.get(artifact).into_iter().flatten();
+        let mut from: BTreeSet<&Path> = reached_from(artifact, bundle).into_iter().collect();
+        from.extend(found_at.flat_map(|path| reached_from(path, bundle)));
+        from
+    }
 }
 
 /// What a search has found so far.
@@ -90,24 +110,32 @@ struct Found {
     bundles: BTreeSet<PathBuf>,
     packages: BTreeSet<PathBuf>,
     roots: BTreeSet<PathBuf>,
+    found_at: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
 }
 
 impl Found {
+    /// Notes that the artifact at the canonical path `resolved` was found
+    /// at `path` in a folder.
+    fn at(&mut self, resolved: &Path, path: PathBuf) {
+        self.found_at.entry(resolved.to_path_buf()).or_default().insert(path);
+    }
+
     fn finish(self) -> Artifacts {
         Artifacts {
             bundles: self.bundles.into_iter().collect(),
             packages: self.packages.into_iter().collect(),
             roots: self.roots,
+            found_at: self.found_at,
         }
     }
 }
 
-/// The paths a search finds the artifact at the canonical path `artifact`
-/// from, a bundle if `bundle` and else a package: the artifact itself, and
-/// each folder above it that a search reaches it from. A search goes two
-/// levels down, never into a bundle, and finds an artifact only by its name;
-/// a bundle given as a path is not searched at all.
-pub(crate) fn reached_from(artifact: &Path, bundle: bool) -> Vec<&Path> {
+/// The paths a search finds the artifact at `artifact` from, a bundle if
+/// `bundle` and else a package: the artifact itself, and each folder above it
+/// that a search reaches it from. A search goes two levels down, never into a
+/// bundle, and finds an artifact only by its name; a bundle given as a path is
+/// not searched at all.
+fn reached_from(artifact: &Path, bundle: bool) -> Vec<&Path> {
     let mut from = vec![artifact];
     let named = if bundle { is_bundle_name(artifact) } else { is_package_name(artifact) };
     if !named {
@@ -224,12 +252,14 @@ fn search_folder(folder: &Path, depth: u32, found: &mut Found) -> io::Result<()>
                 && let Ok(resolved) = fs::canonicalize(&path)
                 && is_package_name(&resolved)
             {
+                found.at(&resolved, path);
                 found.packages.insert(resolved);
             }
         } else if !metadata.is_dir() {
             // A socket, a pipe or a device node.
         } else if is_bundle_name(&path) {
             if let Ok(resolved) = fs::canonicalize(&path) {
+                found.at(&resolved, path);
                 found.bundles.insert(resolved);
             }
         } else if depth > 1 && !linked() {

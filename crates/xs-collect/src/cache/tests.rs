@@ -610,6 +610,41 @@ fn only_the_entries_of_apps_that_are_gone_from_a_path_searched_are_removed() {
     assert_same(&lab, &cache, APPS - 2);
 }
 
+/// An app installed as a link in a folder of apps, as Nix installs them:
+/// the folder's scan drops the entry of what the link pointed to once the
+/// link points elsewhere, and once it is gone, although no path searched
+/// is above where the app itself is.
+#[test]
+fn an_app_found_through_a_link_is_dropped_once_the_link_no_longer_finds_it() {
+    let lab = Lab::new();
+    let cache = lab.cache();
+    let store = lab.dir.path().join("store");
+    let old = bundle(&store.join("v1-example/Applications/Example.app"), "org.example.nix");
+    let new = bundle(&store.join("v2-example/Applications/Example.app"), "org.example.nix");
+    let apps = lab.dir.path().join("Linked");
+    let link = apps.join("Nix Apps/Example.app");
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&old, &link).unwrap();
+    let entry_of =
+        |path: &Path| Key::of(Kind::Bundle, &fs::canonicalize(path).unwrap()).file_name();
+
+    assert_eq!(scan_paths(&lab, &apps, &cache).reused, 0);
+    assert_eq!(scan_paths(&lab, &apps, &cache).reused, 1);
+    assert_eq!(lab.kept(), [entry_of(&old)]);
+
+    // An upgrade points the link at another build.
+    fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&new, &link).unwrap();
+    assert_eq!(scan_paths(&lab, &apps, &cache).reused, 0);
+    assert_eq!(lab.kept(), [entry_of(&new)]);
+
+    // Removing the app removes the link.
+    fs::remove_file(&link).unwrap();
+    assert_eq!(scan_paths(&lab, &apps, &cache).reused, 0);
+    assert!(lab.kept().is_empty(), "{:?}", lab.kept());
+    assert!(old.exists() && new.exists());
+}
+
 /// A scan run as root keeps no cache: it would leave files in the user's
 /// folder that the user cannot replace. Nothing is created, not even the
 /// folder.
