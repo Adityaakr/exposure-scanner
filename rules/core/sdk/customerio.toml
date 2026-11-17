@@ -1,7 +1,7 @@
 id = "sdk/customerio"
 name = "Customer.io"
 entity = "customerio"
-category = "customer_messaging"
+category = "profiling"
 sources = [
     "https://raw.githubusercontent.com/customerio/customerio-ios/HEAD/CustomerIOCommon.podspec",
     "https://raw.githubusercontent.com/customerio/customerio-ios/HEAD/CustomerIODataPipelines.podspec",
@@ -13,7 +13,9 @@ sources = [
     "https://repo1.maven.org/maven2/io/customer/android/tracking/3.11.2/tracking-3.11.2.aar",
 ]
 
-# The SDK reports who the user is and what they do, so that messages can be triggered.
+# A customer-data platform: the SDK reports who the user is and what they do,
+# so that messages can be triggered. Tracking user events tied to identity is
+# profiling.
 [match]
 android_class_prefix = ["io.customer.datapipelines.", "io.customer.sdk."]
 dex_string = [

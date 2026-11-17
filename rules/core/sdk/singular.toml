@@ -10,9 +10,15 @@ sources = [
     "https://raw.githubusercontent.com/singular-labs/Singular-iOS-SDK/HEAD/Singular.xcframework/ios-arm64/Singular.framework/PrivacyInfo.xcprivacy",
 ]
 
+# Its endpoint hosts are strings an app that filters ad or tracking traffic can
+# hold as data, so two different ones must be in one DEX file to count.
 [match]
 android_class_prefix = ["com.singular.sdk."]
-dex_string = [{ lit = "sdk-api-v1.singular.net", at = "host" }]
+dex_string = [
+    { lit = "exceptions.singular.net", at = "host" },
+    { lit = "sdk-api-v1.singular.net", at = "host" },
+]
 apple_framework = ["Singular.framework"]
 macho_objc_class = ["SingularConfig", "SingularLinkParams"]
 privacy_manifest = [{ lit = "safetrack.singular.net", at = "host" }]
+min_distinct = { dex_string = 2 }

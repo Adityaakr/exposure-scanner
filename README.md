@@ -64,9 +64,10 @@ nothing else. A clean report from this build does not mean an app is clean.
 | Analytics | Google Analytics (Firebase), Mixpanel, Amplitude, Twilio Segment, PostHog, Heap, Datadog RUM, New Relic, Microsoft App Center Analytics, Countly, TelemetryDeck, Aptabase, Statsig, Facebook SDK (app events) |
 | Advertising | Google Mobile Ads (AdMob), Meta Audience Network, AppLovin MAX, Unity Ads, Unity LevelPlay (ironSource) |
 | Attribution | AppsFlyer, Adjust, Branch, Kochava, Singular |
+| Profiling | Braze, Customer.io |
 | Session replay | LogRocket, Fullstory, Hotjar, Smartlook, UXCam |
 | Crash reporting | Sentry, Bugsnag, Firebase Crashlytics, Rollbar, Raygun, App Center Crashes |
-| Customer messaging | Intercom, Braze, OneSignal, Customer.io |
+| Customer messaging | Intercom, OneSignal |
 | Other, not counted | Firebase Cloud Messaging, Firebase Installations, Google DataTransport, Google Play Billing, App Center |
 | Components (no company) | Sparkle, Squirrel, electron-updater, PLCrashReporter |
 
@@ -116,9 +117,10 @@ Only claims in the categories advertising, analytics, attribution, profiling
 and session replay are counted, and only when they name a company. Hosting is
 not receiving: crash reporting, push delivery, payments, an update feed and a
 declared tracking domain that no rule names are in the report and in none of
-the three numbers. Customer messaging (Intercom, Braze, OneSignal,
-Customer.io) is in the report under its company and is not counted either:
-the five counted categories are a fixed list (design report, section 3, A7).
+the three numbers. Customer messaging (Intercom, OneSignal) is in
+the report under its company and is not counted either: the five counted
+categories are a fixed list (design report, section 3, A7). Braze and
+Customer.io track what the user does and so are counted, under profiling.
 Each claim says whether it counts, in `headline`, so the numbers can be
 recounted from the claims.
 

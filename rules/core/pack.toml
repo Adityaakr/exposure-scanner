@@ -45,10 +45,11 @@ id = "push_messaging"
 name = "Push messaging"
 headline = false
 
-# Messaging platforms an app reports its user to, by identity and by what the
-# user does, so that the platform can choose and send messages: in-app chat,
-# campaigns, push. Not in the headline: the five headline categories are a
-# fixed list (design report, section 3, A7).
+# Messaging platforms whose main job is to deliver messages (in-app chat,
+# push) to a user the app already knows. Not in the headline: delivering to
+# a known user is not collecting about them, and the five counted categories
+# are a fixed list (design report, section 3, A7). An SDK whose main job is
+# tracking what the user does goes under profiling instead.
 [[category]]
 id = "customer_messaging"
 name = "Customer messaging"

@@ -23,5 +23,5 @@ dex_string = [
     { lit = "webview.unityads.unity3d.com", at = "host" },
 ]
 apple_framework = ["UnityAds.framework"]
-macho_objc_class = ["UADSMetaData", "USRVSdkProperties", "UnityAds"]
+macho_objc_class = ["UADSMetaData", "USRVSdkProperties"]
 min_distinct = { dex_string = 2 }

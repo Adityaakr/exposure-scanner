@@ -23,4 +23,4 @@ content_literal = [
     { lit = "widget.intercom.io", at = "host" },
 ]
 apple_framework = ["Intercom.framework"]
-macho_objc_class = ["ICMUserAttributes", "Intercom"]
+macho_objc_class = ["ICMUserAttributes"]

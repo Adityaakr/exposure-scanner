@@ -146,6 +146,10 @@ mistakes made while the pack was written, each found on a real app.
 - **An endpoint that is a bare registrable domain** is refused by the
   compiler. Write it with the path of the API below it and the `word`
   boundary, as Statsig's rule does with `featureassets.org/v1`.
+- **An exact class name that is a plain word or a bare brand word**, such
+  as `Intercom`, can be an app's own class: a doorbell app may define an
+  `Intercom` class. Use the vendor-prefixed classes, such as
+  `ICMUserAttributes`.
 - **The hosts of an ad network** are data in apps that block or skip ads:
   NewPipe, which shows no ads, holds `googleads.g.doubleclick.net` among its
   DEX strings. Prefer the table witnesses (manifest entries, classes, file

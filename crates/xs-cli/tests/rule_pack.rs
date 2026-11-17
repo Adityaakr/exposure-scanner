@@ -215,7 +215,7 @@ fn what_real_apps_ship_is_found() {
 fn what_only_resembles_an_sdk_is_not_found() {
     let pack = pack();
     let matchers = Matchers::build(&pack).unwrap();
-    let cases: [(MatcherKind, &[&str]); 7] = [
+    let cases: [(MatcherKind, &[&str]); 8] = [
         // Dia names a module of its own TelemetryClient, the name of
         // TelemetryDeck's older module, and Segment is a common word.
         (
@@ -226,6 +226,8 @@ fn what_only_resembles_an_sdk_is_not_found() {
                 "_TtC7Segment12SegmentedBar",
             ],
         ),
+        // A plain word or bare brand word can be an app's own class name.
+        (MatcherKind::MachoObjcClass, &["Intercom", "OSNotification", "UnityAds"]),
         (MatcherKind::AppleFramework, &["TelemetryClient.framework", "Segment.framework"]),
         // NewPipe, which shows no ads, has an ad host among its strings.
         (
