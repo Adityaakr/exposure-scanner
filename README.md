@@ -205,10 +205,12 @@ app, so the page is built to stay inert whatever they hold:
 | Nothing is loaded | No image, no font, no link that leaves the page. The one stylesheet is in the page, and the policy admits it by its hash, so an inline style or a second stylesheet would not apply. |
 | The same bytes | No date, no device name, no path outside an app, and no path you gave. The same evidence, rule pack and scope give the same file. |
 
-Where a scan looked is the one thing on the page that the saved evidence
-does not hold. So the page `exposure report` renders from a saved report is
-the page of the scan, byte for byte, except for that statement: it says the
-scope is not on record.
+Where a scan looked is not evidence about any app, so no record holds it.
+The JSON report carries it beside the evidence, in its `scope` field, as
+`installed` or `given`. So the page `exposure report` renders from a saved
+report is the page of the scan, byte for byte, with the same statement of
+where the scan looked. A JSON report saved before the field existed is
+still read; its page says that the scope is not on record.
 
 A test scans a bundle and a package whose app names, ids, versions and class
 names are markup, reads the page back with a reader stricter than a browser,
@@ -236,9 +238,10 @@ a documented omission: name that folder to scan it. Every scan without a
 `PATH` states the omission in its scope line, the last line of the summary on
 standard error. It is not a coverage record, which differs from the design
 report (section 4.8), which asked for one: a coverage record needs an app as
-its subject, and a folder is not one. The scope line is fixed text. It is
-not part of the JSON report, and it never holds a path you gave. The HTML
-report of a scan states it too, at the top of its coverage section.
+its subject, and a folder is not one. The scope line is fixed text, and it
+never holds a path you gave. The JSON report records which of the two scopes
+the scan had, in its `scope` field, outside the evidence records. The HTML
+report states the scope too, at the top of its coverage section.
 
 ```console
 $ target/release/exposure scan --json report.json

@@ -10,7 +10,6 @@
 //! their profiles ([`installed`]).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -18,6 +17,8 @@ use std::path::{Path, PathBuf};
 use xs_model::record::{Browser, CoverageReason};
 
 use crate::ScanError;
+#[cfg(test)]
+use crate::ScanScope;
 use crate::browser::{self, Extension, Form};
 
 /// How far below a folder artifacts are looked for: the folder's entries and
@@ -29,50 +30,6 @@ const MAX_FOLDER_DEPTH: u32 = 2;
 const SHARED_APPS: &str = "/Applications";
 /// The folder, below a user's home folder, for apps of that user alone.
 const USER_APPS: &str = "Applications";
-/// The folder of Apple's own apps, on the sealed system volume.
-const SYSTEM_APPS: &str = "/System/Applications";
-
-/// Where a scan looked for apps, and where it deliberately did not.
-///
-/// Its text is the same on every machine and for every user: the fixed
-/// folders are named, the user's own as `~/Applications` whether or not it
-/// exists, and a path the user gave never is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScanScope {
-    /// No path was given: the installed-app folders and the profile folders
-    /// of the browsers were searched, and `/System/Applications` was not.
-    Installed,
-    /// Paths were given: what they name was scanned and nothing else. The
-    /// installed-app folders were not searched.
-    Given,
-}
-
-impl fmt::Display for ScanScope {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Installed => write!(
-                f,
-                "the apps installed in {SHARED_APPS} and ~/{USER_APPS}; {SYSTEM_APPS} (Apple's \
-                 own apps on the sealed system volume) was not searched: name the folder to \
-                 scan it; the extensions installed in your profiles of {}",
-                browser_names()
-            ),
-            Self::Given => f.write_str(
-                "the paths given and nothing else; the installed-app folders were not searched",
-            ),
-        }
-    }
-}
-
-/// The browsers whose profiles are searched, as a reader knows them:
-/// `Arc, Brave, … and Vivaldi`.
-fn browser_names() -> String {
-    let names = Browser::ALL.map(Browser::name);
-    match names.split_last() {
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-        None => String::new(),
-    }
-}
 
 fn named(path: &Path, extension: &str) -> bool {
     path.extension().is_some_and(|found| found.eq_ignore_ascii_case(extension))
@@ -208,7 +165,8 @@ pub fn installed_roots(home: Option<&Path>) -> Vec<PathBuf> {
 /// is counted in [`Artifacts::unlisted`]. Apple's own apps on the sealed system volume, in
 /// `/System/Applications`, are not among them; that folder is scanned when
 /// it is named. No record says so, since a record needs an app as its
-/// subject: the scan says it in its scope, [`ScanScope::Installed`].
+/// subject: the scan says it in its scope,
+/// [`ScanScope::Installed`](crate::ScanScope::Installed).
 ///
 /// # Errors
 ///
@@ -534,9 +492,12 @@ mod tests {
     /// What a scan without a path says it covered (design report, section
     /// 4.8, as amended in the README): both installed-app folders, and that
     /// Apple's apps were left out with the way to scan them. The text is
-    /// fixed, so it cannot hold the home folder of whoever runs the scan.
+    /// fixed, so it cannot hold the home folder of whoever runs the scan,
+    /// and the folders it names are the ones that are searched.
     #[test]
     fn the_scope_of_a_scan_of_the_installed_apps_names_what_was_left_out() {
+        let installed = ScanScope::Installed.to_string();
+        assert!(installed.contains(&format!("in {SHARED_APPS} and ~/{USER_APPS};")), "{installed}");
         assert_eq!(
             ScanScope::Installed.to_string(),
             "the apps installed in /Applications and ~/Applications; /System/Applications \

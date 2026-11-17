@@ -619,16 +619,15 @@ fn coverage(page: &mut Markup, view: &View<'_>, meta: &ReportMeta) {
 
 /// Where the scan looked for apps, and where it deliberately did not.
 ///
-/// The scan states this when it runs. It is not evidence about any app, so
-/// the saved evidence does not hold it, and a page rendered from saved
-/// evidence says so.
+/// The scan states this when it runs and the JSON report carries it. A
+/// report saved before it did has no scope, and its page says so.
 fn scope(page: &mut Markup, meta: &ReportMeta) {
     page.raw("<h3>Where the scan looked</h3>\n");
     page.open_class("p", "scope");
     match &meta.scope {
         Some(scope) => {
             page.raw("This scan covered ");
-            page.text(scope);
+            page.text(&scope.to_string());
             page.raw(".");
         }
         None => page.raw(

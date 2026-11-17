@@ -39,7 +39,7 @@ use serde::Serialize;
 use xs_model::canon::{self, CanonError};
 use xs_model::pack::PackRef;
 use xs_model::record::{Record, RecordId};
-use xs_model::report::{ReportSchema, Scanner};
+use xs_model::report::{ReportSchema, ScanScope, Scanner};
 use xs_model::{Claim, EvidenceSet, Headline};
 
 pub use crate::html::{CONTENT_SECURITY_POLICY, html};
@@ -51,14 +51,13 @@ pub struct ReportMeta {
     pub scanner: Scanner,
     /// The rule-pack layers the claims were derived with.
     pub packs: Vec<PackRef>,
-    /// Where the scan looked for apps and where it deliberately did not, in
-    /// the scanner's own fixed words, which name no path the user gave.
+    /// Where the scan looked for apps and where it deliberately did not.
     ///
-    /// It is known when the scan itself renders the report. The JSON
-    /// document does not carry it, so a report rendered again from saved
-    /// evidence has `None`, and the HTML report then says that the scope
-    /// is not on record instead of leaving it out.
-    pub scope: Option<String>,
+    /// The JSON document carries it, so a report rendered again from a
+    /// saved one states the same scope as the scan did. A report saved
+    /// before the document had the field has `None`, and the HTML report
+    /// then says that the scope is not on record instead of leaving it out.
+    pub scope: Option<ScanScope>,
 }
 
 /// Why a report was refused.
@@ -194,6 +193,8 @@ struct ReportRef<'a> {
     schema: ReportSchema,
     scanner: &'a Scanner,
     packs: &'a [PackRef],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<ScanScope>,
     headline: Headline,
     claims: &'a [Claim],
     evidence: &'a EvidenceSet,
@@ -218,6 +219,7 @@ pub fn json(
         schema: ReportSchema,
         scanner: &meta.scanner,
         packs: &meta.packs,
+        scope: meta.scope,
         headline: Headline::of(claims),
         claims,
         evidence,
@@ -353,6 +355,28 @@ mod tests {
         assert_eq!(report.evidence, evidence);
         assert_eq!(report.scanner, meta().scanner);
         assert_eq!(report.packs, meta().packs);
+        assert_eq!(report.scope, None);
+    }
+
+    /// The document carries where the scan looked, so a later render can
+    /// state it. A report without a scope has no such field at all, which
+    /// is the document as it was before the field existed.
+    #[test]
+    fn the_report_carries_the_scope_of_the_scan() {
+        let (claims, evidence, _, _) = fixture();
+        for (scope, stored) in [(ScanScope::Installed, "installed"), (ScanScope::Given, "given")] {
+            let meta = ReportMeta { scope: Some(scope), ..meta() };
+            let text = json(&claims, &evidence, &meta).unwrap();
+            let tree: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(tree["scope"], stored);
+            let report: Report = serde_json::from_str(&text).unwrap();
+            assert_eq!(report.scope, Some(scope));
+            // The scope is beside the evidence, not in it.
+            assert_eq!(report.evidence, evidence);
+        }
+        let text = json(&claims, &evidence, &meta()).unwrap();
+        let tree: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(tree.get("scope").is_none(), "{text}");
     }
 
     #[test]

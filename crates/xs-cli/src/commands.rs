@@ -4,10 +4,9 @@ use std::fs;
 use std::io::Write as _;
 use std::path::Path;
 
-use xs_collect::ScanScope;
 use xs_match::Matchers;
 use xs_model::record::Record;
-use xs_model::report::Scanner;
+use xs_model::report::{ScanScope, Scanner};
 use xs_model::{EvidenceSet, Headline, Pack, Report};
 use xs_render::ReportMeta;
 use xs_rules::{SignedLayer, TRUSTED_KEYS};
@@ -95,8 +94,8 @@ struct Rendered {
 /// Derives claims from `evidence` and renders the reports `outputs` asks
 /// for. Both documents are rendered from the same claims.
 ///
-/// `scope` is where the scan looked, when the scan itself is rendering. The
-/// page states it; the JSON document does not carry it.
+/// `scope` is where the scan looked. Both documents carry it, so the page
+/// rendered from a saved JSON report is the page of the scan.
 fn render(
     evidence: &EvidenceSet,
     pack: &Pack,
@@ -105,7 +104,6 @@ fn render(
     outputs: Outputs<'_>,
 ) -> Result<Rendered> {
     let claims = xs_derive::derive(evidence, pack).map_err(|error| error.to_string())?;
-    let scope = scope.map(|scope| scope.to_string());
     let meta = ReportMeta { scanner, packs: pack.refs(), scope };
     let json = xs_render::json(&claims, evidence, &meta).map_err(|error| error.to_string())?;
     let html = match outputs.html {
@@ -216,8 +214,7 @@ pub(crate) fn report(args: &args::Report) -> Result<()> {
     let pack = built_in_pack()?;
     // The evidence was gathered by the scanner the file names; keep that.
     let outputs = Outputs { html: args.html.as_deref(), json: args.json.as_deref() };
-    // A saved report does not say where its scan looked.
-    let report = render(&saved.evidence, &pack, saved.scanner, None, outputs)?;
+    let report = render(&saved.evidence, &pack, saved.scanner, saved.scope, outputs)?;
     deliver_all(&report, outputs)
 }
 

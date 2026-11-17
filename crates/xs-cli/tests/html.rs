@@ -180,16 +180,14 @@ fn one_page_whatever_the_input_order_the_thread_count_and_the_way_it_was_made() 
     assert!(output.stdout.is_empty(), "the page was asked for, so the JSON report is not printed");
     let rendered_again = fs::read_to_string(&again).unwrap();
 
-    // The one thing a scan knows that its saved evidence does not is where
-    // it looked. The page of the scan states it; the page rendered again
-    // says it is not on record. Nothing else differs, to the byte.
-    let (scanned, saved_scope) = (scope(&reference.html), scope(&rendered_again));
-    assert_eq!(scanned.1, format!("This scan covered {}.", xs_collect::ScanScope::Given));
-    assert!(
-        saved_scope.1.starts_with("This page was rendered from saved evidence"),
-        "{saved_scope:?}"
+    // The saved report holds where the scan looked, so the page rendered
+    // again is the page of the scan, to the byte, with that statement.
+    assert!(rendered_again == reference.html, "the page rendered again differs from the scan's");
+    assert_eq!(
+        scope(&rendered_again),
+        "This scan covered the paths given and nothing else; the installed-app folders were \
+         not searched."
     );
-    assert!(scanned.0 == saved_scope.0, "the pages differ outside the scope");
 
     // And both at once, the JSON report unchanged, the page the same as
     // any other rendered from that evidence.
@@ -205,21 +203,54 @@ fn one_page_whatever_the_input_order_the_thread_count_and_the_way_it_was_made() 
     assert!(fs::read_to_string(&second).unwrap() == rendered_again);
 }
 
-/// Splits a page into everything but its scope statement, and the
-/// statement: the text of the one paragraph that says where the scan looked.
-fn scope(page: &str) -> (String, String) {
-    const OPEN: &str = "<p class=\"scope\">";
-    assert_eq!(page.matches(OPEN).count(), 1, "one scope statement");
-    let (before, rest) = page.split_once(OPEN).unwrap();
-    let (statement, after) = rest.split_once("</p>").unwrap();
-    let stated = read(page)
+/// The text of the one paragraph of a page that says where the scan looked.
+fn scope(page: &str) -> String {
+    let stated: Vec<String> = read(page)
         .descendants()
         .into_iter()
-        .find(|element| element.has_class("scope"))
-        .unwrap()
-        .text();
-    assert!(!statement.contains('<'), "the statement is text: {statement}");
-    (format!("{before}{OPEN}</p>{after}"), stated)
+        .filter(|element| element.has_class("scope"))
+        .map(Element::text)
+        .collect();
+    assert_eq!(stated.len(), 1, "one scope statement");
+    stated.into_iter().next().unwrap()
+}
+
+/// A JSON report written before the report held the scope of its scan is
+/// still read. Its page is the page of the scan except for the statement of
+/// where the scan looked, which says that it is not on record, and no scope
+/// is made up for the JSON report written from it.
+#[test]
+fn a_report_saved_without_its_scope_is_still_rendered_and_says_so() {
+    let reference = scan_fixtures(2);
+    let mut tree: serde_json::Value = serde_json::from_str(&reference.json).unwrap();
+    assert_eq!(tree.as_object_mut().unwrap().remove("scope"), Some("given".into()));
+    let older = canon::to_string(&tree).unwrap() + "\n";
+
+    let dir = tempfile::tempdir().unwrap();
+    let (saved, html, json) =
+        (dir.path().join("older.json"), dir.path().join("older.html"), dir.path().join("out.json"));
+    fs::write(&saved, &older).unwrap();
+    let output = exposure(&["report", text(&saved), "--html", text(&html), "--json", text(&json)]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(fs::read_to_string(&json).unwrap() == older);
+
+    let page = fs::read_to_string(&html).unwrap();
+    let stated = scope(&page);
+    assert_eq!(
+        stated,
+        "This page was rendered from saved evidence, which does not record where the scan \
+         looked. The scan stated it in the summary it printed when it ran."
+    );
+    let scanned = scope(&reference.html);
+    assert_eq!(page.matches(&stated).count(), 1);
+    assert!(page.replacen(&stated, &scanned, 1) == reference.html);
+
+    // The scope is one of the scanner's two, never words from the file.
+    tree["scope"] = "/Users/someone/Apps".into();
+    fs::write(&saved, canon::to_string(&tree).unwrap()).unwrap();
+    let output = exposure(&["report", text(&saved), "--html", text(&html)]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cannot read"), "{}", stderr(&output));
 }
 
 #[test]

@@ -13,7 +13,7 @@ use xs_model::record::{
     ArtifactRecord, Collector, CoverageReason, CoverageRecord, CoverageStatus, Facts, ObjectRef,
     Platform, Proof, Region, Scope, SubjectKind, V1, declared,
 };
-use xs_model::report::Scanner;
+use xs_model::report::{ScanScope, Scanner};
 use xs_model::{RelPath, Sha256Digest, SubjectDigest};
 
 use super::*;
@@ -86,14 +86,11 @@ fn pack() -> Pack {
     Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap()
 }
 
-/// What the scanner says of a scan of given paths.
-const SCOPE: &str = "the paths given and nothing else; the installed-app folders were not searched";
-
 fn meta(pack: &Pack) -> ReportMeta {
     ReportMeta {
         scanner: Scanner { name: "exposure".into(), version: "0.1.0".into() },
         packs: pack.refs(),
-        scope: Some(SCOPE.into()),
+        scope: Some(ScanScope::Given),
     }
 }
 
@@ -358,7 +355,7 @@ fn a_publisher_known_by_its_signature_links_to_the_record_that_names_it() {
     assert!(root.by_id(&link[1..]).unwrap().text().contains(GOOGLE_TEAM));
 }
 
-/// The strings a hostile app controls, and two the report file controls.
+/// The strings a hostile app controls, and those the report file controls.
 struct Strings {
     name: &'static str,
     app_id: &'static str,
@@ -370,7 +367,6 @@ struct Strings {
     scanner_version: &'static str,
     sdk_name: &'static str,
     note: &'static str,
-    scope: &'static str,
 }
 
 const BENIGN: Strings = Strings {
@@ -385,7 +381,6 @@ const BENIGN: Strings = Strings {
     scanner_version: "0.1.0",
     sdk_name: "AcmeAnalytics",
     note: "a remark",
-    scope: SCOPE,
 };
 
 /// Markup in every place a value is shown: element and attribute breakouts,
@@ -402,9 +397,6 @@ const HOSTILE: Strings = Strings {
     scanner_version: "' onmouseover='alert(5)' x=\"",
     sdk_name: "</h5><form action=https://evil.example><input name=q>",
     note: "<link rel=stylesheet href=https://evil.example/x.css><!-- --> &#60;script&#62;",
-    // The scanner's words are fixed text. The renderer is handed a string,
-    // and treats it as any other.
-    scope: "</p><script>alert('scope')</script>",
 };
 
 /// One app that ships Acme's SDK, with `strings` wherever a value can go.
@@ -431,7 +423,7 @@ fn render_with(strings: &Strings) -> (Element, String) {
     let meta = ReportMeta {
         scanner: Scanner { name: strings.scanner.into(), version: strings.scanner_version.into() },
         packs: pack.refs(),
-        scope: Some(strings.scope.into()),
+        scope: Some(ScanScope::Given),
     };
     let document = html(&claims, &evidence, &meta, &pack).unwrap();
     (render(&claims, &evidence, &meta, &pack), document)
@@ -456,7 +448,6 @@ fn hostile_names_render_as_text_and_add_nothing_to_the_document() {
         HOSTILE.scanner_version,
         HOSTILE.sdk_name,
         HOSTILE.note,
-        HOSTILE.scope,
     ] {
         assert!(text.contains(value), "not shown as text: {value}");
     }
@@ -863,15 +854,16 @@ fn a_package_that_could_not_be_read_is_set_aside_and_not_counted_as_scanned() {
 }
 
 /// The coverage section starts with where the scan looked, and where it
-/// deliberately did not. A page rendered from saved evidence has no scope
-/// to state, and says so instead of saying nothing.
+/// deliberately did not, in the words the README gives for each kind of
+/// scan. A page rendered from a report saved without a scope has none to
+/// state, and says so instead of saying nothing.
 #[test]
 fn coverage_says_where_the_scan_looked_or_that_it_is_not_on_record() {
     let (pack, evidence) = (pack(), evidence());
     let claims = claims(&evidence, &pack);
-    let stated = |scope: Option<&str>| {
+    let stated = |scope: Option<ScanScope>| {
         let mut meta = meta(&pack);
-        meta.scope = scope.map(Into::into);
+        meta.scope = scope;
         let root = render(&claims, &evidence, &meta, &pack);
         let coverage = section(&root, "coverage");
         let parts: Vec<String> = coverage.named("h3").into_iter().map(Element::text).collect();
@@ -879,12 +871,18 @@ fn coverage_says_where_the_scan_looked_or_that_it_is_not_on_record() {
         coverage.descendants().into_iter().find(|e| e.has_class("scope")).unwrap().text()
     };
 
-    assert_eq!(stated(Some(SCOPE)), format!("This scan covered {SCOPE}."));
+    assert_eq!(
+        stated(Some(ScanScope::Given)),
+        "This scan covered the paths given and nothing else; the installed-app folders were \
+         not searched."
+    );
     // What was left out on purpose is part of the statement.
-    let installed = "the apps installed in /Applications and ~/Applications; \
-                     /System/Applications (Apple's own apps on the sealed system volume) was \
-                     not searched: name the folder to scan it";
-    assert_eq!(stated(Some(installed)), format!("This scan covered {installed}."));
+    assert_eq!(
+        stated(Some(ScanScope::Installed)),
+        "This scan covered the apps installed in /Applications and ~/Applications; \
+         /System/Applications (Apple's own apps on the sealed system volume) was not searched: \
+         name the folder to scan it."
+    );
     assert_eq!(
         stated(None),
         "This page was rendered from saved evidence, which does not record where the scan \
