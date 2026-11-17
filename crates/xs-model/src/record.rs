@@ -243,9 +243,16 @@ impl Platform {
 /// The collector that produced a record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Collector {
+    /// An Android package as a whole: its identity, the names of its
+    /// entries, and what could not be read of it.
+    #[serde(rename = "android.apk")]
+    AndroidApk,
     /// Class and string tables of an Android DEX file.
     #[serde(rename = "android.dex")]
     AndroidDex,
+    /// The compiled manifest of an Android package.
+    #[serde(rename = "android.manifest")]
+    AndroidManifest,
     /// A macOS application bundle.
     #[serde(rename = "macos.bundle")]
     MacosBundle,
@@ -470,6 +477,12 @@ pub enum Region {
     EmbeddedScript,
     /// The values a property list holds under one key.
     PropertyList,
+    /// The components and `meta-data` entries an Android manifest declares.
+    Components,
+    /// The `string_ids` table of a DEX file: its string constants.
+    StringIds,
+    /// The names of the entries of a zip archive.
+    ZipEntries,
 }
 
 /// What kind of code a file holds (design report, section 5.2 control 1).

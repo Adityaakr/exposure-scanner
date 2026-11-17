@@ -23,6 +23,7 @@ serde_json.workspace = true
 lexopt.workspace = true
 
 [dev-dependencies]
+xs-formats = { workspace = true, features = ["testkit"] }
 tempfile.workspace = true
 
 [lints]

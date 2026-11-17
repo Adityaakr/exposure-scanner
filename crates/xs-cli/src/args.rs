@@ -15,9 +15,9 @@ usage:
   exposure --help | --version
 
 commands:
-  scan     Read the app bundles at each PATH (a macOS .app, or a folder of
-           them) and report which SDKs they ship. Nothing is changed,
-           executed or sent anywhere.
+  scan     Read the apps at each PATH (a macOS .app bundle, a folder of
+           bundles, or an Android .apk file) and report which SDKs they ship.
+           Nothing is changed, executed or sent anywhere.
   report   Derive the report again from the evidence saved in FILE.
   rules    Show the built-in rule pack, or verify a signed pack file.
 

@@ -5,6 +5,7 @@
 //! build the rule pack and to prove the scanner's guarantees from outside.
 #![allow(clippy::print_stdout, clippy::print_stderr, reason = "a command-line tool for developers")]
 
+mod fixtures;
 mod guard;
 mod key;
 mod net;
@@ -26,6 +27,9 @@ rule pack
   pack check              verify the committed pack is fresh, reproducible and signed
   key generate --dir DIR  create a rule-pack signing key outside the repository
 
+fixtures
+  fixtures fetch --dir DIR  download the real apps pinned in tests/fixtures/real-apps.txt
+
 guarantees
   guardrails              prove the guardrails bite: banned crates and APIs are refused
   no-network [--strict]   prove a scan opens no socket (--strict: no check may be skipped)
@@ -41,6 +45,7 @@ fn main() -> ExitCode {
         ["pack", "sign", "--key", key] => pack::sign(Path::new(key)),
         ["pack", "check"] => pack::check(),
         ["key", "generate", "--dir", dir] => key::generate(Path::new(dir)),
+        ["fixtures", "fetch", "--dir", dir] => fixtures::fetch(Path::new(dir)),
         ["guardrails"] => guard::run(),
         ["no-network"] => net::run(false),
         ["no-network", "--strict"] => net::run(true),

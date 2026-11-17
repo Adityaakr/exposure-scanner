@@ -1,0 +1,7 @@
+# The fuzz targets need a nightly compiler for the sanitizer and coverage
+# instrumentation. It is pinned here, in the one folder that uses it; the
+# scanner itself builds with the stable toolchain pinned at the repository
+# root.
+[toolchain]
+channel = "nightly-2026-11-10"
+profile = "minimal"

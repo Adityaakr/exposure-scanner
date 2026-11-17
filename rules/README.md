@@ -85,6 +85,18 @@ two categories are for declared hosts; a rule does not use them. The update
 feed is reported only that way: `update_feed` is the kind of that proof, not a
 matcher a rule may list, and the compiler refuses a rule that does.
 
+## What the Android matchers look at
+
+Each matcher is given the values of one table of an `.apk` file, and a
+token is compared with one value at a time.
+
+| Matcher | A value is | Write a token as |
+|---|---|---|
+| `manifest_component` | The `android:name` of an `activity`, `activity-alias`, `service`, `receiver` or `provider` directly inside `<application>`, as a fully qualified class name; or the `android:name` of a `meta-data` entry, as written | `io.sentry.android.core.SentryInitProvider`, or the `meta-data` key `com.google.firebase.components:<Registrar class>` |
+| `android_class_prefix` | The name of a class that a `classes*.dex` file defines, with dots: `com.example.Outer$Inner`. A class the app only refers to is not a value | A package with its trailing dot: `io.sentry.` |
+| `dex_string` | One string constant of a `classes*.dex` file | An endpoint host with the `host` boundary |
+| `apk_file` | The full name of one entry of the archive | The whole name, one token for each place it can be: `billing.properties`, `lib/arm64-v8a/libsentry.so` |
+
 ## What the compiler refuses
 
 These lints exist because of failures seen on real apps (design report,

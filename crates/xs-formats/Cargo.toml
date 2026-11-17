@@ -9,13 +9,15 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+miniz_oxide.workspace = true
 plist.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 [features]
-# Test support for other crates' tests: a writer of small Mach-O files. Only
-# dev-dependencies enable it, so it is never part of the shipped scanner.
+# Test support for other crates' tests: writers of small Mach-O files and of
+# synthetic zip, DEX and manifest files. Only dev-dependencies enable it, so
+# it is never part of the shipped scanner.
 testkit = []
 
 [dev-dependencies]

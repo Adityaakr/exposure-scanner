@@ -71,6 +71,51 @@ fn search_folder(folder: &Path, depth: u32, found: &mut BTreeSet<PathBuf>) -> st
     Ok(())
 }
 
+fn is_package_name(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("apk"))
+}
+
+/// The artifacts a list of paths names or contains, by kind.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Artifacts {
+    /// macOS application bundles. See [`bundles`].
+    pub bundles: Vec<PathBuf>,
+    /// Android packages: regular files named `.apk`.
+    pub packages: Vec<PathBuf>,
+}
+
+/// Resolves `paths` to the artifacts they name or contain.
+///
+/// A path to a file named `.apk` yields that package. Every other path is
+/// resolved as [`bundles`] resolves it: a bundle yields itself and any
+/// other folder the bundles inside it. A folder is not searched for
+/// packages. A symbolic link to a package is followed once, and each list
+/// is de-duplicated by canonical path and sorted; the order affects
+/// scheduling only, never output.
+///
+/// # Errors
+///
+/// Fails if a given path does not exist, cannot be read, or is neither an
+/// artifact nor a folder.
+pub fn artifacts(paths: &[PathBuf]) -> Result<Artifacts, ScanError> {
+    let mut packages = BTreeSet::new();
+    let mut rest = Vec::new();
+    for path in paths {
+        let fail = |error| ScanError::Path { path: path.clone(), error };
+        let resolved = fs::canonicalize(path).map_err(fail)?;
+        // As for bundles, the name the user gave decides.
+        if fs::metadata(&resolved).map_err(fail)?.is_file()
+            && (is_package_name(path) || is_package_name(&resolved))
+        {
+            packages.insert(resolved);
+        } else {
+            // Bundles, folders of bundles, and what is neither and is refused.
+            rest.push(path.clone());
+        }
+    }
+    Ok(Artifacts { bundles: bundles(&rest)?, packages: packages.into_iter().collect() })
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::symlink;
@@ -147,6 +192,94 @@ mod tests {
         let forward = [dir.path().join("Apps"), dir.path().join("Elsewhere")];
         let backward = [dir.path().join("Elsewhere"), dir.path().join("Apps")];
         assert_eq!(bundles(&forward).unwrap(), bundles(&backward).unwrap());
+    }
+
+    /// A tree with packages next to bundles.
+    fn package_tree() -> tempfile::TempDir {
+        let dir = tree();
+        for path in [
+            "Apps/one.apk",
+            "Apps/Two.APK",
+            "Apps/Utilities/three.apk",
+            "Apps/Utilities/Deep/four.apk",
+            "Apps/One.app/Contents/inside-a-bundle.apk",
+            "Apps/notes.txt",
+            "Elsewhere/five.apk",
+        ] {
+            fs::write(dir.path().join(path), b"a file").unwrap();
+        }
+        fs::create_dir_all(dir.path().join("Apps/folder.apk")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_folder_yields_its_bundles_and_none_of_the_packages_in_it() {
+        let dir = package_tree();
+        for folder in ["Apps", "Apps/Utilities", "Elsewhere"] {
+            let found = artifacts(&[dir.path().join(folder)]).unwrap();
+            assert!(found.packages.is_empty(), "{folder}");
+            assert_eq!(found.bundles, bundles(&[dir.path().join(folder)]).unwrap(), "{folder}");
+        }
+        assert_eq!(artifacts(&[dir.path().join("Apps")]).unwrap().bundles.len(), 3);
+    }
+
+    #[test]
+    fn a_package_path_yields_that_package_and_a_bundle_path_no_packages() {
+        let dir = package_tree();
+        for package in ["Apps/Utilities/Deep/four.apk", "Apps/Two.APK"] {
+            let found = artifacts(&[dir.path().join(package)]).unwrap();
+            assert_eq!(names(dir.path(), &found.packages), [package]);
+            assert!(found.bundles.is_empty());
+        }
+
+        let found = artifacts(&[dir.path().join("Apps/One.app")]).unwrap();
+        assert!(found.packages.is_empty());
+        assert_eq!(names(dir.path(), &found.bundles), ["Apps/One.app"]);
+    }
+
+    #[test]
+    fn one_package_reached_several_ways_is_one_artifact() {
+        let dir = package_tree();
+        symlink(dir.path().join("Elsewhere/five.apk"), dir.path().join("Apps/link.apk")).unwrap();
+        // A link whose own name says package decides, whatever it points at.
+        symlink(dir.path().join("Apps/notes.txt"), dir.path().join("Apps/renamed.apk")).unwrap();
+        let found = artifacts(&[
+            dir.path().join("Apps/one.apk"),
+            dir.path().join("Apps/./one.apk"),
+            dir.path().join("Apps/link.apk"),
+            dir.path().join("Elsewhere/five.apk"),
+            dir.path().join("Apps/renamed.apk"),
+        ])
+        .unwrap();
+        assert_eq!(
+            names(dir.path(), &found.packages),
+            ["Apps/notes.txt", "Apps/one.apk", "Elsewhere/five.apk"]
+        );
+    }
+
+    #[test]
+    fn the_order_of_the_paths_given_does_not_matter_for_packages_either() {
+        let dir = package_tree();
+        let paths =
+            ["Apps", "Elsewhere/five.apk", "Apps/one.apk"].map(|path| dir.path().join(path));
+        let mut backward = paths.clone();
+        backward.reverse();
+        let found = artifacts(&paths).unwrap();
+        assert_eq!(found, artifacts(&backward).unwrap());
+        assert_eq!(names(dir.path(), &found.packages), ["Apps/one.apk", "Elsewhere/five.apk"]);
+    }
+
+    #[test]
+    fn what_is_neither_an_artifact_nor_a_folder_is_still_an_error() {
+        let dir = package_tree();
+        assert!(matches!(artifacts(&[dir.path().join("nope.apk")]), Err(ScanError::Path { .. })));
+        assert!(matches!(
+            artifacts(&[dir.path().join("Apps/notes.txt")]),
+            Err(ScanError::Unsupported(_))
+        ));
+        // A folder that happens to be named like a package is a folder.
+        let found = artifacts(&[dir.path().join("Apps/folder.apk")]).unwrap();
+        assert_eq!(found, Artifacts::default());
     }
 
     #[test]
