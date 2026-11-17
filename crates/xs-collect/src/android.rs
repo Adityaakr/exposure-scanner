@@ -40,7 +40,8 @@
 //! A package that cannot be opened or read to its end, or that changes while
 //! it is read, has no hash, so nothing can be said about what it holds. It
 //! does not fail the scan, which may cover many other apps: it becomes one
-//! `coverage` record that says the package was skipped and why. With no
+//! `coverage` record that says the package was skipped as `unreadable`,
+//! whichever of the two happened. With no
 //! hash, the subject of that record has the digest `unread` and is told from
 //! other packages by the name of its file, the one thing known about it.
 //!
@@ -343,16 +344,6 @@ enum Unread {
     Changed,
 }
 
-impl Unread {
-    /// What a coverage record says of a package that was not read.
-    const fn reason(&self) -> CoverageReason {
-        match self {
-            Self::Refused(_) => CoverageReason::Unreadable,
-            Self::Changed => CoverageReason::Changed,
-        }
-    }
-}
-
 impl From<io::Error> for Unread {
     fn from(error: io::Error) -> Self {
         Self::Refused(error)
@@ -420,8 +411,8 @@ pub(crate) enum Package {
         /// How many bytes were read and hashed.
         bytes: u64,
     },
-    /// It has no hash, for this reason. See [`unread`].
-    Unread(CoverageReason),
+    /// It could not be read as one file, so it has no hash. See [`unread`].
+    Unread,
 }
 
 thread_local! {
@@ -442,7 +433,7 @@ pub(crate) fn read(path: &Path, matchers: &Matchers<'_>) -> Package {
     });
     match scanned {
         Ok(Scanned { records, bytes }) => Package::Scanned { records, bytes },
-        Err(unread) => Package::Unread(unread.reason()),
+        Err(Unread::Refused(_) | Unread::Changed) => Package::Unread,
     }
 }
 
@@ -456,10 +447,10 @@ pub(crate) fn unread_name(path: &Path) -> String {
 }
 
 /// The record that says `count` packages named `name` were skipped because
-/// of `reason`. Packages that share a name and a reason share the record,
-/// which counts them: a record's id is its content, so two records that say
-/// the same would be one.
-pub(crate) fn unread(name: String, reason: CoverageReason, count: u32) -> Record {
+/// they could not be read as one file. Packages that share a name share the
+/// record, which counts them: a record's id is its content, so two records
+/// that say the same would be one.
+pub(crate) fn unread(name: String, count: u32) -> Record {
     Record::Coverage(CoverageRecord {
         v: V1,
         collector: Collector::AndroidApk,
@@ -471,7 +462,7 @@ pub(crate) fn unread(name: String, reason: CoverageReason, count: u32) -> Record
             digest: SubjectDigest::Unread,
         },
         status: CoverageStatus::Skipped,
-        reason,
+        reason: CoverageReason::Unreadable,
         location: None,
         bytes: None,
         count,
@@ -1686,7 +1677,6 @@ mod tests {
             let mut buffer = vec![0; 64];
             scan_package(&mut reader, before.len() as u64, &mut buffer, &matchers)
                 .map(|scanned| scanned.records)
-                .map_err(|unread| unread.reason())
         };
 
         // Never replaced, and replaced before the first read.
@@ -1698,7 +1688,7 @@ mod tests {
         assert_eq!(artifact(&replaced).subject.digest, digest_after);
 
         // Replaced after any number of reads: the result is one file or the
-        // other, whole, or the package is reported as changed.
+        // other, whole, or the package is not read.
         let mut noticed = 0;
         for reads_left in 1..200 {
             match run(reads_left) {
@@ -1706,9 +1696,9 @@ mod tests {
                     records == stable || records == replaced,
                     "a mix of two files after {reads_left} reads"
                 ),
-                Err(reason) => {
+                Err(unread) => {
                     noticed += 1;
-                    assert_eq!(reason, CoverageReason::Changed);
+                    assert!(matches!(unread, Unread::Changed), "{unread:?}");
                 }
             }
         }
@@ -1746,7 +1736,7 @@ mod tests {
         let matchers = Matchers::build(&pack).unwrap();
         let mut buffer = vec![0; 64];
         let unread = scan_package(&mut Failing, 100, &mut buffer, &matchers).err().unwrap();
-        assert_eq!(unread.reason(), CoverageReason::Unreadable);
+        assert!(matches!(unread, Unread::Refused(_)), "{unread:?}");
         assert_eq!(io::Error::from(unread).kind(), io::ErrorKind::PermissionDenied);
     }
 
@@ -1783,9 +1773,9 @@ mod tests {
         assert_eq!(edges(&records).len(), 4);
 
         let gone = dir.path().join("gone.apk");
-        assert!(matches!(read(&gone, &matchers), Package::Unread(CoverageReason::Unreadable)));
+        assert!(matches!(read(&gone, &matchers), Package::Unread));
         // A folder opens and then refuses to be read.
-        assert!(matches!(read(dir.path(), &matchers), Package::Unread(CoverageReason::Unreadable)));
+        assert!(matches!(read(dir.path(), &matchers), Package::Unread));
     }
 
     /// The one record about a package that was not read: no hash, the name
@@ -1802,7 +1792,7 @@ mod tests {
         let long = format!("/tmp/{}.apk", "n".repeat(300));
         assert!(unread_name(Path::new(&long)).len() <= text::MAX_ID_BYTES);
 
-        let record = unread(String::from("locked.apk"), CoverageReason::Unreadable, 2);
+        let record = unread(String::from("locked.apk"), 2);
         record.validate().unwrap();
         assert_eq!(
             serde_json::to_value(&record).unwrap(),

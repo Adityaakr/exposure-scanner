@@ -273,6 +273,23 @@ fn the_terminal_summary_names_no_app_and_no_path() {
     assert!(!summary.contains(text(dir.path())), "{summary}");
 }
 
+/// A scan says what it covered on a line of its own. Given a path, that is
+/// the path and nothing else: the installed apps were not looked at, and the
+/// summary must not read as if they had been.
+#[test]
+fn a_scan_of_a_given_path_states_its_scope() {
+    let output = exposure(&["scan", FIXTURE, "--json", "/dev/null"]);
+    let summary = stderr(&output);
+    let scope: Vec<&str> =
+        summary.lines().filter_map(|line| line.strip_prefix("exposure: scope: ")).collect();
+    assert_eq!(
+        scope,
+        ["the paths given and nothing else; the installed-app folders were not searched"],
+        "{summary}"
+    );
+    assert!(!summary.contains("/Applications"), "{summary}");
+}
+
 #[test]
 fn problems_with_the_command_line_are_told_apart_from_failed_scans() {
     // Usage errors: exit 2, with the usage text.
@@ -321,7 +338,9 @@ fn an_empty_folder_is_an_empty_report_not_an_error() {
 
 #[test]
 fn help_and_version() {
-    assert!(stdout(&exposure(&["--help"])).contains("exposure scan [PATH...]"));
+    let help = stdout(&exposure(&["--help"]));
+    assert!(help.contains("exposure scan [PATH...]"));
+    assert!(help.contains("only what the PATHs name is scanned"), "{help}");
     assert_eq!(
         stdout(&exposure(&["--version"])),
         concat!("exposure ", env!("CARGO_PKG_VERSION"), "\n")

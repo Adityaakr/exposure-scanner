@@ -111,6 +111,7 @@ $ cargo build --release --package exposure
 $ target/release/exposure scan tests/fixtures/macos/Skeleton.app --json report.json
 exposure: scanned 1 app (3 files, 676 bytes): 1 claim, 0 coverage notes
 exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
+exposure: scope: the paths given and nothing else; the installed-app folders were not searched
 ```
 
 To install the binary instead of running it from the build folder:
@@ -138,15 +139,25 @@ a bundle. An app reached two ways, such as directly and through a symbolic
 link, is scanned once.
 
 Without a `PATH`, on macOS, the installed apps are scanned: those in
-`/Applications` and in your own `~/Applications`. Apple's own apps on the
-sealed system volume, in `/System/Applications`, are not among them; name
-that folder to scan it. On another system there is no folder this build
-knows to look in, and a scan without a `PATH` says so.
+`/Applications` and in your own `~/Applications`. On another system there is
+no folder this build knows to look in, and a scan without a `PATH` says so.
+
+A `PATH` replaces the installed-app folders, it is not added to them: when
+any `PATH` is given, only what the `PATH`s name is scanned.
+
+Apple's own apps on the sealed system volume, in `/System/Applications`, are
+a documented omission: name that folder to scan it. Every scan without a
+`PATH` states the omission in its scope line, the last line of the summary on
+standard error. It is not a coverage record, which differs from the design
+report (section 4.8), which asked for one: a coverage record needs an app as
+its subject, and a folder is not one. The scope line is fixed text. It is
+not part of the JSON report, and it never holds a path you gave.
 
 ```console
 $ target/release/exposure scan --json report.json
 exposure: scanned 16 apps (11658 files, 6813162633 bytes): 19 claims, 2 coverage notes
 exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
+exposure: scope: the apps installed in /Applications and ~/Applications; /System/Applications (Apple's own apps on the sealed system volume) was not searched: name the folder to scan it
 ```
 
 A path that does not exist, or that is not something to scan, is a mistake
@@ -157,8 +168,7 @@ report as a coverage note, never passed off as "nothing found":
 | What cannot be read | What the report says |
 |---|---|
 | A file inside a bundle, or a bundle's folder | `skipped`, `unreadable`, under that bundle, with the place inside it |
-| An `.apk` file: no permission, or a read error | `skipped`, `unreadable`, under the name of the file |
-| An `.apk` file that changes while it is read | `skipped`, `changed`, under the name of the file |
+| An `.apk` file: no permission, a read error, or the file changes while it is read | `skipped`, `unreadable`, under the name of the file |
 
 An `.apk` file is identified by its hash. One that was not read to its end
 as one file has none, so its coverage note carries the digest `unread` and
@@ -194,6 +204,7 @@ all that is known is the domain its app id spells.
 $ target/release/exposure scan tests/fixtures/android/Skeleton.apk --json report.json
 exposure: scanned 1 app (1 file, 1818 bytes): 2 claims, 0 coverage notes
 exposure: headline: 0 companies at contacts or above, 1 company at contains, 1 app with a third-party channel
+exposure: scope: the paths given and nothing else; the installed-app folders were not searched
 ```
 
 An `.apk` file is read once, from start to end, for its SHA-256, which is its

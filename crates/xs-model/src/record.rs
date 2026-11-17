@@ -625,13 +625,12 @@ pub enum CoverageReason {
     UnexpectedCase,
     /// An import format contained a record of an unknown shape.
     UnrecognizedRecord,
-    /// The file system refused the read.
+    /// The input could not be read as one file: the file system refused the
+    /// read, or the file changed while it was being read, so that what was
+    /// read of it belongs to no one version of it.
     Unreadable,
     /// The format is known but this build has no reader for it.
     UnsupportedFormat,
-    /// The input changed while it was being read, so what was read of it
-    /// belongs to no one version of it.
-    Changed,
 }
 
 #[cfg(test)]
@@ -880,11 +879,14 @@ pub(crate) mod tests {
                 "status": "skipped", "reason": reason, "count": count
             })
         };
-        for tree in [skipped("unreadable", 1), skipped("changed", 2)] {
+        for tree in [skipped("unreadable", 1), skipped("unreadable", 2)] {
             let record: Record = serde_json::from_value(tree.clone()).unwrap();
             record.validate().unwrap();
             assert_eq!(serde_json::to_value(&record).unwrap(), tree);
         }
+        // The reasons are a fixed list, and a package that changed while it
+        // was read has no reason of its own in it.
+        assert!(serde_json::from_value::<Record>(skipped("changed", 1)).is_err());
 
         let refused =
             |tree: serde_json::Value| serde_json::from_value::<Record>(tree).unwrap().validate();

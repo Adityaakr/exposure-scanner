@@ -18,9 +18,11 @@ commands:
   scan     Read the apps at each PATH (a macOS .app bundle, an Android .apk
            file, or a folder that holds either) and report which SDKs they
            ship. Without a PATH, on macOS: the apps installed in /Applications
-           and in your own Applications folder. An app that cannot be read is
-           reported as such and does not stop the scan. Nothing is changed,
-           executed or sent anywhere.
+           and in your own Applications folder, but not Apple's own apps in
+           /System/Applications. A PATH replaces those folders: when any
+           PATH is given, only what the PATHs name is scanned. An app that
+           cannot be read is reported as such and does not stop the scan.
+           Nothing is changed, executed or sent anywhere.
   report   Derive the report again from the evidence saved in FILE.
   rules    Show the built-in rule pack, or verify a signed pack file.
 

@@ -49,9 +49,10 @@ use std::path::PathBuf;
 use xs_match::Matchers;
 use xs_model::EvidenceSet;
 use xs_model::evidence::EvidenceError;
-use xs_model::record::{CoverageReason, Record};
+use xs_model::record::Record;
 
 use crate::discover::Artifacts;
+pub use crate::discover::ScanScope;
 use crate::schedule::{Job, Pool};
 
 /// How to run a scan.
@@ -68,6 +69,9 @@ pub struct ScanOutcome {
     pub evidence: EvidenceSet,
     /// Totals for the progress line. Not part of any report.
     pub stats: ScanStats,
+    /// Where apps were looked for, and where they were deliberately not.
+    /// It is not evidence: no record holds it.
+    pub scope: ScanScope,
 }
 
 /// Totals of one scan.
@@ -140,7 +144,9 @@ impl From<EvidenceError> for ScanError {
 /// Each path is a macOS application bundle, an Android package (a file
 /// named `.apk`) or a folder that holds either; see [`discover::artifacts`].
 /// With no path at all, the apps installed on this machine are scanned; see
-/// [`discover::installed`]. Giving the same artifact twice, directly or
+/// [`discover::installed`]. A path replaces those folders: when any is
+/// given, only what the paths name is scanned. Which of the two a scan was
+/// is its [`ScanScope`]. Giving the same artifact twice, directly or
 /// through a symbolic link, scans it once.
 ///
 /// # Errors
@@ -155,7 +161,11 @@ pub fn scan(
     matchers: &Matchers<'_>,
     options: ScanOptions,
 ) -> Result<ScanOutcome, ScanError> {
-    let found = if paths.is_empty() { discover::installed()? } else { discover::artifacts(paths)? };
+    let (scope, found) = if paths.is_empty() {
+        (ScanScope::Installed, discover::installed()?)
+    } else {
+        (ScanScope::Given, discover::artifacts(paths)?)
+    };
     let pool = Pool::new(options.threads).map_err(ScanError::Threads)?;
     let (records, stats) = collect(&found, matchers, &pool);
 
@@ -163,7 +173,7 @@ pub fn scan(
     for record in records {
         evidence.insert(record)?;
     }
-    Ok(ScanOutcome { evidence, stats })
+    Ok(ScanOutcome { evidence, stats, scope })
 }
 
 /// One read of the scan: a file of a bundle, or a package.
@@ -215,9 +225,9 @@ fn collect(found: &Artifacts, matchers: &Matchers<'_>, pool: &Pool) -> (Vec<Reco
     let mut records = Vec::new();
     let mut per_bundle: Vec<Vec<(usize, macos::FileRead)>> =
         plans.iter().map(|_| Vec::new()).collect();
-    // Packages that were not read are told apart by name and reason alone,
-    // so those that share both are counted in one record.
-    let mut unread: BTreeMap<(String, CoverageReason), u32> = BTreeMap::new();
+    // Packages that were not read are told apart by name alone, so those
+    // that share one are counted in one record.
+    let mut unread: BTreeMap<String, u32> = BTreeMap::new();
     for (job, done) in jobs.iter().zip(done) {
         match (job.work, done) {
             (Work::File { bundle, file }, Some(Done::File(result))) => {
@@ -234,9 +244,9 @@ fn collect(found: &Artifacts, matchers: &Matchers<'_>, pool: &Pool) -> (Vec<Reco
                 stats.bytes += bytes;
                 records.extend(scanned);
             }
-            (Work::Package(index), Some(Done::Package(android::Package::Unread(reason)))) => {
+            (Work::Package(index), Some(Done::Package(android::Package::Unread))) => {
                 if let Some(path) = found.packages.get(index) {
-                    let count = unread.entry((android::unread_name(path), reason)).or_insert(0);
+                    let count = unread.entry(android::unread_name(path)).or_insert(0);
                     *count = count.saturating_add(1);
                 }
             }
@@ -252,8 +262,8 @@ fn collect(found: &Artifacts, matchers: &Matchers<'_>, pool: &Pool) -> (Vec<Reco
         stats.bytes += bytes;
         records.extend(finished);
     }
-    for ((name, reason), count) in unread {
-        records.push(android::unread(name, reason, count));
+    for (name, count) in unread {
+        records.push(android::unread(name, count));
     }
     (records, stats)
 }

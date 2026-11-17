@@ -109,12 +109,14 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
     let gaps =
         outcome.evidence.iter().filter(|(_, record)| matches!(record, Record::Coverage(_))).count();
     let stats = outcome.stats;
-    // A summary for the terminal. It names no app, no company and no path.
+    // A summary for the terminal. It names no app, no company and no path
+    // the user gave.
     let headline = report.headline;
     let _ = writeln!(
         std::io::stderr(),
         "exposure: scanned {} ({}, {}): {}, {}\n\
-         exposure: headline: {} at contacts or above, {} at contains, {} with a third-party channel",
+         exposure: headline: {} at contacts or above, {} at contains, {} with a third-party channel\n\
+         exposure: scope: {}",
         plural(stats.artifacts, "app"),
         plural(stats.files, "file"),
         plural(stats.bytes, "byte"),
@@ -123,6 +125,7 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
         plural(headline.companies_contacts.into(), "company"),
         plural(headline.companies_contains.into(), "company"),
         plural(headline.apps_third_party.into(), "app"),
+        outcome.scope,
     );
     Ok(())
 }

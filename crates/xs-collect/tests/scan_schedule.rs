@@ -7,7 +7,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
-use xs_collect::{ScanOptions, ScanOutcome, scan};
+use xs_collect::{ScanOptions, ScanOutcome, ScanScope, scan};
 use xs_formats::testkit::{self, DexBuilder, ZipBuilder};
 use xs_match::Matchers;
 use xs_model::matcher::Boundary;
@@ -145,6 +145,12 @@ fn a_folder_is_scanned_for_bundles_and_packages_alike() {
     assert_eq!(edges(&outcome.evidence), ALL_EDGES);
     assert!(coverage(&outcome.evidence).is_empty());
     assert_eq!(outcome.stats.artifacts, 6);
+    // A scan of given paths says that it covered those and nothing else,
+    // and names none of them.
+    assert_eq!(outcome.scope, ScanScope::Given);
+    let scope = outcome.scope.to_string();
+    assert!(scope.contains("the paths given and nothing else"), "{scope}");
+    assert!(!scope.contains(dir.path().to_str().unwrap()) && !scope.contains("Apps"), "{scope}");
     // Three files per bundle and one per package.
     assert_eq!(outcome.stats.files, 3 * 3 + 3);
 }
