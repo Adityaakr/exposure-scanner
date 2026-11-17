@@ -532,14 +532,14 @@ fn plan<'a>(
             continue;
         }
         // A proof points at an entry by its name, so a name a record cannot
-        // hold (not UTF-8, absolute, with `..` or a control character) is
-        // only counted.
+        // hold (not UTF-8, absolute, with `..`, `//` or a control character)
+        // is only counted, as a name that was read and not understood.
         let name = std::str::from_utf8(entry.name).ok().and_then(|name| {
             let path = RelPath::new(name).ok()?;
             Some((name, path))
         });
         let Some((name, path)) = name else {
-            gaps.count(CoverageStatus::Skipped, CoverageReason::Unreadable);
+            gaps.count(CoverageStatus::Unrecognized, CoverageReason::ParseError);
             continue;
         };
         matchers.match_value(MatcherKind::ApkFile, SCOPE, entry.name, names);
@@ -1535,7 +1535,7 @@ mod tests {
             .stored("fine/name.txt", b"x")
             .finish();
         let records = scan(&apk, &tracker_pack());
-        assert_eq!(coverage(&records), ["Skipped Unreadable - None 4"]);
+        assert_eq!(coverage(&records), ["Unrecognized ParseError - None 4"]);
     }
 
     #[test]
