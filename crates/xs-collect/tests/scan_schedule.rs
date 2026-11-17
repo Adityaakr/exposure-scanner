@@ -88,7 +88,7 @@ fn pack() -> Pack {
 
 fn scan_with(paths: &[PathBuf], threads: usize) -> ScanOutcome {
     let pack = pack();
-    scan(paths, &Matchers::build(&pack).unwrap(), ScanOptions { threads }).unwrap()
+    scan(paths, &Matchers::build(&pack).unwrap(), ScanOptions { threads, cache: None }).unwrap()
 }
 
 fn coverage(evidence: &EvidenceSet) -> Vec<&CoverageRecord> {

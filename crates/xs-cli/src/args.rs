@@ -9,6 +9,7 @@ use lexopt::prelude::*;
 pub(crate) const USAGE: &str = "\
 usage:
   exposure scan [PATH...] [--json FILE] [--threads N]
+                [--no-cache | --cache-dir DIR]
   exposure report FILE [--json FILE]
   exposure rules show
   exposure rules verify PACK --sig SIGNATURE
@@ -22,7 +23,13 @@ commands:
            /System/Applications. A PATH replaces those folders: when any
            PATH is given, only what the PATHs name is scanned. An app that
            cannot be read is reported as such and does not stop the scan.
-           Nothing is changed, executed or sent anywhere.
+           No app is changed, nothing is executed and nothing is sent
+           anywhere.
+           An app that has not changed since an earlier scan is not read
+           again: what was found in it is kept in a private cache, in
+           ~/Library/Caches/exposure on macOS and in ~/.cache/exposure (or
+           under XDG_CACHE_HOME) elsewhere. The report is the same with the
+           cache and without it, and the folder can be deleted at any time.
   report   Derive the report again from the evidence saved in FILE.
   rules    Show the built-in rule pack, or verify a signed pack file.
 
@@ -31,6 +38,10 @@ options:
                 of standard output.
   --threads N   Worker threads for scan. Default: one per core. The report
                 does not depend on it.
+  --no-cache    Read every app again, and neither use nor keep the cache.
+  --cache-dir DIR
+                Keep the cache in DIR, which is created if it is not there,
+                instead of the folder named above.
 ";
 
 /// What the user asked for.
@@ -50,6 +61,19 @@ pub(crate) struct Scan {
     pub(crate) paths: Vec<PathBuf>,
     pub(crate) json: Option<PathBuf>,
     pub(crate) threads: usize,
+    pub(crate) cache: Cache,
+}
+
+/// Where a scan keeps the results it can use again.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) enum Cache {
+    /// In the user's cache folder.
+    #[default]
+    Default,
+    /// In this folder (`--cache-dir`).
+    Dir(PathBuf),
+    /// Nowhere (`--no-cache`): every app is read and nothing is kept.
+    Off,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -70,6 +94,8 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
     let mut json: Option<PathBuf> = None;
     let mut threads: Option<usize> = None;
     let mut signature: Option<PathBuf> = None;
+    let mut no_cache = false;
+    let mut cache_dir: Option<PathBuf> = None;
 
     while let Some(arg) = parser.next().map_err(|error| error.to_string())? {
         match arg {
@@ -77,6 +103,8 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
             Short('V') | Long("version") => return Ok(Command::Version),
             Long("json") => json = Some(value(&mut parser, "--json")?.into()),
             Long("sig") => signature = Some(value(&mut parser, "--sig")?.into()),
+            Long("no-cache") => no_cache = true,
+            Long("cache-dir") => cache_dir = Some(value(&mut parser, "--cache-dir")?.into()),
             Long("threads") => {
                 let text = value(&mut parser, "--threads")?;
                 let count = text.to_str().and_then(|text| text.parse::<usize>().ok());
@@ -100,11 +128,21 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
     match command.to_str() {
         Some("scan") => {
             reject("--sig", signature.is_some(), "scan")?;
-            Ok(Command::Scan(Scan { paths: rest, json, threads: threads.unwrap_or(0) }))
+            let cache = match (no_cache, cache_dir) {
+                (true, Some(_)) => {
+                    return Err(String::from("--no-cache and --cache-dir do not go together"));
+                }
+                (true, None) => Cache::Off,
+                (false, Some(dir)) => Cache::Dir(dir),
+                (false, None) => Cache::Default,
+            };
+            Ok(Command::Scan(Scan { paths: rest, json, threads: threads.unwrap_or(0), cache }))
         }
         Some("report") => {
             reject("--sig", signature.is_some(), "report")?;
             reject("--threads", threads.is_some(), "report")?;
+            reject("--no-cache", no_cache, "report")?;
+            reject("--cache-dir", cache_dir.is_some(), "report")?;
             match <[PathBuf; 1]>::try_from(rest) {
                 Ok([file]) => Ok(Command::Report(Report { file, json })),
                 Err(_) => Err(String::from("report takes exactly one FILE")),
@@ -113,6 +151,8 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
         Some("rules") => {
             reject("--json", json.is_some(), "rules")?;
             reject("--threads", threads.is_some(), "rules")?;
+            reject("--no-cache", no_cache, "rules")?;
+            reject("--cache-dir", cache_dir.is_some(), "rules")?;
             let mut rest = rest.into_iter();
             let action = rest.next();
             let pack = rest.next();
@@ -152,6 +192,7 @@ mod tests {
             paths: vec!["/Applications".into(), "My App.app".into()],
             json: Some("out.json".into()),
             threads: 4,
+            cache: Cache::Default,
         });
         assert_eq!(
             parse_words(&[
@@ -179,19 +220,48 @@ mod tests {
         );
         assert_eq!(
             parse_words(&["scan", "x.app"]),
-            Ok(Command::Scan(Scan { paths: vec!["x.app".into()], json: None, threads: 0 }))
+            Ok(Command::Scan(Scan {
+                paths: vec!["x.app".into()],
+                json: None,
+                threads: 0,
+                cache: Cache::Default
+            }))
         );
+    }
+
+    /// The cache is on unless it is turned off, and sits in the user's
+    /// cache folder unless another is named.
+    #[test]
+    fn scan_takes_the_cache_options() {
+        let cache = |words: &[&str]| match parse_words(words) {
+            Ok(Command::Scan(scan)) => scan.cache,
+            other => panic!("{words:?} gave {other:?}"),
+        };
+        assert_eq!(cache(&["scan", "x.app"]), Cache::Default);
+        assert_eq!(cache(&["scan", "--no-cache", "x.app"]), Cache::Off);
+        assert_eq!(cache(&["scan", "x.app", "--cache-dir", "kept"]), Cache::Dir("kept".into()));
+        assert_eq!(cache(&["--cache-dir=kept", "scan"]), Cache::Dir("kept".into()));
     }
 
     #[test]
     fn scan_without_a_path_is_a_scan_of_the_installed_apps() {
         assert_eq!(
             parse_words(&["scan"]),
-            Ok(Command::Scan(Scan { paths: vec![], json: None, threads: 0 }))
+            Ok(Command::Scan(Scan {
+                paths: vec![],
+                json: None,
+                threads: 0,
+                cache: Cache::Default
+            }))
         );
         assert_eq!(
             parse_words(&["scan", "--threads", "2", "--json", "out.json"]),
-            Ok(Command::Scan(Scan { paths: vec![], json: Some("out.json".into()), threads: 2 }))
+            Ok(Command::Scan(Scan {
+                paths: vec![],
+                json: Some("out.json".into()),
+                threads: 2,
+                cache: Cache::Default
+            }))
         );
     }
 
@@ -199,7 +269,12 @@ mod tests {
     fn a_path_that_looks_like_an_option_can_follow_a_double_dash() {
         assert_eq!(
             parse_words(&["scan", "--", "--odd.app"]),
-            Ok(Command::Scan(Scan { paths: vec!["--odd.app".into()], json: None, threads: 0 }))
+            Ok(Command::Scan(Scan {
+                paths: vec!["--odd.app".into()],
+                json: None,
+                threads: 0,
+                cache: Cache::Default
+            }))
         );
     }
 
@@ -229,7 +304,12 @@ mod tests {
             &["scan", "x.app", "--threads", "0"],
             &["scan", "x.app", "--threads", "many"],
             &["scan", "x.app", "--threads"],
-            &["scan", "x.app", "--no-cache"],
+            &["scan", "x.app", "--no-cache", "--cache-dir", "kept"],
+            &["scan", "x.app", "--cache-dir"],
+            &["scan", "x.app", "--cache"],
+            &["report", "a.json", "--no-cache"],
+            &["report", "a.json", "--cache-dir", "kept"],
+            &["rules", "show", "--no-cache"],
             &["scan", "x.app", "--sig", "s"],
             &["report"],
             &["report", "a.json", "b.json"],

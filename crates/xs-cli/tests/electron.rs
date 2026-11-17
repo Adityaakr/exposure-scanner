@@ -28,8 +28,17 @@ const GOLDEN: &str =
 const SKELETON: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/macos/Skeleton.app");
 
+/// Runs the binary. A scan runs without the results cache, which has tests
+/// of its own: these tests neither go by what an earlier run left in the
+/// cache of whoever runs them, nor leave anything there.
 fn exposure(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_exposure")).args(args).output().unwrap()
+    let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
+    if let Some((&"scan", rest)) = args.split_first() {
+        command.args(["scan", "--no-cache"]).args(rest);
+    } else {
+        command.args(args);
+    }
+    command.output().unwrap()
 }
 
 fn stdout(output: &Output) -> String {

@@ -6,14 +6,15 @@ companies have a channel to your data, through which apps.
 `exposure` reads files that are already on your disk, recognises third-party
 SDKs by literal markers, maps each one to the company behind it, and writes a
 report in which every statement links to a record you can re-check by hand.
-It never observes behaviour, changes nothing, executes nothing and sends
-nothing anywhere.
+It never observes behaviour, changes no app, executes nothing and sends
+nothing anywhere. All it writes is the report, and a private cache of what
+it found, so that the next scan reads only the apps that changed.
 
 ## Status
 
 Milestone 1 ("static truth") is in progress. This repository currently holds
-the foundation, the macOS, Electron and Android collectors, the resolver and
-the scan scheduler:
+the foundation, the macOS, Electron and Android collectors, the resolver, the
+scan scheduler and the results cache:
 
 | Part | State |
 |---|---|
@@ -27,7 +28,8 @@ the scan scheduler:
 | Resolver: the company behind an SDK or a host, the app's vendor by Team ID then app id, first or third party, headline counts | Done (below) |
 | Scan scheduler: finding the installed apps, and bundles and packages in a folder; one queue of files for the whole scan, largest first; an app that cannot be read is reported and does not stop the scan | Done (below) |
 | What each app may access: usage descriptions and entitlements of a macOS bundle, `uses-permission` of an Android manifest, as access claims graded `requested` | Done (below) |
-| HTML report, cache | Not yet (build plan tasks 11 to 14) |
+| Results cache: an app that has not changed since an earlier scan is not read again; private, deletable, off with `--no-cache`; the report is the same with it and without | Done (below) |
+| HTML report | Not yet (build plan tasks 11, 13 and 14) |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
 
@@ -115,6 +117,7 @@ $ target/release/exposure scan tests/fixtures/macos/Skeleton.app --json report.j
 exposure: scanned 1 app (3 files, 676 bytes): 1 claim, 0 coverage notes
 exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
 exposure: scope: the paths given and nothing else; the installed-app folders were not searched
+exposure: cache: 0 apps unchanged since an earlier scan and not read again, 1 app read
 ```
 
 To install the binary instead of running it from the build folder:
@@ -125,6 +128,7 @@ $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exp
 
 ```
 exposure scan [PATH...] [--json FILE] [--threads N]   scan .app bundles, .apk files, or folders of them
+              [--no-cache | --cache-dir DIR]          without the cache, or with it in DIR
 exposure report FILE [--json FILE]                    derive the report again from saved evidence
 exposure rules show                                   list the built-in rule pack
 exposure rules verify PACK --sig SIGNATURE            check a signed pack file offline
@@ -161,6 +165,7 @@ $ target/release/exposure scan --json report.json
 exposure: scanned 16 apps (11658 files, 6813162633 bytes): 121 claims, 3 coverage notes
 exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
 exposure: scope: the apps installed in /Applications and ~/Applications; /System/Applications (Apple's own apps on the sealed system volume) was not searched: name the folder to scan it
+exposure: cache: 16 apps unchanged since an earlier scan and not read again, 0 apps read
 ```
 
 A path that does not exist, or that is not something to scan, is a mistake
@@ -176,6 +181,78 @@ report as a coverage note, never passed off as "nothing found":
 An `.apk` file is identified by its hash. One that was not read to its end
 as one file has none, so its coverage note carries the digest `unread` and
 the file's name, and no other record can be about it.
+
+### The cache
+
+Reading is nearly all of a scan's time, and between two scans nearly no app
+changes. So a scan keeps what it found in each app, and the next scan reads
+only the apps whose files look different. On the laptop measured below, a
+scan of the 16 installed apps takes 1.4 s when it reads them and 0.10 s when
+none has changed.
+
+**The report is the same with the cache and without it, byte for byte.** A
+kept result is used only if all of this still holds:
+
+| What | How it is told |
+|---|---|
+| The app is in the state it was read in | Every folder of a bundle is listed, which reads no content. The names and kinds of all entries must be the same, and for every regular file its size, its modification time, its change time and its inode. An `.apk` file answers for itself the same way. |
+| It is the same app in the same place | An entry is kept under the hash of the app's path. |
+| It is the same program | The SHA-256 of the `exposure` binary itself. A version number is not enough: two builds of one version can read an app differently. |
+| It is the same rules | The hash of every layer of the rule pack. |
+
+Anything else is a miss, and a miss is an ordinary read. The last line of
+the summary says how many apps were read and how many were not.
+
+**What is kept, and where.** One file per app, readable by its owner only,
+in a folder created for its owner only:
+
+| System | Folder |
+|---|---|
+| macOS | `~/Library/Caches/exposure` |
+| elsewhere | `$XDG_CACHE_HOME/exposure`, or `~/.cache/exposure` without that variable |
+
+A file holds the records about one app, the same records the report shows,
+and two hashes: of the four things above, and of the file's own content. It
+holds no path and no list of the app's files. The folder can be deleted at
+any time; the next scan reads everything and fills it again. A scan of the
+installed apps also removes what is kept about any app it no longer finds,
+so the cache does not go on holding an app you removed. A scan of given
+paths adds to the cache and removes nothing.
+
+`--no-cache` reads every app, uses nothing that is kept and keeps nothing.
+`--cache-dir DIR` keeps the cache in `DIR` instead. A cache that cannot be
+used, such as a folder that cannot be written, is said in the summary and
+the scan runs without it.
+
+**What is not kept, and not trusted:**
+
+- A result for an app with a file that was written or changed within a few
+  seconds before the scan. A change made in the same tick of the clock as
+  the listing could leave such a file looking as it was listed, so the app
+  is read again next time. This is the one place the scanner goes by a time:
+  that of the file system the cache is on, compared with the times of the
+  app's files. No report depends on it.
+- A result with a part the file system refused. The refusal may be gone the
+  next time, with no file looking different.
+- A file in the cache that is damaged or was edited: its content hash, the
+  hash of what it is valid for, and every record's own id are checked, and
+  what fails is passed over. The app is read and the file replaced.
+- A file in the cache that belongs to another user, or that another user
+  may write.
+
+The checks are against damage and against other users. They are not against
+you: whoever can write your files can write the cache, as they can write the
+report. And one thing the listing cannot show: if the right to read an app
+is taken away without any of its files changing, a scan with the cache still
+reports what the app held when it was read.
+
+The cache amends the spec's trust rule 5, "store the minimum: by default
+only the report file is kept": the warm-scan target cannot be met without
+kept results (design report, section 10.4). Two things differ from the
+design report's section 4.7. It asked for the list of an app's files to be
+kept, with their sizes, times, inodes and hashes; the cache keeps one hash
+of that list, which is all a comparison needs. And it asked for results to
+be valid for a scanner version; they are valid for one build.
 
 ### What a finding looks like
 
@@ -315,8 +392,8 @@ than left to discipline.
 
 | Property | How it is enforced | Checked by |
 |---|---|---|
-| **Private.** A scan opens no socket. | No crate that can open one is allowed into the dependency graph. The lint lists ban the socket, process, clock and environment APIs. | `cargo deny check`; `cargo xtask no-network`: the binary imports no socket function, and the scan runs in a network namespace with no interfaces, under `strace`, and under a macOS sandbox that denies the network. Each check is paired with a control program that must be caught. |
-| **Deterministic.** Same evidence and rule pack, same bytes. | Derivation and rendering live in `no_std` crates that cannot read a clock, a file or the environment and have no randomly seeded map. Records hold paths inside the artifact only. Evidence is a set keyed by content hash. | One report across input orders, thread counts and install locations; the committed fixture report must be reproduced byte for byte on Linux and macOS. |
+| **Private.** A scan opens no socket. | No crate that can open one is allowed into the dependency graph. The lint lists ban the socket, process, clock and environment APIs. | `cargo deny check`; `cargo xtask no-network`: the binary imports no socket function, and the scan runs in a network namespace with no interfaces, under `strace`, and under a macOS sandbox that denies the network, each time without the cache, with an empty one and with a full one. Each check is paired with a control program that must be caught. |
+| **Deterministic.** Same evidence and rule pack, same bytes. | Derivation and rendering live in `no_std` crates that cannot read a clock, a file or the environment and have no randomly seeded map. Records hold paths inside the artifact only. Evidence is a set keyed by content hash. | One report across input orders, thread counts, install locations and cache states (off, empty, full, damaged); the committed fixture report must be reproduced byte for byte on Linux and macOS. |
 | **Honest.** Every finding shows its grade and the raw record behind it. | The renderer refuses a claim that cites a record the report does not carry. | A test deletes a cited record and expects the render to fail. |
 | **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary or archive that large is reported with its size instead. Of a Mach-O file only the headers and at most 1 MiB of load commands per architecture are held in memory, whatever its size. Symbolic links are never followed. The file table of an asar archive is not trusted: an entry that overlaps another or reaches past the end of the archive is counted as a gap and not read, and a header in a shape no archive writer produces is refused whole. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. The zip, DEX and manifest parsers and the Android collector also run under libFuzzer, 60 s each (`fuzz/run.sh`). |
 | **Rules are data.** A rule pack cannot run code. | A rule is a literal plus one boundary from a fixed list. The scanner only loads a compiled pack whose signature verifies against a key built into the binary; it contains no parser for rule sources. | A tampered pack is refused; the pack compiler's lints are tested. |
@@ -351,7 +428,7 @@ One Cargo workspace. A crate may depend only on crates above it in this list.
 | `xs-rules` | Pack loader and signature check; source compiler behind a tooling-only feature | std without file access |
 | `xs-derive` | Evidence and pack in, claims out: grades, companies, vendors, parties | `no_std` |
 | `xs-render` | Claims and evidence in, report out | `no_std` |
-| `xs-collect` | Discovery and reading. The only crate that opens files | std |
+| `xs-collect` | Discovery, reading and the results cache. The only crate that opens files | std |
 | `exposure` (in `crates/xs-cli`) | The `exposure` binary | std |
 | `xtask` | Developer tooling. Never shipped | anything |
 
@@ -361,7 +438,8 @@ needs a nightly toolchain and the libFuzzer runtime.
 ```
 discover ─▶ collect ─▶ evidence ─▶ derive ─▶ claims ─▶ render ─▶ report
 (stat)     (read, hash,  set       (pure)              (pure)
-            match)
+   ▲        match)
+   └─ cache ─┘   an app that looks as it did when it was read is not read again
 ```
 
 Everything left of the evidence set touches the file system. Everything right
@@ -373,8 +451,9 @@ headers and load commands are picked out of the windows as they go by; the
 file is still read exactly once.
 
 The scan has one queue. Every bundle is listed first, which only looks at
-names and sizes. Then every file to read, of every bundle and every package,
-is one task in one list, largest first. A few files hold most of the bytes
+names, sizes and times. An app that the cache holds in the state listed is
+done with there. Then every file to read, of every other bundle and
+package, is one task in one list, largest first. A few files hold most of the bytes
 (on the laptop below, half of them sit in 12 files), so the order matters:
 they start at once on separate threads, and no thread is left reading a
 large file alone at the end. Which thread reads what, and in which order,
@@ -390,10 +469,15 @@ installed apps, 11,658 files and 6.8 GB read, page cache warm:
 | 4 | 1.37 s | 4.32x | 30 MB |
 | 8 | 0.91 s | 6.48x | 39 MB |
 
-All 13 runs gave the same report, byte for byte. The benchmark fails below
-3x at 8 threads or at 200 MB of memory. With Rayon's default splitting in
-place of one task per file it measures 1.19x and fails. A cold disk was not
-measured.
+Those runs keep no cache. With one, and nothing changed since the scan that
+filled it, the same scan takes 0.10 s at 8 MB: all 16 apps are found
+unchanged and none is read.
+
+All 17 runs gave the same report, byte for byte: 13 without the cache, one
+that fills it and three that find it full. The benchmark fails below 3x at
+8 threads, at 200 MB of memory, or if the scan with nothing changed takes
+5 s. With Rayon's default splitting in place of one task per file it
+measures 1.19x and fails. A cold disk was not measured.
 
 Memory does not grow with the bytes read. It grows with the number of files
 listed: a bundle of 300,000 small files took 84 MB. And it grows with the
@@ -411,7 +495,7 @@ $ cargo deny check                          # needs cargo-deny
 $ cargo xtask pack check                    # rule sources, compiled pack and signature agree
 $ cargo xtask guardrails                    # the guardrails refuse deliberate violations
 $ cargo xtask no-network                    # a scan opens no socket
-$ cargo xtask bench --strict                # scaling and memory gates on the installed apps (macOS)
+$ cargo xtask bench --strict                # scaling, memory and warm-scan gates on the installed apps (macOS)
 $ fuzz/run.sh 60                            # every fuzz target for 60 s; see fuzz/README.md
 ```
 

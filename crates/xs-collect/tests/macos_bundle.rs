@@ -90,7 +90,9 @@ fn pack() -> Pack {
 
 fn evidence_with(paths: &[PathBuf], threads: usize) -> EvidenceSet {
     let pack = pack();
-    scan(paths, &Matchers::build(&pack).unwrap(), ScanOptions { threads }).unwrap().evidence
+    scan(paths, &Matchers::build(&pack).unwrap(), ScanOptions { threads, cache: None })
+        .unwrap()
+        .evidence
 }
 
 fn evidence(path: &Path) -> EvidenceSet {

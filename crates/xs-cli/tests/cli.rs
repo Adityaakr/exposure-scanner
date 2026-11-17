@@ -24,8 +24,17 @@ const PACK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../rules/dist/core.p
 const PACK_SIGNATURE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../rules/dist/core.pack.json.minisig");
 
+/// Runs the binary. A scan runs without the results cache, which has tests
+/// of its own: these tests neither go by what an earlier run left in the
+/// cache of whoever runs them, nor leave anything there.
 fn exposure(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_exposure")).args(args).output().unwrap()
+    let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
+    if let Some((&"scan", rest)) = args.split_first() {
+        command.args(["scan", "--no-cache"]).args(rest);
+    } else {
+        command.args(args);
+    }
+    command.output().unwrap()
 }
 
 fn stdout(output: &Output) -> String {
@@ -293,7 +302,7 @@ fn a_scan_of_a_given_path_states_its_scope() {
 #[test]
 fn problems_with_the_command_line_are_told_apart_from_failed_scans() {
     // Usage errors: exit 2, with the usage text.
-    for args in [&[][..], &["frobnicate"], &["scan", FIXTURE, "--no-cache"]] {
+    for args in [&[][..], &["frobnicate"], &["scan", FIXTURE, "--frobnicate"]] {
         let output = exposure(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert!(stderr(&output).contains("usage:"), "{args:?}");

@@ -417,6 +417,8 @@ name = "xs-collect"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "serde",
+ "serde_json",
  "xs-formats",
  "xs-match",
  "xs-model",

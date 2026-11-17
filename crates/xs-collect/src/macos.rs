@@ -67,6 +67,7 @@ use xs_model::{MatcherKind, RelPath, Sha256Digest, canon, text};
 
 use self::binary::{Binary, BinaryFindings};
 use crate::access::Asked;
+use crate::cache::{Listing, Seen, State};
 use crate::electron;
 use crate::read::{self, OnePass, Sink, WINDOW};
 
@@ -206,6 +207,9 @@ pub(crate) struct Plan {
     frameworks: Vec<String>,
     /// Regular files to consider, with their sizes.
     files: Vec<(RelPath, u64)>,
+    /// Everything the listing saw, for the results cache: what tells this
+    /// state of the bundle from another without reading it.
+    listing: Listing,
     gaps: Gaps,
     files_read: u64,
     bytes_read: u64,
@@ -216,6 +220,15 @@ impl Plan {
     /// place in this list is what `read` and `finish` know it by.
     pub(crate) fn sizes(&self) -> impl Iterator<Item = u64> + '_ {
         self.files.iter().map(|(_, size)| *size)
+    }
+
+    /// The state the bundle was listed in, as far as the file system tells
+    /// it without any file being read: every name and every kind of entry
+    /// the listing saw, and of each regular file what [`Listing::file`]
+    /// adds. Whatever the collector goes by when it lists is in it, so a
+    /// bundle in the same state is read into the same records.
+    pub(crate) fn state(&self) -> State {
+        self.listing.state()
     }
 
     /// Sets aside a file of `bytes` bytes, which is over [`MAX_FILE_BYTES`].
@@ -314,6 +327,7 @@ fn plan_within(root: &Path, max_entries: usize) -> Plan {
         manifest: BundleManifest::new(),
         frameworks: Vec::new(),
         files: Vec::new(),
+        listing: Listing::new(),
         gaps: Gaps::default(),
         files_read: 0,
         bytes_read: 0,
@@ -329,15 +343,21 @@ fn read_info_plist(plan: &mut Plan) {
     let path = plan.root.join(INFO_PLIST);
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return plan.gaps.unrecognized(CoverageReason::ParseError, location);
+        Err(error) => {
+            plan.listing.note(Seen::Refused);
+            return if error.kind() == io::ErrorKind::NotFound {
+                plan.gaps.unrecognized(CoverageReason::ParseError, location)
+            } else {
+                plan.gaps.skipped(CoverageReason::Unreadable, location)
+            };
         }
-        Err(_) => return plan.gaps.skipped(CoverageReason::Unreadable, location),
     };
     if !metadata.is_file() {
         // A link or a folder where the property list belongs.
+        plan.listing.note(Seen::Other);
         return plan.gaps.unrecognized(CoverageReason::ParseError, location);
     }
+    plan.listing.file(&metadata);
     let limit = info_plist::MAX_BYTES as u64;
     if metadata.len() > limit {
         return plan.gaps.skipped(CoverageReason::OverBudget, location);
@@ -394,7 +414,10 @@ fn walk(plan: &mut Plan, max_entries: usize) {
     // not by the call stack.
     let mut pending: Vec<(PathBuf, Option<RelPath>, u32)> = vec![(plan.root.clone(), None, 0)];
     while let Some((dir, dir_rel, depth)) = pending.pop() {
+        let listed_as = dir_rel.as_ref().map_or("", RelPath::as_str);
+        plan.listing.name(Seen::Listed, listed_as.as_bytes());
         let Ok(entries) = fs::read_dir(&dir) else {
+            plan.listing.note(Seen::Refused);
             plan.gaps.skipped(CoverageReason::Unreadable, dir_rel);
             continue;
         };
@@ -410,11 +433,13 @@ fn walk(plan: &mut Plan, max_entries: usize) {
                 Ok(entry) => listed.push((entry.file_name(), entry.file_type())),
                 Err(_) => {
                     complete = false;
+                    plan.listing.note(Seen::Refused);
                     plan.gaps.skipped(CoverageReason::Unreadable, dir_rel.clone());
                 }
             }
         }
         if over_budget {
+            plan.listing.note(Seen::OverBudget);
             plan.gaps.skipped(CoverageReason::OverBudget, dir_rel);
             continue;
         }
@@ -435,6 +460,14 @@ fn walk(plan: &mut Plan, max_entries: usize) {
         let frameworks = dir_rel.as_ref().is_some_and(|dir| dir.as_str() == FRAMEWORKS);
         let mut folders = Vec::new();
         for (name, kind) in listed {
+            let seen = match &kind {
+                Ok(kind) if kind.is_dir() => Seen::Folder,
+                Ok(kind) if kind.is_file() => Seen::File,
+                Ok(kind) if kind.is_symlink() => Seen::Link,
+                Ok(_) => Seen::Other,
+                Err(_) => Seen::Refused,
+            };
+            plan.listing.name(seen, name.as_encoded_bytes());
             let path = name.to_str().and_then(|name| match &dir_rel {
                 Some(parent) => parent.join(name).ok().map(|path| (name, path)),
                 None => rel(name).map(|path| (name, path)),
@@ -491,8 +524,14 @@ fn walk(plan: &mut Plan, max_entries: usize) {
                 // reached by its real path.
             } else if kind.is_file() {
                 match fs::symlink_metadata(dir.join(name)) {
-                    Ok(metadata) if metadata.is_file() => plan.files.push((path, metadata.len())),
-                    _ => plan.gaps.skipped(CoverageReason::Unreadable, Some(path)),
+                    Ok(metadata) if metadata.is_file() => {
+                        plan.listing.file(&metadata);
+                        plan.files.push((path, metadata.len()));
+                    }
+                    _ => {
+                        plan.listing.note(Seen::Refused);
+                        plan.gaps.skipped(CoverageReason::Unreadable, Some(path));
+                    }
                 }
             } else {
                 // A socket, pipe or device node. Not app content.

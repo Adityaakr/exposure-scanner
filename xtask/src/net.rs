@@ -12,6 +12,11 @@
 //! open a socket ([`probe`]) is run the same way and must be caught. A
 //! sandbox that blocks nothing, or a tracer that records nothing, therefore
 //! fails the test instead of passing it.
+//!
+//! Every dynamic check runs the scan three times ([`Scans`]): without the
+//! results cache, with an empty one, which reads every app and stores what
+//! it found, and with the cache that run left, which reads none. So what is
+//! proven of the scan is proven of it however much the cache spares it.
 
 use std::io::Write as _;
 use std::net::{TcpListener, TcpStream};
@@ -68,6 +73,57 @@ fn output(command: &mut Command) -> Result<Output> {
     command.output().map_err(|error| format!("cannot run {:?}: {error}", command.get_program()))
 }
 
+/// The scans a dynamic check runs, and what each has to print.
+struct Scans<'a> {
+    /// The arguments of a scan that keeps no cache.
+    plain: &'a [&'a str],
+    /// The arguments of the same scan with its cache in `cache`.
+    cached: &'a [&'a str],
+    /// A folder for the cache that this program may empty.
+    cache: &'a Path,
+    /// What an unrestricted scan without a cache printed: the report.
+    baseline: &'a [u8],
+}
+
+impl Scans<'_> {
+    /// Runs the three scans with `run`, which says what is wrong with a run
+    /// that it does not accept. Each must succeed and print the baseline,
+    /// and the two with a cache must have read every app and none.
+    fn each(&self, mut run: impl FnMut(&str, &[&str]) -> Result<Output>) -> Result<()> {
+        // The folder is made here, by whoever runs the test, so that it can
+        // be removed again even where the scan itself ran as root.
+        let _ = std::fs::remove_dir_all(self.cache);
+        std::fs::create_dir_all(self.cache)
+            .map_err(|error| format!("cannot create {}: {error}", self.cache.display()))?;
+        let scans = [
+            ("without a cache", self.plain, None),
+            ("with an empty cache", self.cached, Some("cache: 0 apps unchanged")),
+            ("with a full cache", self.cached, Some(", 0 apps read")),
+        ];
+        let mut outcome = Ok(());
+        for (name, args, said) in scans {
+            outcome = run(name, args).and_then(|run| {
+                let summary = String::from_utf8_lossy(&run.stderr);
+                if !run.status.success() {
+                    Err(format!("the scan {name} failed: {}", summary.trim()))
+                } else if run.stdout != self.baseline {
+                    Err(format!("the scan {name} printed a different report"))
+                } else if said.is_some_and(|said| !summary.contains(said)) {
+                    Err(format!("the scan {name} did not use it as expected: {}", summary.trim()))
+                } else {
+                    Ok(())
+                }
+            });
+            if outcome.is_err() {
+                break;
+            }
+        }
+        std::fs::remove_dir_all(self.cache)
+            .map_err(|error| format!("cannot remove {}: {error}", self.cache.display()))?;
+        outcome
+    }
+}
+
 fn works(program: &str, args: &[&str]) -> bool {
     Command::new(program).args(args).output().is_ok_and(|output| output.status.success())
 }
@@ -108,13 +164,16 @@ pub(crate) fn run(strict: bool) -> Result<()> {
     let package = root.join("tests/fixtures/android/Skeleton.apk");
     let bundles = bundles.to_str().ok_or("the repository path is not UTF-8")?;
     let package = package.to_str().ok_or("the repository path is not UTF-8")?;
-    let scan = ["scan", bundles, package, "--threads", "2"];
+    let cache = target.join("no-network/cache");
+    let cache_text = cache.to_str().ok_or("the target path is not UTF-8")?;
+    let plain = ["scan", "--no-cache", bundles, package, "--threads", "2"];
+    let cached = ["scan", "--cache-dir", cache_text, bundles, package, "--threads", "2"];
     let me = std::env::current_exe()
         .map_err(|error| format!("cannot find the xtask binary: {error}"))?;
 
     // What an unrestricted scan prints. Every restricted run must print the
     // same bytes: the scanner neither needs the network nor notices its loss.
-    let baseline = output(Command::new(&exposure).args(scan))?;
+    let baseline = output(Command::new(&exposure).args(plain))?;
     if !baseline.status.success() || baseline.stdout.is_empty() {
         return Err(format!(
             "the plain scan failed: {}",
@@ -128,6 +187,8 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         ));
     }
 
+    let scans = Scans { plain: &plain, cached: &cached, cache: &cache, baseline: &baseline.stdout };
+
     let mut checks = Checks(Vec::new());
     checks.record("imported symbols", symbol_check(&exposure, &me));
 
@@ -135,7 +196,7 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         let sandbox = ["sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"];
         let outcome =
             if works("sandbox-exec", &["-p", "(version 1)(allow default)", "/usr/bin/true"]) {
-                restricted_run(&sandbox, &exposure, &scan, &me, &baseline.stdout)
+                restricted_run(&sandbox, &exposure, &scans, &me)
             } else {
                 Outcome::Skipped(String::from("sandbox-exec is not available"))
             };
@@ -147,9 +208,9 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         let unprivileged = ["unshare", "--map-root-user", "--net"];
         let with_sudo = ["sudo", "-n", "unshare", "--net"];
         let outcome = if works("unshare", &["--map-root-user", "--net", "true"]) {
-            restricted_run(&unprivileged, &exposure, &scan, &me, &baseline.stdout)
+            restricted_run(&unprivileged, &exposure, &scans, &me)
         } else if works("sudo", &["-n", "unshare", "--net", "true"]) {
-            restricted_run(&with_sudo, &exposure, &scan, &me, &baseline.stdout)
+            restricted_run(&with_sudo, &exposure, &scans, &me)
         } else {
             Outcome::Skipped(String::from(
                 "cannot create a network namespace (no unshare, or no privilege)",
@@ -158,7 +219,7 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         checks.record("network namespace with no interfaces", outcome);
 
         let outcome = if works("strace", &["-V"]) {
-            strace_check(&target.join("no-network"), &exposure, &scan, &me, &baseline.stdout)
+            strace_check(&target.join("no-network"), &exposure, &scans, &me)
         } else {
             Outcome::Skipped(String::from("strace is not installed"))
         };
@@ -204,15 +265,9 @@ fn symbol_check(exposure: &Path, control: &Path) -> Outcome {
     }
 }
 
-/// Runs the control and then the scan behind `wrapper`. The control must be
-/// blocked; the scan must succeed and print exactly the baseline.
-fn restricted_run(
-    wrapper: &[&str],
-    exposure: &Path,
-    scan: &[&str],
-    control: &Path,
-    baseline: &[u8],
-) -> Outcome {
+/// Runs the control and then the scans behind `wrapper`. The control must
+/// be blocked; every scan must succeed and print exactly the baseline.
+fn restricted_run(wrapper: &[&str], exposure: &Path, scans: &Scans<'_>, control: &Path) -> Outcome {
     match output(&mut wrapped(wrapper, control, &["netprobe"])) {
         Ok(probe) if probe.status.code() == Some(i32::from(BLOCKED)) => {}
         Ok(probe) => {
@@ -224,18 +279,12 @@ fn restricted_run(
         }
         Err(error) => return Outcome::Failed(error),
     }
-    match output(&mut wrapped(wrapper, exposure, scan)) {
-        Ok(run) if run.status.success() && run.stdout == baseline => {
-            Outcome::Passed(String::from("scan succeeded with identical output (control: blocked)"))
-        }
-        Ok(run) if run.status.success() => {
-            Outcome::Failed(String::from("the scan printed a different report without a network"))
-        }
-        Ok(run) => Outcome::Failed(format!(
-            "the scan failed without a network: {}",
-            String::from_utf8_lossy(&run.stderr).trim()
+    match scans.each(|_, scan| output(&mut wrapped(wrapper, exposure, scan))) {
+        Ok(()) => Outcome::Passed(String::from(
+            "3 scans (no cache, empty cache, full cache) succeeded with identical output \
+             (control: blocked)",
         )),
-        Err(error) => Outcome::Failed(error),
+        Err(error) => Outcome::Failed(format!("without a network, {error}")),
     }
 }
 
@@ -251,13 +300,7 @@ fn network_calls(log: &str) -> Vec<&str> {
         .collect()
 }
 
-fn strace_check(
-    dir: &Path,
-    exposure: &Path,
-    scan: &[&str],
-    control: &Path,
-    baseline: &[u8],
-) -> Outcome {
+fn strace_check(dir: &Path, exposure: &Path, scans: &Scans<'_>, control: &Path) -> Outcome {
     if let Err(error) = std::fs::create_dir_all(dir) {
         return Outcome::Failed(format!("cannot create {}: {error}", dir.display()));
     }
@@ -279,28 +322,23 @@ fn strace_check(
         }
         Err(error) => return Outcome::Failed(error),
     }
-    match trace(exposure, scan, "scan.strace") {
-        Ok((run, _)) if !run.status.success() => Outcome::Failed(format!(
-            "the traced scan failed: {}",
-            String::from_utf8_lossy(&run.stderr).trim()
+    let traced = scans.each(|name, scan| {
+        let (run, log) = trace(exposure, scan, "scan.strace")?;
+        let calls = network_calls(&log);
+        if run.status.success() && !calls.is_empty() {
+            return Err(format!(
+                "the scan {name} made network system calls: {}",
+                calls.join(" | ")
+            ));
+        }
+        Ok(run)
+    });
+    match traced {
+        Ok(()) => Outcome::Passed(String::from(
+            "3 scans (no cache, empty cache, full cache) succeeded with identical output and 0 \
+             network system calls (control: caught)",
         )),
-        Ok((run, _)) if run.stdout != baseline => {
-            Outcome::Failed(String::from("the traced scan printed a different report"))
-        }
-        Ok((_, log)) => {
-            let calls = network_calls(&log);
-            if calls.is_empty() {
-                Outcome::Passed(String::from(
-                    "scan succeeded with identical output and 0 network system calls (control: caught)",
-                ))
-            } else {
-                Outcome::Failed(format!(
-                    "the scan made network system calls: {}",
-                    calls.join(" | ")
-                ))
-            }
-        }
-        Err(error) => Outcome::Failed(error),
+        Err(error) => Outcome::Failed(format!("traced, {error}")),
     }
 }
 
