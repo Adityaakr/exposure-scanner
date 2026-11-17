@@ -617,10 +617,9 @@ pub fn site_pattern(entry: &str) -> Option<SitePattern> {
         _ if scheme.eq_ignore_ascii_case("https") => Scheme::Https,
         _ => return None,
     };
-    let (authority, path) = match rest.find('/') {
-        Some(slash) => rest.split_at_checked(slash)?,
-        None => (rest, ""),
-    };
+    // A pattern without a path is refused by the browsers, so it grants
+    // nothing.
+    let (authority, path) = rest.split_at_checked(rest.find('/')?)?;
     // A port, where a browser accepts one, is digits or `*` after the last
     // colon. An address in brackets is one host whatever follows it.
     let (name, every_port) = match authority.rsplit_once(':') {
@@ -954,7 +953,6 @@ mod tests {
         assert_eq!(site_pattern("HTTP://*/*"), web(Scheme::Http, Host::Any, true));
         assert_eq!(site_pattern("https://*/*.pdf"), web(Scheme::Https, Host::Any, false));
         assert_eq!(site_pattern("https://*/"), web(Scheme::Https, Host::Any, false));
-        assert_eq!(site_pattern("https://*"), web(Scheme::Https, Host::Any, false));
         assert_eq!(site_pattern("*://*:*/*"), web(Scheme::Any, Host::Any, true));
         assert_eq!(site_pattern("*://*.com/*"), web(Scheme::Any, under("com"), true));
         assert_eq!(site_pattern("*://*.Co.UK/*"), web(Scheme::Any, under("co.uk"), true));
@@ -1006,6 +1004,9 @@ mod tests {
             "*:/*/*",
             "://*/*",
             "urn:*",
+            "https://*",
+            "*://*.com",
+            "http://example.com",
         ] {
             assert_eq!(site_pattern(not), None, "{not}");
         }

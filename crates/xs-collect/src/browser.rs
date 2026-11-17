@@ -293,13 +293,7 @@ impl Search<'_> {
                     // `Temp`, where the browser unpacks an update.
                     continue;
                 }
-                let versions = self.list(&extension, subfolders);
-                let superseded =
-                    u32::try_from(versions.len().saturating_sub(1)).unwrap_or(u32::MAX);
-                let name = |path: &PathBuf| path.file_name().unwrap_or_default().to_owned();
-                if let Some(latest) =
-                    versions.into_iter().max_by(|a, b| version_order(&name(a), &name(b)))
-                {
+                if let Some((latest, superseded)) = newest(self.list(&extension, subfolders)) {
                     self.add(latest, Form::Folder, superseded);
                 }
             }
@@ -356,6 +350,24 @@ fn version_order(a: &OsStr, b: &OsStr) -> Ordering {
         (None, None) => Ordering::Equal,
     };
     by_version.then_with(|| a.as_encoded_bytes().cmp(b.as_encoded_bytes()))
+}
+
+/// The highest of `versions`, the version folders of one extension, by
+/// [`version_order`], and how many others there are.
+pub(crate) fn newest(versions: impl IntoIterator<Item = PathBuf>) -> Option<(PathBuf, u32)> {
+    let name = |path: &PathBuf| path.file_name().unwrap_or_default().to_owned();
+    let mut others: u32 = 0;
+    let mut latest: Option<PathBuf> = None;
+    for version in versions {
+        latest = Some(match latest {
+            None => version,
+            Some(best) => {
+                others = others.saturating_add(1);
+                if version_order(&name(&version), &name(&best)).is_gt() { version } else { best }
+            }
+        });
+    }
+    latest.map(|latest| (latest, others))
 }
 
 /// The record that says `count` folders of `browser` could not be listed
@@ -1366,13 +1378,15 @@ mod tests {
                 "ws://*/*",
                 "tabs",
                 "",
+                "https://*",
+                "*://*:*",
             ] {
                 assert!(breadth(named, paths).is_none(), "{named}");
             }
         }
         // A permission grants whole sites, whatever its path says; a
         // script runs only on the pages its path matches.
-        for path_only in ["https://*/", "*://*/*.pdf", "https://*", "*://*:*/app/*"] {
+        for path_only in ["https://*/", "*://*/*.pdf", "*://*:*/app/*"] {
             assert!(
                 matches!(breadth(path_only, Paths::Ignored), Some(Breadth::All)),
                 "{path_only}"

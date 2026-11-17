@@ -110,16 +110,33 @@ struct Found {
     bundles: BTreeSet<PathBuf>,
     packages: BTreeSet<PathBuf>,
     extensions: BTreeSet<Extension>,
+    /// Version folders of Chromium extensions found inside a folder, by the
+    /// folder of their extension: of each, only the highest is scanned.
+    versions: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
 }
 
 impl Found {
-    fn finish(self) -> Artifacts {
+    fn finish(mut self) -> Artifacts {
+        for versions in std::mem::take(&mut self.versions).into_values() {
+            if let Some((path, superseded)) = browser::newest(versions) {
+                let given = Extension { path, form: Form::Folder, browser: None, superseded: 0 };
+                self.extensions.remove(&given);
+                self.extensions.insert(Extension { superseded, ..given });
+            }
+        }
         Artifacts {
             bundles: self.bundles.into_iter().collect(),
             packages: self.packages.into_iter().collect(),
             extensions: self.extensions.into_iter().collect(),
             unlisted: BTreeMap::new(),
         }
+    }
+
+    /// Adds the version folder at the canonical path `path`, found inside a
+    /// folder that was searched.
+    fn version(&mut self, path: PathBuf) {
+        let extension = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        self.versions.entry(extension).or_default().insert(path);
     }
 
     /// Adds the extension at the canonical path `path`, found by path and
@@ -267,7 +284,7 @@ fn search_folder(folder: &Path, depth: u32, found: &mut Found) -> io::Result<()>
                 && let Ok(resolved) = fs::canonicalize(&path)
                 && browser::is_version_folder(&resolved)
             {
-                found.extension(resolved, Form::Folder);
+                found.version(resolved);
             }
         } else if depth > 1 && !linked() {
             // Plain sub-folders only; a link to a folder is not descended into.
@@ -530,6 +547,60 @@ mod tests {
         let given = ScanScope::Given.to_string();
         assert!(given.contains("installed-app folders were not searched"), "{given}");
         assert!(!given.contains("/Applications"), "{given}");
+    }
+
+    /// A folder of extensions searched after an update holds the folder of
+    /// the version it replaced: only the highest version is an extension,
+    /// and it counts the others. A version folder named directly is
+    /// scanned as given.
+    #[test]
+    fn a_searched_folder_yields_the_highest_version_of_each_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let extensions = dir.path().join("Extensions");
+        let id = "abcdefghijklmnopabcdefghijklmnop";
+        let other = "ponmlkjihgfedcbaponmlkjihgfedcba";
+        for version in [
+            format!("{id}/2.0.9_0"),
+            format!("{id}/10.0_0"),
+            format!("{id}/9.9_1"),
+            format!("{other}/1.0_0"),
+        ] {
+            fs::create_dir_all(extensions.join(&version)).unwrap();
+            fs::write(extensions.join(&version).join("manifest.json"), b"{}").unwrap();
+        }
+        let shown = |found: &Artifacts| -> Vec<(String, u32)> {
+            let root = fs::canonicalize(&extensions).unwrap();
+            found
+                .extensions
+                .iter()
+                .map(|extension| {
+                    let path = extension.path.strip_prefix(&root).unwrap();
+                    (path.display().to_string(), extension.superseded)
+                })
+                .collect()
+        };
+
+        let found = artifacts(std::slice::from_ref(&extensions)).unwrap();
+        assert_eq!(shown(&found), [(format!("{id}/10.0_0"), 2), (format!("{other}/1.0_0"), 0)]);
+
+        let old = extensions.join(id).join("2.0.9_0");
+        assert_eq!(
+            shown(&artifacts(std::slice::from_ref(&old)).unwrap()),
+            [(format!("{id}/2.0.9_0"), 0)]
+        );
+
+        // Named directly and found inside a searched folder: the search
+        // says the most, and the folder is one extension.
+        let newest = extensions.join(id).join("10.0_0");
+        let found = artifacts(&[newest, extensions.clone(), old]).unwrap();
+        assert_eq!(
+            shown(&found),
+            [
+                (format!("{id}/10.0_0"), 2),
+                (format!("{id}/2.0.9_0"), 0),
+                (format!("{other}/1.0_0"), 0)
+            ]
+        );
     }
 
     /// Discovery reads no file, so asking for the installed apps of the
