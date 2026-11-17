@@ -327,9 +327,6 @@ fn walk(plan: &mut Plan, max_entries: usize) {
     // Depth-first with an explicit stack: nesting is bounded by the budget,
     // not by the call stack.
     let mut pending: Vec<(PathBuf, Option<RelPath>, u32)> = vec![(plan.root.clone(), None, 0)];
-    // Whether the property list, or what replaced the folder that should
-    // hold it, has been reported on.
-    let mut plist_settled = false;
     while let Some((dir, dir_rel, depth)) = pending.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
             plan.gaps.skipped(CoverageReason::Unreadable, dir_rel);
@@ -337,6 +334,7 @@ fn walk(plan: &mut Plan, max_entries: usize) {
         };
         let mut listed = Vec::new();
         let mut over_budget = false;
+        let mut complete = true;
         for entry in entries {
             match entry {
                 Ok(_) if listed.len() >= left => {
@@ -344,7 +342,10 @@ fn walk(plan: &mut Plan, max_entries: usize) {
                     break;
                 }
                 Ok(entry) => listed.push((entry.file_name(), entry.file_type())),
-                Err(_) => plan.gaps.skipped(CoverageReason::Unreadable, dir_rel.clone()),
+                Err(_) => {
+                    complete = false;
+                    plan.gaps.skipped(CoverageReason::Unreadable, dir_rel.clone());
+                }
             }
         }
         if over_budget {
@@ -353,6 +354,18 @@ fn walk(plan: &mut Plan, max_entries: usize) {
         }
         left -= listed.len();
         listed.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        // The property list is missing only if a whole listing shows that
+        // it, or the folder that holds it, is not there. A folder that could
+        // not be listed has its own record and says nothing about the file.
+        let holds = |leaf: &str| listed.iter().any(|(name, _)| name == leaf);
+        let plist_missing = match dir_rel.as_ref().map(RelPath::as_str) {
+            None => !holds(CONTENTS),
+            Some(CONTENTS) => !holds("Info.plist"),
+            Some(_) => false,
+        };
+        if complete && plist_missing {
+            plan.gaps.unrecognized(CoverageReason::ParseError, rel(INFO_PLIST));
+        }
         let frameworks = dir_rel.as_ref().is_some_and(|dir| dir.as_str() == FRAMEWORKS);
         let mut folders = Vec::new();
         for (name, kind) in listed {
@@ -383,7 +396,6 @@ fn walk(plan: &mut Plan, max_entries: usize) {
                 continue;
             };
             if path.as_str() == INFO_PLIST {
-                plist_settled = true;
                 read_info_plist(plan);
                 if !kind.is_dir() {
                     continue;
@@ -402,7 +414,6 @@ fn walk(plan: &mut Plan, max_entries: usize) {
             }
             if path.as_str() == CONTENTS {
                 // A link or a file where the contents folder belongs.
-                plist_settled = true;
                 plan.gaps.unrecognized(CoverageReason::ParseError, Some(path.clone()));
             }
             if path.as_str() == FRAMEWORKS {
@@ -427,9 +438,6 @@ fn walk(plan: &mut Plan, max_entries: usize) {
         }
         // The stack gives back the last folder first.
         pending.extend(folders.into_iter().rev());
-    }
-    if !plist_settled {
-        plan.gaps.unrecognized(CoverageReason::ParseError, rel(INFO_PLIST));
     }
     // The visit goes folder by folder, which is not path order.
     plan.files.sort_unstable();
@@ -720,6 +728,62 @@ mod tests {
             // The bundle's own folder holds four entries.
             assert_eq!(under(3), expect(&[], &["<root>"]), "{order:?}");
         }
+    }
+
+    /// A coverage record must say what happened. `unrecognized` means the
+    /// input was read and not understood; a property list inside a folder
+    /// that was never listed was not read, and the folder's own record
+    /// already says so.
+    #[test]
+    fn a_contents_folder_that_was_not_listed_does_not_make_the_property_list_damaged() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let gaps = |plan: &Plan| -> Vec<(String, CoverageStatus, CoverageReason)> {
+            assert!(plan.gaps.unlocated.is_empty());
+            plan.gaps
+                .located
+                .keys()
+                .map(|(path, status, reason, _)| (path.as_str().to_string(), *status, *reason))
+                .collect()
+        };
+        let names = ["Contents/Info.plist", "Contents/a", "Contents/b"];
+        let dir = tree(&names, 0..names.len());
+
+        // Listed in full, the file is found: no record about it missing.
+        let listed = plan(dir.path(), 4);
+        assert!(!gaps(&listed).iter().any(|(path, ..)| path == "Contents"), "{:?}", gaps(&listed));
+        assert_eq!(listed.files_read, 1);
+
+        // One entry at the top leaves one, and `Contents` holds three.
+        assert_eq!(
+            gaps(&plan(dir.path(), 2)),
+            [("Contents".to_string(), CoverageStatus::Skipped, CoverageReason::OverBudget)]
+        );
+
+        // A folder that is there but may not be listed.
+        let contents = dir.path().join("Contents");
+        fs::set_permissions(&contents, fs::Permissions::from_mode(0o000)).unwrap();
+        let unreadable = fs::read_dir(&contents).is_err();
+        let found = gaps(&plan(dir.path(), 4));
+        fs::set_permissions(&contents, fs::Permissions::from_mode(0o755)).unwrap();
+        // Running as root, permissions do not bind and there is nothing to test.
+        if unreadable {
+            assert_eq!(
+                found,
+                [("Contents".to_string(), CoverageStatus::Skipped, CoverageReason::Unreadable)]
+            );
+        }
+
+        // A listing that completes without the file is what "missing" means.
+        fs::remove_file(contents.join("Info.plist")).unwrap();
+        assert_eq!(
+            gaps(&plan(dir.path(), 4)),
+            [(
+                "Contents/Info.plist".to_string(),
+                CoverageStatus::Unrecognized,
+                CoverageReason::ParseError
+            )]
+        );
     }
 
     /// Folders cost memory like files do, so they count against the same
