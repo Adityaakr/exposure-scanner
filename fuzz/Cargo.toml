@@ -51,3 +51,10 @@ path = "fuzz_targets/apk.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "extension_manifest"
+path = "fuzz_targets/extension_manifest.rs"
+test = false
+doc = false
+bench = false

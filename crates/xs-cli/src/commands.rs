@@ -116,12 +116,15 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
     // A summary for the terminal. It names no app, no company and no path
     // the user gave.
     let headline = report.headline;
+    let mut scanned = plural(stats.artifacts, "app");
+    if stats.extensions > 0 {
+        scanned = format!("{scanned} and {}", plural(stats.extensions, "browser extension"));
+    }
     let _ = writeln!(
         std::io::stderr(),
-        "exposure: scanned {} ({}, {}): {}, {}\n\
+        "exposure: scanned {scanned} ({}, {}): {}, {}\n\
          exposure: headline: {} at contacts or above, {} at contains, {} with a third-party channel\n\
          exposure: scope: {}",
-        plural(stats.artifacts, "app"),
         plural(stats.files, "file"),
         plural(stats.bytes, "byte"),
         plural(report.claims as u64, "claim"),

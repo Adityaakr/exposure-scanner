@@ -35,6 +35,13 @@
 //!   say the SDK receives pictures. When every Android permission behind
 //!   the claim stops at an API level (`android:maxSdkVersion`), a note says
 //!   which devices the access is limited to.
+//! * **Extension permissions.** An access edge from a browser extension to
+//!   something its manifest asks the browser for is not the work of a pack
+//!   rule either: the permission is one of a fixed list that is part of the
+//!   scanner, with its name and its category. Such a claim names no company
+//!   and counts in no headline. When every record behind it comes from an
+//!   optional manifest key, the claim carries the note `optional`: the
+//!   extension has to ask before it holds the permission.
 //! * **Vendor and party.** Who publishes the app is read from its signature
 //!   first and its app id second, and the claim says whether the company is
 //!   that vendor: first party, third party, or unknown. The rules are
@@ -59,11 +66,12 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 
-use xs_model::access::{self, Permission};
+use xs_model::access;
 use xs_model::canon::CanonError;
 use xs_model::claim::{Claim, ClaimId, ClaimKey, ClaimObject, Confidence};
 use xs_model::matcher::MatcherKind;
 use xs_model::pack::{Pack, Rule};
+use xs_model::permission::{self, ManifestKey, Permission};
 use xs_model::record::{
     EdgeRecord, EdgeType, Grade, ObjectKind, ObjectRef, Record, RecordId, Scope, Subject, declared,
 };
@@ -129,7 +137,8 @@ impl From<CanonError> for DeriveError {
 pub const fn confidence(matcher: MatcherKind, scope: Scope) -> Confidence {
     match matcher {
         // Names read from a parsed table, or the app's own declaration.
-        MatcherKind::ManifestComponent
+        MatcherKind::ExtensionManifest
+        | MatcherKind::ManifestComponent
         | MatcherKind::AndroidClassPrefix
         | MatcherKind::ApkFile
         | MatcherKind::NpmPackage
@@ -160,7 +169,9 @@ enum Origin<'a> {
     /// A host the app declares, with the category id of the declaration.
     Declared(&'a str),
     /// A permission the app asks for.
-    Permission(&'static Permission),
+    Permission(&'static access::Permission),
+    /// A permission a browser extension's manifest asks for.
+    ExtensionPermission(Permission),
 }
 
 /// Everything known about one claim while its evidence is gathered.
@@ -176,6 +187,9 @@ struct Group<'a> {
     /// The highest API level any witness asks on, or `None` once one asks on
     /// every level.
     max_sdk: Option<u32>,
+    /// Whether every record so far was read from an optional key of an
+    /// extension manifest. Only a claim about a permission can be optional.
+    optional: bool,
 }
 
 /// Derives the claims that `evidence` supports under `pack`.
@@ -233,6 +247,7 @@ pub fn derive(evidence: &EvidenceSet, pack: &Pack) -> Result<Vec<Claim>, DeriveE
         group.confidence = group.confidence.max(witness);
         group.evidence.push(record_id);
         group.max_sdk = group.max_sdk.zip(edge.proof.max_sdk).map(|(a, b)| a.max(b));
+        group.optional &= is_optional(edge);
     }
 
     let mut claims = Vec::with_capacity(groups.len());
@@ -265,10 +280,22 @@ fn origin<'a>(
         }
         // A record is checked against the list of permissions when it enters
         // the set, so this lookup only fails for evidence built by hand.
+        ObjectKind::Permission if edge.proof.matcher == MatcherKind::ExtensionManifest => {
+            Permission::from_id(&edge.object.id)
+                .map(Origin::ExtensionPermission)
+                .ok_or_else(unknown_rule)
+        }
         ObjectKind::Permission => {
             access::permission(&edge.object.id).map(Origin::Permission).ok_or_else(unknown_rule)
         }
     }
+}
+
+/// Whether `edge` is to a permission its extension only may ask for: one
+/// read from an optional key of the manifest.
+fn is_optional(edge: &EdgeRecord) -> bool {
+    edge.object.kind == ObjectKind::Permission
+        && ManifestKey::from_name(&edge.proof.token).is_some_and(ManifestKey::is_optional)
 }
 
 fn new_group<'a>(edge: &'a EdgeRecord, origin: Origin<'a>) -> Group<'a> {
@@ -282,6 +309,7 @@ fn new_group<'a>(edge: &'a EdgeRecord, origin: Origin<'a>) -> Group<'a> {
         confidence: Confidence::Low,
         evidence: Vec::new(),
         max_sdk: edge.proof.max_sdk,
+        optional: true,
     }
 }
 
@@ -317,6 +345,18 @@ fn finish(
             None,
             permission.category,
             group.max_sdk.map(access::android_limit_note).into_iter().collect(),
+        ),
+        // An extension's permission is one of a fixed list. Nobody is named
+        // for it, and its category is not one the pack ranks.
+        Origin::ExtensionPermission(permission) => (
+            permission.name().to_string(),
+            None,
+            permission::CATEGORY,
+            if group.optional {
+                Vec::from([permission::NOTE_OPTIONAL.to_string()])
+            } else {
+                Vec::new()
+            },
         ),
     };
     let headline = group.edge == EdgeType::Channel
@@ -515,6 +555,7 @@ mod tests {
                 sandbox: None,
                 files_scanned: 1,
                 bytes_scanned: 1,
+                ..Facts::default()
             },
         })
     }
@@ -1133,6 +1174,86 @@ mod tests {
             DeriveError::UnknownCategory { category, .. } if category == "tracking_domain"
         ));
         assert!(error.to_string().contains("tracking_domain"));
+    }
+
+    /// An edge from a browser extension to what its manifest asks for,
+    /// under the manifest key `key`.
+    fn permission_edge(seed: u8, permission: Permission, key: ManifestKey) -> Record {
+        Record::Edge(EdgeRecord {
+            v: V1,
+            collector: Collector::BrowserExtension,
+            subject: Subject {
+                kind: SubjectKind::Extension,
+                platform: Platform::Chromium,
+                id: "nkbihfbeogaeaoehlefnkodbefgpgknn".into(),
+                version: Some("13.56.0.0".into()),
+                digest: digest(seed),
+            },
+            edge: EdgeType::Access,
+            grade: Grade::Requested,
+            object: ObjectRef { kind: ObjectKind::Permission, id: permission.id().into() },
+            rule: permission::RULE.into(),
+            proof: Proof {
+                matcher: MatcherKind::ExtensionManifest,
+                token: key.as_str().into(),
+                count: 1,
+                example: Some("*://*/*".into()),
+                location: RelPath::new("manifest.json").unwrap(),
+                region: Region::ManifestKey,
+                scope: Scope::AppCode,
+                max_sdk: None,
+            },
+        })
+    }
+
+    /// A permission is reached, not somebody: no company, no party, no
+    /// headline, and a category that is part of the scanner rather than of
+    /// the pack, which does not define it.
+    #[test]
+    fn a_permission_is_a_claim_about_access_and_names_nobody() {
+        let records = [
+            permission_edge(9, Permission::AllSites, ManifestKey::HostPermissions),
+            permission_edge(9, Permission::AllSites, ManifestKey::ContentScripts),
+            permission_edge(9, Permission::Cookies, ManifestKey::Permissions),
+        ];
+        assert!(pack().category(permission::CATEGORY).is_none());
+        let claims = derive(&set(records), &pack()).unwrap();
+        assert_eq!(claims.len(), 2);
+        let all = claim(&claims, "extension/all-sites");
+        assert_eq!(all.edge, EdgeType::Access);
+        assert_eq!(all.object.name, "Every website");
+        assert_eq!(all.object.kind, ObjectKind::Permission);
+        assert_eq!(all.category, permission::CATEGORY);
+        assert_eq!(
+            (all.company.as_deref(), all.party, all.headline),
+            (None, Party::Unknown, false)
+        );
+        assert_eq!((all.grade, all.rungs.as_slice()), (Grade::Requested, &[Grade::Requested][..]));
+        assert_eq!((all.confidence, all.witnesses), (Confidence::High, 1));
+        assert_eq!(all.evidence.len(), 2);
+        assert!(all.notes.is_empty());
+        assert_eq!(Headline::of(&claims), Headline::default());
+    }
+
+    /// What an extension may only ask for while it runs is said so: the
+    /// claim carries the note `optional` exactly when no record behind it
+    /// comes from a key the extension holds.
+    #[test]
+    fn a_permission_only_an_optional_key_asks_for_is_noted_as_optional() {
+        let optional = |keys: &[ManifestKey]| {
+            let records = keys.iter().map(|&key| permission_edge(3, Permission::History, key));
+            let claims = derive(&set(records), &pack()).unwrap();
+            assert_eq!(claims.len(), 1);
+            claims[0].notes.clone()
+        };
+        let noted = vec![String::from(permission::NOTE_OPTIONAL)];
+        assert_eq!(optional(&[ManifestKey::OptionalPermissions]), noted);
+        assert_eq!(
+            optional(&[ManifestKey::OptionalPermissions, ManifestKey::OptionalHostPermissions]),
+            noted
+        );
+        assert!(optional(&[ManifestKey::Permissions]).is_empty());
+        assert!(optional(&[ManifestKey::OptionalPermissions, ManifestKey::Permissions]).is_empty());
     }
 
     #[test]

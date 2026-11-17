@@ -174,21 +174,30 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
     let exposure = target.join("release/exposure");
     // The committed fixtures, so that every collector reads something: the
-    // folder of bundles, one of them an Electron app with an archive, and
-    // the package.
+    // folder of bundles, one of them an Electron app with an archive, the
+    // package, and the browser extensions, a folder of them and an add-on.
     let bundles = root.join("tests/fixtures/macos");
     let package = root.join("tests/fixtures/android/Skeleton.apk");
-    let bundles = bundles.to_str().ok_or("the repository path is not UTF-8")?;
-    let package = package.to_str().ok_or("the repository path is not UTF-8")?;
+    let extensions = root.join("tests/fixtures/browser/Extensions");
+    let addon = root.join("tests/fixtures/browser/addon@example.org.xpi");
+    let utf8 = |path: &'_ PathBuf| path.to_str().map(String::from);
+    let paths = [&bundles, &package, &extensions, &addon]
+        .map(utf8)
+        .into_iter()
+        .collect::<Option<Vec<String>>>()
+        .ok_or("the repository path is not UTF-8")?;
     let home = target.join("no-network/home");
-    let plain = ["scan", "--no-cache", bundles, package, "--threads", "2"];
-    let cached = ["scan", bundles, package, "--threads", "2"];
+    let mut cached: Vec<&str> = vec!["scan"];
+    cached.extend(paths.iter().map(String::as_str));
+    cached.extend(["--threads", "2"]);
+    let mut plain = cached.clone();
+    plain.insert(1, "--no-cache");
     let me = std::env::current_exe()
         .map_err(|error| format!("cannot find the xtask binary: {error}"))?;
 
     // What an unrestricted scan prints. Every restricted run must print the
     // same bytes: the scanner neither needs the network nor notices its loss.
-    let baseline = output(Command::new(&exposure).args(plain))?;
+    let baseline = output(Command::new(&exposure).args(&plain))?;
     if !baseline.status.success() || baseline.stdout.is_empty() {
         return Err(format!(
             "the plain scan failed: {}",

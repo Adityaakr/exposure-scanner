@@ -731,6 +731,7 @@ fn records(
             sandbox: None,
             files_scanned: 1,
             bytes_scanned: bytes,
+            ..Facts::default()
         },
     })];
     let mut edge = |collector, finding: Finding<'_>, location: &RelPath, region| {

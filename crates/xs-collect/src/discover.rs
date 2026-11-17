@@ -1,18 +1,24 @@
 //! Finding artifacts. Discovery only looks at names and file types; it reads
 //! no file content.
 //!
-//! Two kinds of artifact are found: macOS application bundles, which are
-//! folders named `.app`, and Android packages, which are files named `.apk`.
-//! They are found either below the paths a scan is given ([`artifacts`]) or,
-//! when it is given none, where macOS keeps installed apps ([`installed`]).
+//! Three kinds of artifact are found: macOS application bundles, which are
+//! folders named `.app`; Android packages, which are files named `.apk`; and
+//! browser extensions, which are files named `.xpi` (Firefox) or folders
+//! `<id>/<version>` that hold a `manifest.json` (the Chromium family). They
+//! are found either below the paths a scan is given ([`artifacts`]) or, when
+//! it is given none, where macOS keeps installed apps and the browsers keep
+//! their profiles ([`installed`]).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use xs_model::record::{Browser, CoverageReason};
+
 use crate::ScanError;
+use crate::browser::{self, Extension, Form};
 
 /// How far below a folder artifacts are looked for: the folder's entries and
 /// the entries of its sub-folders, which covers `/Applications` and
@@ -33,8 +39,8 @@ const SYSTEM_APPS: &str = "/System/Applications";
 /// exists, and a path the user gave never is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanScope {
-    /// No path was given: the installed-app folders were searched, and
-    /// `/System/Applications` was not.
+    /// No path was given: the installed-app folders and the profile folders
+    /// of the browsers were searched, and `/System/Applications` was not.
     Installed,
     /// Paths were given: what they name was scanned and nothing else. The
     /// installed-app folders were not searched.
@@ -48,12 +54,23 @@ impl fmt::Display for ScanScope {
                 f,
                 "the apps installed in {SHARED_APPS} and ~/{USER_APPS}; {SYSTEM_APPS} (Apple's \
                  own apps on the sealed system volume) was not searched: name the folder to \
-                 scan it"
+                 scan it; the extensions installed in your profiles of {}",
+                browser_names()
             ),
             Self::Given => f.write_str(
                 "the paths given and nothing else; the installed-app folders were not searched",
             ),
         }
+    }
+}
+
+/// The browsers whose profiles are searched, as a reader knows them:
+/// `Arc, Brave, … and Vivaldi`.
+fn browser_names() -> String {
+    let names = Browser::ALL.map(Browser::name);
+    match names.split_last() {
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => String::new(),
     }
 }
 
@@ -78,6 +95,13 @@ pub struct Artifacts {
     pub bundles: Vec<PathBuf>,
     /// Android packages: regular files named `.apk`.
     pub packages: Vec<PathBuf>,
+    /// Browser extensions: version folders of the Chromium family and
+    /// Firefox archives named `.xpi`.
+    pub extensions: Vec<Extension>,
+    /// How many profile folders of each browser could not be listed while
+    /// its extensions were looked for, by the reason. Only a search of the
+    /// browsers' own folders fills it.
+    pub unlisted: BTreeMap<(Browser, CoverageReason), u32>,
 }
 
 /// What a search has found so far.
@@ -85,22 +109,51 @@ pub struct Artifacts {
 struct Found {
     bundles: BTreeSet<PathBuf>,
     packages: BTreeSet<PathBuf>,
+    extensions: BTreeSet<Extension>,
+    /// Version folders of Chromium extensions found inside a folder, by the
+    /// folder of their extension: of each, only the highest is scanned.
+    versions: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
 }
 
 impl Found {
-    fn finish(self) -> Artifacts {
+    fn finish(mut self) -> Artifacts {
+        for versions in std::mem::take(&mut self.versions).into_values() {
+            if let Some((path, superseded)) = browser::newest(versions) {
+                let given = Extension { path, form: Form::Folder, browser: None, superseded: 0 };
+                self.extensions.remove(&given);
+                self.extensions.insert(Extension { superseded, ..given });
+            }
+        }
         Artifacts {
             bundles: self.bundles.into_iter().collect(),
             packages: self.packages.into_iter().collect(),
+            extensions: self.extensions.into_iter().collect(),
+            unlisted: BTreeMap::new(),
         }
+    }
+
+    /// Adds the version folder at the canonical path `path`, found inside a
+    /// folder that was searched.
+    fn version(&mut self, path: PathBuf) {
+        let extension = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        self.versions.entry(extension).or_default().insert(path);
+    }
+
+    /// Adds the extension at the canonical path `path`, found by path and
+    /// so in no browser's profile.
+    fn extension(&mut self, path: PathBuf, form: Form) {
+        self.extensions.insert(Extension { path, form, browser: None, superseded: 0 });
     }
 }
 
 /// Resolves `paths` to the artifacts they name or contain.
 ///
 /// A path to a bundle yields that bundle, and a path to a file named `.apk`
-/// that package. A path to any other folder yields the bundles and the
-/// packages inside it, down to two levels, without looking inside bundles.
+/// that package. A path to a file named `.xpi` yields that Firefox add-on,
+/// and a path to an installed version of a Chromium extension, a folder
+/// `<id>/<version>` that holds a `manifest.json`, that extension. A path to
+/// any other folder yields the bundles, the packages and the extensions
+/// inside it, down to two levels, without looking inside bundles.
 /// For a path given here the name the user gave decides, so `Foo.app` given
 /// through a link named `Foo.app` is a bundle whatever the link points at is
 /// called. Inside a folder, a symbolic link to a bundle is followed once; a
@@ -120,10 +173,14 @@ pub fn artifacts(paths: &[PathBuf]) -> Result<Artifacts, ScanError> {
         let is_named = |test: fn(&Path) -> bool| test(path) || test(&resolved);
         if metadata.is_file() && is_named(is_package_name) {
             found.packages.insert(resolved);
+        } else if metadata.is_file() && is_named(browser::is_archive_name) {
+            found.extension(resolved, Form::Archive);
         } else if !metadata.is_dir() {
             return Err(ScanError::Unsupported(path.clone()));
         } else if is_named(is_bundle_name) {
             found.bundles.insert(resolved);
+        } else if browser::is_version_folder(&resolved) {
+            found.extension(resolved, Form::Folder);
         } else {
             search_folder(&resolved, MAX_FOLDER_DEPTH, &mut found).map_err(fail)?;
         }
@@ -140,12 +197,15 @@ pub fn installed_roots(home: Option<&Path>) -> Vec<PathBuf> {
     roots
 }
 
-/// The apps installed on this machine: what a scan covers when it is given
-/// no path.
+/// The apps and the browser extensions installed on this machine: what a
+/// scan covers when it is given no path.
 ///
-/// These are the artifacts in `/Applications` and in the `Applications`
+/// The apps are the artifacts in `/Applications` and in the `Applications`
 /// folder of the user who runs the scan, each searched as [`artifacts`]
-/// searches a folder. Apple's own apps on the sealed system volume, in
+/// searches a folder. The extensions are those in that user's profiles of
+/// the browsers this build knows the folders of; see [`browser::installed`].
+/// A browser whose folders cannot be listed does not fail the search: it
+/// is counted in [`Artifacts::unlisted`]. Apple's own apps on the sealed system volume, in
 /// `/System/Applications`, are not among them; that folder is scanned when
 /// it is named. No record says so, since a record needs an app as its
 /// subject: the scan says it in its scope, [`ScanScope::Installed`].
@@ -161,7 +221,13 @@ pub fn installed() -> Result<Artifacts, ScanError> {
     // Whose apps are scanned depends on who runs the scan. Nothing else does:
     // no record holds the folder an app was found in.
     let home = std::env::home_dir();
-    in_roots(&installed_roots(home.as_deref()))
+    let mut found = in_roots(&installed_roots(home.as_deref()))?;
+    if let Some(home) = home {
+        let browsers = browser::installed(&browser::application_support(&home));
+        found.extensions = browsers.extensions;
+        found.unlisted = browsers.unlisted;
+    }
+    Ok(found)
 }
 
 /// The artifacts in `roots`, each searched as a folder. A root that does not
@@ -197,12 +263,28 @@ fn search_folder(folder: &Path, depth: u32, found: &mut Found) -> io::Result<()>
                 && is_package_name(&resolved)
             {
                 found.packages.insert(resolved);
+            } else if browser::is_archive_name(&path)
+                && let Ok(resolved) = fs::canonicalize(&path)
+                && browser::is_archive_name(&resolved)
+            {
+                // As for a package: a link is an add-on only if what it
+                // points at is named like one.
+                found.extension(resolved, Form::Archive);
             }
         } else if !metadata.is_dir() {
             // A socket, a pipe or a device node.
         } else if is_bundle_name(&path) {
             if let Ok(resolved) = fs::canonicalize(&path) {
                 found.bundles.insert(resolved);
+            }
+        } else if browser::is_version_folder(&path) {
+            // A link to a folder is not an extension, as it is not a folder
+            // to descend into.
+            if !linked()
+                && let Ok(resolved) = fs::canonicalize(&path)
+                && browser::is_version_folder(&resolved)
+            {
+                found.version(resolved);
             }
         } else if depth > 1 && !linked() {
             // Plain sub-folders only; a link to a folder is not descended into.
@@ -459,11 +541,66 @@ mod tests {
             ScanScope::Installed.to_string(),
             "the apps installed in /Applications and ~/Applications; /System/Applications \
              (Apple's own apps on the sealed system volume) was not searched: name the folder \
-             to scan it"
+             to scan it; the extensions installed in your profiles of Arc, Brave, Google \
+             Chrome, Chromium, Dia, Microsoft Edge, Firefox and Vivaldi"
         );
         let given = ScanScope::Given.to_string();
         assert!(given.contains("installed-app folders were not searched"), "{given}");
         assert!(!given.contains("/Applications"), "{given}");
+    }
+
+    /// A folder of extensions searched after an update holds the folder of
+    /// the version it replaced: only the highest version is an extension,
+    /// and it counts the others. A version folder named directly is
+    /// scanned as given.
+    #[test]
+    fn a_searched_folder_yields_the_highest_version_of_each_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let extensions = dir.path().join("Extensions");
+        let id = "abcdefghijklmnopabcdefghijklmnop";
+        let other = "ponmlkjihgfedcbaponmlkjihgfedcba";
+        for version in [
+            format!("{id}/2.0.9_0"),
+            format!("{id}/10.0_0"),
+            format!("{id}/9.9_1"),
+            format!("{other}/1.0_0"),
+        ] {
+            fs::create_dir_all(extensions.join(&version)).unwrap();
+            fs::write(extensions.join(&version).join("manifest.json"), b"{}").unwrap();
+        }
+        let shown = |found: &Artifacts| -> Vec<(String, u32)> {
+            let root = fs::canonicalize(&extensions).unwrap();
+            found
+                .extensions
+                .iter()
+                .map(|extension| {
+                    let path = extension.path.strip_prefix(&root).unwrap();
+                    (path.display().to_string(), extension.superseded)
+                })
+                .collect()
+        };
+
+        let found = artifacts(std::slice::from_ref(&extensions)).unwrap();
+        assert_eq!(shown(&found), [(format!("{id}/10.0_0"), 2), (format!("{other}/1.0_0"), 0)]);
+
+        let old = extensions.join(id).join("2.0.9_0");
+        assert_eq!(
+            shown(&artifacts(std::slice::from_ref(&old)).unwrap()),
+            [(format!("{id}/2.0.9_0"), 0)]
+        );
+
+        // Named directly and found inside a searched folder: the search
+        // says the most, and the folder is one extension.
+        let newest = extensions.join(id).join("10.0_0");
+        let found = artifacts(&[newest, extensions.clone(), old]).unwrap();
+        assert_eq!(
+            shown(&found),
+            [
+                (format!("{id}/10.0_0"), 2),
+                (format!("{id}/2.0.9_0"), 0),
+                (format!("{other}/1.0_0"), 0)
+            ]
+        );
     }
 
     /// Discovery reads no file, so asking for the installed apps of the

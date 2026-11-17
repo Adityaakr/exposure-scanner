@@ -19,8 +19,9 @@
 //! A channel edge points at an SDK, which a rule of the pack names, or at a
 //! host the app's own files declare, such as its update feed. Only the host
 //! is kept of a declared address, never the address itself. An access edge
-//! points at a permission the app asks for, one of the fixed list in
-//! [`access`](crate::access).
+//! points at a permission: one an app asks for, from the fixed list in
+//! [`access`], or one a browser extension's manifest asks
+//! for, from the fixed list in [`permission`].
 //!
 //! Besides edges there are two more kinds. An `artifact` record carries facts
 //! about the subject itself. A `coverage` record says what was skipped or not
@@ -37,6 +38,7 @@ use crate::canon::{self, CanonError};
 use crate::digest::{DigestParseError, Sha256Digest, SubjectDigest};
 use crate::matcher::MatcherKind;
 use crate::path::RelPath;
+use crate::permission::{self, ManifestKey, Permission};
 use crate::serde_str::impl_serde_str;
 use crate::text;
 
@@ -142,6 +144,11 @@ impl Record {
         // What was not read is evidence of nothing, and was not looked at
         // and found wanting either.
         let read = self.subject().digest != SubjectDigest::Unread;
+        // A browser is where extensions are looked for, not something that
+        // is read and hashed itself.
+        if read && self.subject().kind == SubjectKind::Browser {
+            return Err(RecordError::BrowserSubject);
+        }
         match self {
             Self::Coverage(record) if read || record.status == CoverageStatus::Skipped => {
                 record.validate()
@@ -181,6 +188,10 @@ pub enum RecordError {
     /// About such a subject there can only be a `coverage` record that says
     /// it was skipped.
     UnreadSubject,
+    /// The subject is a browser and carries a digest. A browser is not an
+    /// artifact: the only record about one is a `coverage` record that says
+    /// its extensions were not read.
+    BrowserSubject,
 }
 
 impl fmt::Display for RecordError {
@@ -206,6 +217,10 @@ impl fmt::Display for RecordError {
             Self::UnreadSubject => f.write_str(
                 "the subject was not read, so the only record about it is a coverage record \
                  that says it was skipped",
+            ),
+            Self::BrowserSubject => f.write_str(
+                "a browser is not an artifact, so the only record about it is a coverage \
+                 record that says its extensions were skipped",
             ),
         }
     }
@@ -243,6 +258,11 @@ impl Subject {
         if let Some(version) = &self.version {
             check_text("subject.version", version, text::MAX_VERSION_BYTES)?;
         }
+        if self.kind == SubjectKind::Browser
+            && Browser::from_id(&self.id).is_none_or(|browser| browser.platform() != self.platform)
+        {
+            return Err(RecordError::BadText("subject.id"));
+        }
         Ok(())
     }
 }
@@ -253,6 +273,13 @@ impl Subject {
 pub enum SubjectKind {
     /// An installable application.
     App,
+    /// A browser extension: a folder in a browser's profile, or one archive.
+    Extension,
+    /// A browser, as the place its extensions are installed in. It is not an
+    /// artifact and has no digest: it is the subject of the `coverage`
+    /// record that says the extensions of a browser could not be read, and
+    /// of no other record. Its id is a [`Browser`] id.
+    Browser,
 }
 
 /// The platform an artifact is built for.
@@ -263,6 +290,11 @@ pub enum Platform {
     Android,
     /// A macOS application bundle.
     Macos,
+    /// A browser built on Chromium, such as Chrome, Edge or Brave. They
+    /// load the same extensions.
+    Chromium,
+    /// Firefox.
+    Firefox,
 }
 
 impl Platform {
@@ -272,6 +304,99 @@ impl Platform {
         match self {
             Self::Android => "android",
             Self::Macos => "macos",
+            Self::Chromium => "chromium",
+            Self::Firefox => "firefox",
+        }
+    }
+}
+
+/// A browser whose profiles the scanner knows where to find.
+///
+/// Which browser an extension was found in is a fact about this device, not
+/// about the extension: the same extension installed in two browsers is one
+/// subject with two `artifact` records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Browser {
+    /// Arc.
+    Arc,
+    /// Brave.
+    Brave,
+    /// Google Chrome.
+    Chrome,
+    /// Chromium.
+    Chromium,
+    /// Dia.
+    Dia,
+    /// Microsoft Edge.
+    Edge,
+    /// Firefox.
+    Firefox,
+    /// Vivaldi.
+    Vivaldi,
+}
+
+impl Browser {
+    /// Every browser, in declaration order.
+    pub const ALL: [Self; 8] = [
+        Self::Arc,
+        Self::Brave,
+        Self::Chrome,
+        Self::Chromium,
+        Self::Dia,
+        Self::Edge,
+        Self::Firefox,
+        Self::Vivaldi,
+    ];
+
+    /// The id used in records.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Arc => "arc",
+            Self::Brave => "brave",
+            Self::Chrome => "chrome",
+            Self::Chromium => "chromium",
+            Self::Dia => "dia",
+            Self::Edge => "edge",
+            Self::Firefox => "firefox",
+            Self::Vivaldi => "vivaldi",
+        }
+    }
+
+    /// The browser with this id.
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|browser| browser.as_str() == id)
+    }
+
+    /// The name a reader knows the browser by.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Arc => "Arc",
+            Self::Brave => "Brave",
+            Self::Chrome => "Google Chrome",
+            Self::Chromium => "Chromium",
+            Self::Dia => "Dia",
+            Self::Edge => "Microsoft Edge",
+            Self::Firefox => "Firefox",
+            Self::Vivaldi => "Vivaldi",
+        }
+    }
+
+    /// The platform the browser's extensions are built for.
+    #[must_use]
+    pub const fn platform(self) -> Platform {
+        match self {
+            Self::Firefox => Platform::Firefox,
+            Self::Arc
+            | Self::Brave
+            | Self::Chrome
+            | Self::Chromium
+            | Self::Dia
+            | Self::Edge
+            | Self::Vivaldi => Platform::Chromium,
         }
     }
 }
@@ -295,6 +420,9 @@ pub enum Collector {
     /// The code of an Electron app: its asar archives and loose scripts.
     #[serde(rename = "electron.app")]
     ElectronApp,
+    /// The manifest of a browser extension.
+    #[serde(rename = "browser.extension")]
+    BrowserExtension,
 }
 
 /// The two kinds of link a subject can have.
@@ -399,6 +527,21 @@ impl EdgeRecord {
                 return Err(RecordError::ObjectRuleMismatch);
             }
             ObjectKind::Host => {}
+            // A browser extension's permission is one of its own fixed list,
+            // under the built-in rule. The proof names the manifest key it
+            // was read from, which is what tells a held permission from an
+            // optional one.
+            ObjectKind::Permission if self.proof.matcher == MatcherKind::ExtensionManifest => {
+                if Permission::from_id(&self.object.id).is_none() {
+                    return Err(RecordError::BadText("object.id"));
+                }
+                if self.rule != permission::RULE {
+                    return Err(RecordError::ObjectRuleMismatch);
+                }
+                if ManifestKey::from_name(&self.proof.token).is_none() {
+                    return Err(RecordError::BadText("proof.token"));
+                }
+            }
             // The key is what the claim rests on, so it must be one that
             // asks for this permission, read from the place the rule names.
             ObjectKind::Permission => {
@@ -434,7 +577,8 @@ pub struct ObjectRef {
     pub kind: ObjectKind,
     /// Its id: a rule id such as `sdk/firebase-crashlytics` for an SDK, the
     /// host name such as `updates.example.com` for a host, the id of an
-    /// [`access::Permission`] such as `camera` for a permission.
+    /// [`access::Permission`] such as `camera` or of a [`Permission`] such
+    /// as `extension/all-sites` for a permission.
     pub id: String,
 }
 
@@ -447,9 +591,10 @@ pub enum ObjectKind {
     /// A host the app's own files declare. Records hold the host only, never
     /// the address it was taken from.
     Host,
-    /// Something on the device the app asks to reach, such as the camera or
-    /// the contacts: one of the fixed list in [`access`](crate::access).
-    /// Only an access edge points at one.
+    /// Something the app asks to reach, such as the camera or the contacts,
+    /// one of the fixed list in [`access`], or something a
+    /// browser extension's manifest asks the browser for, one of the fixed
+    /// list in [`permission`]. Only an access edge points at one.
     Permission,
 }
 
@@ -500,7 +645,9 @@ pub struct Proof {
     /// the property list that holds the declaration, such as `SUFeedURL`.
     /// For a permission the app asks for, the platform's key that asks:
     /// `NSCameraUsageDescription`, `com.apple.security.device.camera` or
-    /// `android.permission.CAMERA`.
+    /// `android.permission.CAMERA`. For a permission a browser extension asks
+    /// for, the [`ManifestKey`] it is listed under, such as
+    /// `host_permissions`.
     pub token: String,
     /// How many times it matched in this place. For an entitlement that
     /// holds a list, the number of entries; the entries themselves are not
@@ -565,6 +712,9 @@ pub enum Region {
     Entitlements,
     /// The `uses-permission` elements an Android manifest declares.
     Permissions,
+    /// The entries a JSON manifest lists under one key. The count is the
+    /// number of distinct entries that ask for the object of the edge.
+    ManifestKey,
 }
 
 /// What kind of code a file holds (design report, section 5.2 control 1).
@@ -603,12 +753,18 @@ impl ArtifactRecord {
         if let Some(team_id) = &self.facts.team_id {
             check_text("facts.team_id", team_id, text::MAX_TEAM_ID_BYTES)?;
         }
+        if let Some(publisher) = &self.facts.publisher {
+            check_text("facts.publisher", publisher, text::MAX_NAME_BYTES)?;
+        }
+        if self.facts.homepage.as_deref().is_some_and(|host| !text::is_host(host)) {
+            return Err(RecordError::BadText("facts.homepage"));
+        }
         Ok(())
     }
 }
 
 /// What a collector learned about an artifact.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Facts {
     /// The display name the artifact declares.
@@ -630,6 +786,19 @@ pub struct Facts {
     /// the Team ID, it is what the signature says, unverified.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<bool>,
+    /// Who the artifact says made it: the `author` of a browser extension's
+    /// manifest. It is what the file claims, like the display name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// The host of the home page the artifact declares. The host only, never
+    /// the address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
+    /// The browser a browser extension was found installed in, when the scan
+    /// looked through the browsers' own profile folders. Absent for an
+    /// extension that was given by path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<Browser>,
     /// How many files the collector read.
     pub files_scanned: u64,
     /// How many bytes the collector read.
@@ -694,6 +863,10 @@ pub enum CoverageReason {
     OverBudget,
     /// The input is damaged or not what its name says.
     ParseError,
+    /// Older versions of the same browser extension are still on disk next
+    /// to the one reported, left for the browser to remove later; they were
+    /// not scanned. The count is how many.
+    SupersededVersion,
     /// A name differs only in letter case from one the artifact's layout
     /// fixes, such as `contents` for `Contents`. The collector takes names
     /// as they are stored, so what sits there was not looked at as that part
@@ -1000,6 +1173,144 @@ pub(crate) mod tests {
         tree["proof"]["matcher"] = json!("android_permission");
         let record: Record = serde_json::from_value(tree).unwrap();
         assert_eq!(record.validate(), Err(RecordError::ObjectOffEdge));
+    }
+
+    /// A browser extension's manifest asks for a permission: an access edge
+    /// at `requested`, to one of the fixed list, under a built-in rule, with
+    /// the manifest key as the token.
+    fn permission_edge() -> serde_json::Value {
+        json!({
+            "v": 1, "kind": "edge", "collector": "browser.extension",
+            "subject": {
+                "kind": "extension", "platform": "chromium",
+                "id": "nkbihfbeogaeaoehlefnkodbefgpgknn", "version": "13.56.0.0",
+                "digest": "bd1:8aa0e5bf089ace014976eb8cae42a857ceb0604a7d2f00870419a3f03c588293"
+            },
+            "edge": "access", "grade": "requested",
+            "object": {"kind": "permission", "id": "extension/all-sites"},
+            "rule": "declared/extension-permission",
+            "proof": {
+                "matcher": "extension_manifest", "token": "host_permissions", "count": 2,
+                "example": "*://*/*", "where": "manifest.json", "region": "manifest_key",
+                "scope": "app_code"
+            }
+        })
+    }
+
+    #[test]
+    fn a_permission_is_an_access_edge_under_the_built_in_rule() {
+        let tree = permission_edge();
+        let record: Record = serde_json::from_value(tree.clone()).unwrap();
+        record.validate().unwrap();
+        assert_eq!(serde_json::to_value(&record).unwrap(), tree);
+
+        let with = |pointer: &str, value: serde_json::Value| {
+            let mut tree = permission_edge();
+            *tree.pointer_mut(pointer).unwrap() = value;
+            serde_json::from_value::<Record>(tree).unwrap().validate()
+        };
+        assert_eq!(with("/proof/token", json!("optional_permissions")), Ok(()));
+        // A permission is reached, not a channel to anyone.
+        let mut channel = permission_edge();
+        channel["edge"] = json!("channel");
+        channel["grade"] = json!("declares");
+        assert_eq!(
+            serde_json::from_value::<Record>(channel).unwrap().validate(),
+            Err(RecordError::ObjectOffEdge)
+        );
+        assert_eq!(with("/grade", json!("contains")), Err(RecordError::GradeOffLadder));
+        // Only the fixed list, only the built-in rule, only a manifest key.
+        assert_eq!(
+            with("/object/id", json!("extension/everything")),
+            Err(RecordError::BadText("object.id"))
+        );
+        assert_eq!(with("/object/id", json!("tabs")), Err(RecordError::BadText("object.id")));
+        assert_eq!(with("/rule", json!("sdk/sentry")), Err(RecordError::ObjectRuleMismatch));
+        assert_eq!(
+            with("/rule", json!("declared/update-feed")),
+            Err(RecordError::ObjectRuleMismatch)
+        );
+        assert_eq!(with("/proof/token", json!("tabs")), Err(RecordError::BadText("proof.token")));
+        // An extension's manifest is no witness of an SDK or a host.
+        let mut sdk = permission_edge();
+        sdk["object"]["kind"] = json!("sdk");
+        assert_eq!(
+            serde_json::from_value::<Record>(sdk).unwrap().validate(),
+            Err(RecordError::ObjectOffEdge)
+        );
+    }
+
+    #[test]
+    fn an_extension_s_facts_hold_a_host_and_no_address() {
+        let artifact = |facts: serde_json::Value| {
+            serde_json::from_value::<Record>(json!({
+                "v": 1, "kind": "artifact", "collector": "browser.extension",
+                "subject": permission_edge()["subject"], "facts": facts
+            }))
+        };
+        let facts = json!({
+            "name": "MetaMask", "publisher": "https://metamask.io", "homepage": "metamask.io",
+            "browser": "dia", "files_scanned": 2, "bytes_scanned": 4096
+        });
+        let record = artifact(facts.clone()).unwrap();
+        record.validate().unwrap();
+        assert_eq!(serde_json::to_value(&record).unwrap()["facts"], facts);
+
+        let mut address = facts.clone();
+        address["homepage"] = json!("https://metamask.io/download");
+        assert_eq!(
+            artifact(address).unwrap().validate(),
+            Err(RecordError::BadText("facts.homepage"))
+        );
+        let mut control = facts.clone();
+        control["publisher"] = json!("Evil\u{202e}Corp");
+        assert_eq!(
+            artifact(control).unwrap().validate(),
+            Err(RecordError::BadText("facts.publisher"))
+        );
+        let mut unknown = facts;
+        unknown["browser"] = json!("netscape");
+        assert!(artifact(unknown).is_err());
+    }
+
+    /// A browser is where extensions are looked for. It has no digest, and
+    /// the only thing a record can say of it is that its extensions were
+    /// skipped.
+    #[test]
+    fn a_browser_is_only_ever_the_subject_of_a_skip() {
+        let skipped = |id: &str, platform: &str, digest: &str, status: &str| {
+            serde_json::from_value::<Record>(json!({
+                "v": 1, "kind": "coverage", "collector": "browser.extension",
+                "subject": {"kind": "browser", "platform": platform, "id": id, "digest": digest},
+                "status": status, "reason": "no_privilege", "count": 1
+            }))
+            .unwrap()
+            .validate()
+        };
+        assert_eq!(skipped("chrome", "chromium", "unread", "skipped"), Ok(()));
+        assert_eq!(skipped("firefox", "firefox", "unread", "skipped"), Ok(()));
+        assert_eq!(
+            skipped("chrome", "chromium", "unread", "unrecognized"),
+            Err(RecordError::UnreadSubject)
+        );
+        let digest = "bd1:8aa0e5bf089ace014976eb8cae42a857ceb0604a7d2f00870419a3f03c588293";
+        assert_eq!(
+            skipped("chrome", "chromium", digest, "skipped"),
+            Err(RecordError::BrowserSubject)
+        );
+        // The id names a browser this build knows, on its own platform.
+        assert_eq!(
+            skipped("chrome", "firefox", "unread", "skipped"),
+            Err(RecordError::BadText("subject.id"))
+        );
+        assert_eq!(
+            skipped("/Users/someone/Chrome", "chromium", "unread", "skipped"),
+            Err(RecordError::BadText("subject.id"))
+        );
+        for browser in Browser::ALL {
+            assert_eq!(Browser::from_id(browser.as_str()), Some(browser));
+            assert_eq!(serde_json::to_value(browser).unwrap(), json!(browser.as_str()));
+        }
     }
 
     #[test]

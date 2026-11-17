@@ -249,6 +249,7 @@ mod tests {
                 sandbox: None,
                 files_scanned: 2,
                 bytes_scanned: 64,
+                ..Facts::default()
             },
         })
     }

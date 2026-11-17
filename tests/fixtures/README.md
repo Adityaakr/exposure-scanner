@@ -61,6 +61,23 @@ strings and no code. The file is written by `fixture()` in
 `EXPOSURE_BLESS=1 cargo test -p exposure` regenerates it and the committed
 reports.
 
+## `browser/`
+
+Synthetic browser extensions, the fixture of the extension collector. Each
+manifest is written to show one rule of the collector:
+
+| Path | What it is there for |
+|---|---|
+| `Extensions/abcdefghijklmnopabcdefghijklmnop/2.1.0_0/` | A Chromium extension as a profile stores it. Its manifest has a comment, a name that is a reference into `_locales/en/messages.json`, `<all_urls>` under `host_permissions`, `tabs` and `cookies`, an optional `clipboardRead`, and a script for every `https` and `http` page. `background.js` and `content.js` hold a URL and are never read |
+| `Extensions/ponmlkjihgfedcbaponmlkjihgfedcba/1.0_0/` | A Chromium extension that asks for nothing broad: named sites, interface names that are not on the list, and a style sheet for every page. It has an `artifact` record and no claim |
+| `addon@example.org.xpi` | A Firefox add-on with a version 2 manifest: site patterns among its `permissions`, its publisher under `developer`, and an optional pattern for every `.com` site that is not reported next to the `<all_urls>` it holds. The file is written by `addon()` in `crates/xs-cli/tests/browser.rs`, and a test fails if the two disagree |
+
+Scanning `Extensions` and the add-on must yield nine claims, every one an
+`access` claim at `requested` that names no company:
+`browser/Extensions.report.json` is the report, byte for byte.
+`EXPOSURE_BLESS=1 cargo test -p exposure` regenerates the add-on and the
+report.
+
 ## Real apps
 
 Real apps are pinned here by URL and SHA-256 and read from a cache folder

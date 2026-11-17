@@ -14,6 +14,7 @@ xs-formats.workspace = true
 xs-match.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+psl.workspace = true
 rayon.workspace = true
 
 [target.'cfg(unix)'.dependencies]

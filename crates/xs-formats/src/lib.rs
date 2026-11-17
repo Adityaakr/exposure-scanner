@@ -16,6 +16,7 @@ pub mod android_manifest;
 pub mod asar;
 pub mod codesign;
 pub mod dex;
+pub mod extension_manifest;
 pub mod host;
 pub mod info_plist;
 mod le;

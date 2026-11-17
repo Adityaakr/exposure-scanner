@@ -13,8 +13,8 @@ it found, so that the next scan reads only the apps that changed.
 ## Status
 
 Milestone 1 ("static truth") is in progress. This repository currently holds
-the foundation, the macOS, Electron and Android collectors, the resolver, the
-scan scheduler and the results cache:
+the foundation, the macOS, Electron, Android and browser extension
+collectors, the resolver, the scan scheduler and the results cache:
 
 | Part | State |
 |---|---|
@@ -30,6 +30,7 @@ scan scheduler and the results cache:
 | What each app may access: usage descriptions and entitlements of a macOS bundle, `uses-permission` of an Android manifest, as access claims graded `requested` | Done (below) |
 | Results cache: an app that has not changed since an earlier scan is not read again; private, deletable, off with `--no-cache`; the report is the same with it and without | Done (below) |
 | Automatic eviction of removed apps from the results cache | Not yet (follow-up); until then, delete the cache folder |
+| Browser extensions: the extensions in your profiles of Chromium-family browsers and Firefox, and what each manifest asks the browser for | Done (below) |
 | HTML report | Not yet (build plan tasks 11, 13 and 14) |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
@@ -56,9 +57,10 @@ An Electron app is a macOS bundle too, so all of the above applies to it.
 Its scripts are read as well: an SDK is found when it is installed as an npm
 package, or bundled into the app's own code.
 
-So today a scan covers macOS bundles, Electron apps among them, and Android
-packages. It looks for the SDKs the built-in pack has rules for, and for
-nothing else. A clean report from this build does not mean an app is clean.
+So today a scan covers macOS bundles, Electron apps among them, Android
+packages and browser extensions. It looks for the SDKs the built-in pack has
+rules for, and for nothing else. A clean report from this build does not mean
+an app is clean.
 
 ### What the built-in pack recognises
 
@@ -156,7 +158,7 @@ $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exp
 ```
 
 ```
-exposure scan [PATH...] [--json FILE] [--threads N]   scan .app bundles, .apk files, or folders of them
+exposure scan [PATH...] [--json FILE] [--threads N]   scan .app bundles, .apk files, extensions, or folders of them
               [--no-cache]                            without the cache
 exposure report FILE [--json FILE]                    derive the report again from saved evidence
 exposure rules show                                   list the built-in rule pack
@@ -169,14 +171,17 @@ sensitive in itself.
 
 ### What is scanned
 
-A `PATH` is a macOS `.app` bundle, an Android `.apk` file, or a folder. A
-folder is searched for both, in itself and in its sub-folders, never inside
-a bundle. An app reached two ways, such as directly and through a symbolic
-link, is scanned once.
+A `PATH` is a macOS `.app` bundle, an Android `.apk` file, a browser
+extension (a Firefox `.xpi` file, or a Chromium `<id>/<version>` folder that
+holds a `manifest.json`), or a folder. A folder is searched for all of them,
+in itself and in its sub-folders, never inside a bundle. An app reached two
+ways, such as directly and through a symbolic link, is scanned once.
 
 Without a `PATH`, on macOS, the installed apps are scanned: those in
-`/Applications` and in your own `~/Applications`. On another system there is
-no folder this build knows to look in, and a scan without a `PATH` says so.
+`/Applications` and in your own `~/Applications`. So are the extensions in
+your own profiles of the browsers below ("Browser extensions"). On another
+system there is no folder this build knows to look in, and a scan without a
+`PATH` says so.
 
 A `PATH` replaces the installed-app folders, it is not added to them: when
 any `PATH` is given, only what the `PATH`s name is scanned.
@@ -191,9 +196,9 @@ not part of the JSON report, and it never holds a path you gave.
 
 ```console
 $ target/release/exposure scan --json report.json
-exposure: scanned 16 apps (11658 files, 6813162633 bytes): 121 claims, 3 coverage notes
+exposure: scanned 16 apps and 8 browser extensions (11669 files, 6813657279 bytes): 136 claims, 4 coverage notes
 exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
-exposure: scope: the apps installed in /Applications and ~/Applications; /System/Applications (Apple's own apps on the sealed system volume) was not searched: name the folder to scan it
+exposure: scope: the apps installed in /Applications and ~/Applications; /System/Applications (Apple's own apps on the sealed system volume) was not searched: name the folder to scan it; the extensions installed in your profiles of Arc, Brave, Google Chrome, Chromium, Dia, Microsoft Edge, Firefox and Vivaldi
 exposure: cache: 16 apps unchanged since an earlier scan and not read again, 0 apps read
 ```
 
@@ -206,6 +211,10 @@ report as a coverage note, never passed off as "nothing found":
 |---|---|
 | A file inside a bundle, or a bundle's folder | `skipped`, `unreadable`, under that bundle, with the place inside it |
 | An `.apk` file: no permission, a read error, or the file changes while it is read | `skipped`, `unreadable`, under the name of the file |
+| A browser whose profile folder the system will not let the scan list (macOS protects some apps' data this way) | `skipped`, `no_privilege`, under the browser, such as `chrome`, with how many folders |
+| A browser extension whose `manifest.json` is missing, is a link, or cannot be read; an add-on archive over 64 MiB | `skipped`, `unreadable` or `over_budget`, under the extension's id |
+| A `manifest.json` that is not JSON, or a message catalogue the name points at that is missing | `unrecognized`, `parse_error`, or `skipped`, `unreadable`, under the extension, with the place inside it |
+| Older version folders of a Chromium extension that an update left behind, next to the highest version, which is the one scanned | `skipped`, `superseded_version`, under the extension, with how many folders |
 
 An `.apk` file is identified by its hash. One that was not read to its end
 as one file has none, so its coverage note carries the digest `unread` and
@@ -217,7 +226,8 @@ Reading is nearly all of a scan's time, and between two scans nearly no app
 changes. So a scan keeps what it found in each app, and the next scan reads
 only the apps whose files look different. On the laptop measured below, a
 scan of the 16 installed apps takes 1.4 s when it reads them and 0.10 s when
-none has changed.
+none has changed. Browser extensions are not kept: a manifest is a few
+kilobytes, so every scan reads them again.
 
 **The report is the same with the cache and without it, byte for byte.** A
 kept result is used only if all of this still holds:
@@ -417,6 +427,86 @@ are reported as unsupported. Split packages are scanned one file at a time. A pa
 read to its end, or that changes while it is read, has no hash to report
 its content under: it is reported as skipped (see "What is scanned").
 
+### Browser extensions
+
+An extension sits inside every page you open, and it may only do what its
+`manifest.json` asks the browser for: the browser grants nothing that is not
+listed there. So that file is what is read, and nothing else:
+
+| Browser | Where its extensions are | What is read |
+|---|---|---|
+| Arc, Brave, Google Chrome, Chromium, Dia, Microsoft Edge, Vivaldi | `~/Library/Application Support/<browser>/<profile>/Extensions/<id>/<version>/`, every profile, the highest version of each extension | `manifest.json`, and `_locales/<default_locale>/messages.json` when the name is a reference into it |
+| Firefox | `~/Library/Application Support/Firefox/Profiles/<profile>/extensions/<id>.xpi` | The archive, for its hash, and the same two entries inside it |
+
+Your history, cookies, bookmarks, saved logins, preferences and pages are
+never opened. Folders are listed to find the extensions; a link is never
+followed. No special privilege is needed: a browser whose folders macOS will
+not let the scan list (it protects some apps' data unless the terminal has
+been given access) is reported as skipped, and the scan carries on.
+
+Each powerful thing a manifest asks for becomes an `access` claim at the
+grade `requested`, about the extension, to a permission from a fixed list
+that is part of the scanner, not of the rule pack:
+
+| Permission | The extension may |
+|---|---|
+| `extension/all-sites` | read and change data on every website you visit |
+| `extension/broad-sites` | read and change data on a broad set of websites: every site under one domain ending, every site over plain http or on one port, or some pages of every site |
+| `extension/history` | read and change your browsing history |
+| `extension/tabs` | see the address and title of every tab you have open |
+| `extension/web-navigation` | see the address of each page as you open it |
+| `extension/web-request` | watch the network requests of the sites it can reach |
+| `extension/cookies` | read and change the cookies of the sites it can reach |
+| `extension/clipboard-read`, `extension/clipboard-write` | read what you copy; replace what is on your clipboard |
+| `extension/downloads` | start downloads and see what you have downloaded |
+| `extension/native-messaging` | exchange messages with a program installed on this computer |
+| `extension/management` | see, switch on and switch off your other extensions |
+| `extension/debugger` | attach the browser's debugger to a page, which can read and change everything in it |
+| `extension/proxy` | route the browser's traffic through a proxy it chooses |
+
+"Every website" is said only of a pattern that covers every page of every
+site: `<all_urls>`, or a wildcard host on any port over `https` or both
+schemes. The browser grants a site whole whatever path a permission's pattern
+gives, so `https://*/` under `host_permissions` (or, in a version 2 manifest,
+`permissions`) is every website; a script's `matches` must have the path `/*`.
+A browser takes sites under `host_permissions` and `optional_host_permissions`
+only from manifest version 3, and under `permissions` and
+`optional_permissions` only before it, so what the other pair lists is not
+reported; a manifest that states no version counts as version 2.
+A wildcard pattern that covers less (only `http`, one port, part of each site
+for a script, a script that `include_globs` narrows, or every site under a
+suffix such as `*.com`) is a broad set; a pattern that names sites is not
+reported. A
+script the browser puts into pages counts only if it runs code: style sheets
+alone cannot read a page. What an extension lists under an `optional_` key
+it holds only once it asks while it runs and you agree, so such a claim
+carries the note `optional`. Whether the browser holds a permission now is
+not read.
+
+The words are what the browser allows, not what an extension does: "may
+read and change data on every website you visit". A permission names no
+company and counts in no headline number, and its claim's category is
+`extension_permission`. Each claim cites records that name the manifest
+key, how many of its entries ask for the permission, and the least of them,
+so it can be checked by opening `manifest.json`.
+
+An extension is a subject of the kind `extension` on the platform `chromium`
+or `firefox`. Its id is the browser's: the folder name for the Chromium
+family, the file name for Firefox. Its digest covers the files that were
+read (`bd1` for a folder, `sha256` for an add-on), so the same extension is
+the same subject in every browser and on every machine. Its `artifact`
+record holds its name, the publisher and the host of the home page its
+manifest declares, and which browser it was found in.
+
+```console
+$ target/release/exposure scan tests/fixtures/browser/Extensions tests/fixtures/browser/addon@example.org.xpi
+exposure: scanned 0 apps and 3 browser extensions (4 files, 1436 bytes): 9 claims, 0 coverage notes
+```
+
+`tests/fixtures/browser/Extensions.report.json` is that report in full: two
+Chromium extensions, one of which asks for nothing broad and so has no
+claim, and one Firefox add-on.
+
 ## The six properties
 
 The scanner reads app lists, so it has to be safer than the apps it reports
@@ -461,7 +551,7 @@ One Cargo workspace. A crate may depend only on crates above it in this list.
 | `xs-rules` | Pack loader and signature check; source compiler behind a tooling-only feature | std without file access |
 | `xs-derive` | Evidence and pack in, claims out: grades, companies, vendors, parties | `no_std` |
 | `xs-render` | Claims and evidence in, report out | `no_std` |
-| `xs-collect` | Discovery, reading and the results cache. The only crate that opens files | std |
+| `xs-collect` | Discovery, reading and the results cache, one module per collector. The only crate that opens files | std |
 | `exposure` (in `crates/xs-cli`) | The `exposure` binary | std |
 | `xtask` | Developer tooling. Never shipped | anything |
 
