@@ -187,11 +187,14 @@ impl_serde_str!(SubjectDigest, "a subject digest such as \"sha256:…\" or \"bd1
 /// directory listing it consulted, by the hash of the sorted entry names. Two
 /// bundles with equal digests therefore yield equal evidence, which is the
 /// property that makes a `contains` record reproducible by anyone holding the
-/// same artifact.
+/// same artifact. A file the collector refused to read because it is over
+/// the per-file byte budget enters by its size, the one thing known about
+/// it, so the coverage record that names that size is covered too.
 ///
 /// The digest is the SHA-256 of the canonical JSON of
 /// `["bd1", [[path, entry], …]]` with paths in byte order, where `entry` is
-/// `"sha256:<hex>"` for a file and `"names:<hex>"` for a directory listing.
+/// `"sha256:<hex>"` for a file, `"names:<hex>"` for a directory listing and
+/// `"over_budget:<size in bytes>"` for a file over the budget.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BundleManifest {
     entries: BTreeMap<RelPath, ManifestEntry>,
@@ -201,6 +204,7 @@ pub struct BundleManifest {
 enum ManifestEntry {
     File(Sha256Digest),
     Listing(Sha256Digest),
+    OverBudget(u64),
 }
 
 impl BundleManifest {
@@ -213,6 +217,12 @@ impl BundleManifest {
     /// Records a file the collector read, by the hash of its content.
     pub fn file(&mut self, path: RelPath, content: Sha256Digest) {
         self.entries.insert(path, ManifestEntry::File(content));
+    }
+
+    /// Records a file the collector did not read because it is over the
+    /// per-file byte budget, by its size in bytes.
+    pub fn over_budget(&mut self, path: RelPath, bytes: u64) {
+        self.entries.insert(path, ManifestEntry::OverBudget(bytes));
     }
 
     /// Records a directory listing the collector consulted.
@@ -262,6 +272,7 @@ impl BundleManifest {
             let value = match entry {
                 ManifestEntry::File(digest) => alloc::format!("sha256:{digest}"),
                 ManifestEntry::Listing(digest) => alloc::format!("names:{digest}"),
+                ManifestEntry::OverBudget(bytes) => alloc::format!("over_budget:{bytes}"),
             };
             preimage.push(b'[');
             canon::write_string(&mut preimage, path.as_str());
@@ -408,5 +419,29 @@ mod tests {
             r#"["bd1",[["Contents/Frameworks","names:{names}"],["Contents/Info.plist","sha256:{EMPTY}"]]]"#
         );
         assert_eq!(manifest.digest(), SubjectDigest::Bundle(Sha256Digest::of(preimage.as_bytes())));
+    }
+
+    #[test]
+    fn an_over_budget_file_enters_the_pinned_preimage_by_its_size() {
+        let manifest = |bytes| {
+            let mut manifest = BundleManifest::new();
+            manifest.file(path("Contents/Info.plist"), Sha256Digest::of(b""));
+            manifest.over_budget(path("Contents/MacOS/Huge"), bytes);
+            manifest
+        };
+        let preimage = alloc::format!(
+            r#"["bd1",[["Contents/Info.plist","sha256:{EMPTY}"],["Contents/MacOS/Huge","over_budget:2147483649"]]]"#
+        );
+        assert_eq!(
+            manifest(2_147_483_649).digest(),
+            SubjectDigest::Bundle(Sha256Digest::of(preimage.as_bytes()))
+        );
+        // The size is all that is known about such a file, so it must count.
+        assert_ne!(manifest(2_147_483_649).digest(), manifest(2_147_483_650).digest());
+        // A file that was read and happens to hash to anything is a
+        // different kind of entry.
+        let mut read = manifest(2_147_483_649);
+        read.file(path("Contents/MacOS/Huge"), Sha256Digest::of(b"2147483649"));
+        assert_ne!(read.digest(), manifest(2_147_483_649).digest());
     }
 }

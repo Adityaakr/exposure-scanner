@@ -31,7 +31,10 @@ const ELLIPSIS: char = '…';
 #[must_use]
 pub fn is_storable(character: char) -> bool {
     !(character.is_control()
-        || matches!(character, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+        || matches!(
+            character,
+            '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+        ))
 }
 
 /// Whether `text` could have come out of [`clean`] with the same budget.
@@ -83,6 +86,16 @@ mod tests {
     fn replaces_control_and_bidi_characters() {
         assert_eq!(clean("a\u{0}b\nc\u{1b}[31m", 255), "a\u{fffd}b\u{fffd}c\u{fffd}[31m");
         assert_eq!(clean("evil\u{202e}txt.exe", 255), "evil\u{fffd}txt.exe");
+        // Every code point with the Unicode Bidi_Control property
+        // (PropList.txt): U+061C, U+200E..200F, U+202A..202E, U+2066..2069.
+        let bidi_controls = ('\u{061c}'..='\u{061c}')
+            .chain('\u{200e}'..='\u{200f}')
+            .chain('\u{202a}'..='\u{202e}')
+            .chain('\u{2066}'..='\u{2069}');
+        for control in bidi_controls {
+            assert!(!is_storable(control), "U+{:04X}", control as u32);
+            assert_eq!(clean(&alloc::format!("Safe{control}1.0"), 255), "Safe\u{fffd}1.0");
+        }
     }
 
     #[test]

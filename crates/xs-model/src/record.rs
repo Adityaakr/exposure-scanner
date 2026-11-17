@@ -474,6 +474,10 @@ pub struct CoverageRecord {
     /// The place inside the artifact, when there is a single one.
     #[serde(rename = "where", default, skip_serializing_if = "Option::is_none")]
     pub location: Option<RelPath>,
+    /// The size in bytes of the input that was not covered, when the size is
+    /// the reason: a file over the per-file byte budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
     /// How many items this record stands for.
     pub count: u32,
 }
@@ -679,7 +683,13 @@ pub(crate) mod tests {
             "status": "skipped", "reason": "encrypted_binary",
             "where": "Wrapper/X.app/X", "count": 1
         });
-        for tree in [artifact, coverage] {
+        let oversized = json!({
+            "v": 1, "kind": "coverage", "collector": "macos.bundle",
+            "subject": artifact["subject"],
+            "status": "skipped", "reason": "over_budget",
+            "where": "Contents/MacOS/Huge", "bytes": 2_147_483_649_u64, "count": 1
+        });
+        for tree in [artifact, coverage, oversized] {
             let record: Record = serde_json::from_value(tree.clone()).unwrap();
             record.validate().unwrap();
             assert_eq!(serde_json::to_value(&record).unwrap(), tree);

@@ -9,6 +9,12 @@
 //! * Every Mach-O file in the bundle is hashed in one pass, so that two
 //!   builds which share an app id and version are still two subjects.
 //!
+//! Every limit is a fixed budget, so a hostile bundle costs a bounded amount
+//! of work and gives the same result on every run: [`MAX_DEPTH`] folders
+//! deep, [`MAX_FILES`] files, [`MAX_FILE_BYTES`] per file, and the property
+//! list parser's own budgets. What a budget cuts off becomes an
+//! `over_budget` coverage record.
+//!
 //! Mach-O sections, Objective-C class names, load commands, the code
 //! signature and privacy manifests are task 6.
 //!
@@ -43,29 +49,34 @@ use crate::schedule::Pool;
 pub const MAX_DEPTH: u32 = 64;
 /// Most files the collector considers in one bundle.
 pub const MAX_FILES: usize = 1_000_000;
+/// Largest file the collector reads: 2 GiB. A larger file is not opened; it
+/// is reported with its size, and the bundle digest covers that size instead
+/// of a content hash. The largest file seen in a real app was 485 MB.
+pub const MAX_FILE_BYTES: u64 = 2 << 30;
 
 const CONTENTS: &str = "Contents";
 const INFO_PLIST: &str = "Contents/Info.plist";
 const FRAMEWORKS: &str = "Contents/Frameworks";
 
 /// Something the collector could not cover, keyed so that equal gaps add up.
-type GapKey = (CoverageStatus, CoverageReason, Option<RelPath>);
+/// The last part is the size of a file over the byte budget.
+type GapKey = (CoverageStatus, CoverageReason, Option<RelPath>, Option<u64>);
 
 #[derive(Default)]
 struct Gaps(BTreeMap<GapKey, u32>);
 
 impl Gaps {
-    fn add(&mut self, status: CoverageStatus, reason: CoverageReason, location: Option<RelPath>) {
-        let count = self.0.entry((status, reason, location)).or_insert(0);
+    fn add(&mut self, key: GapKey) {
+        let count = self.0.entry(key).or_insert(0);
         *count = count.saturating_add(1);
     }
 
     fn skipped(&mut self, reason: CoverageReason, location: Option<RelPath>) {
-        self.add(CoverageStatus::Skipped, reason, location);
+        self.add((CoverageStatus::Skipped, reason, location, None));
     }
 
     fn unrecognized(&mut self, reason: CoverageReason, location: Option<RelPath>) {
-        self.add(CoverageStatus::Unrecognized, reason, location);
+        self.add((CoverageStatus::Unrecognized, reason, location, None));
     }
 }
 
@@ -86,6 +97,19 @@ struct Plan {
     bytes_read: u64,
 }
 
+impl Plan {
+    /// Sets aside a file of `bytes` bytes, which is over [`MAX_FILE_BYTES`].
+    fn over_budget(&mut self, path: RelPath, bytes: u64) {
+        self.manifest.over_budget(path.clone(), bytes);
+        self.gaps.add((
+            CoverageStatus::Skipped,
+            CoverageReason::OverBudget,
+            Some(path),
+            Some(bytes),
+        ));
+    }
+}
+
 /// One file to read: which bundle, which file in its plan, and how large.
 struct Job {
     bundle: usize,
@@ -99,6 +123,8 @@ enum FileResult {
     NotCandidate,
     /// Read to the end.
     Read(OnePass),
+    /// Larger than the byte budget by the time it was read: its size.
+    OverBudget(u64),
     /// The file system refused.
     Failed,
 }
@@ -138,7 +164,9 @@ pub fn collect(
     let results: Vec<FileResult> = pool.map(&jobs, |job| {
         let found = plans.get(job.bundle).and_then(|plan| Some((plan, plan.files.get(job.file)?)));
         match found {
-            Some((plan, (path, _))) => read_file(&plan.root.join(path.as_str()), &content),
+            Some((plan, (path, _))) => {
+                read_file(&plan.root.join(path.as_str()), &content, MAX_FILE_BYTES)
+            }
             None => FileResult::Failed,
         }
     });
@@ -326,6 +354,9 @@ fn walk(plan: &mut Plan) {
                     break;
                 }
                 match entry.metadata() {
+                    Ok(metadata) if metadata.len() > MAX_FILE_BYTES => {
+                        plan.over_budget(path, metadata.len());
+                    }
                     Ok(metadata) => plan.files.push((path, metadata.len())),
                     Err(_) => plan.gaps.skipped(CoverageReason::Unreadable, Some(path)),
                 }
@@ -346,14 +377,24 @@ thread_local! {
 
 /// Reads one file in a single pass if its first bytes say it is a Mach-O
 /// file, and gives up after one small read otherwise.
-fn read_file<M: ContentMatcher + ?Sized>(path: &Path, content: &M) -> FileResult {
-    let Ok(mut file) = File::open(path) else { return FileResult::Failed };
+///
+/// Never reads more than one byte past `budget`. The walk already set aside
+/// the files that were larger when it listed them; one that has grown since
+/// stops here and is reported the same way.
+fn read_file<M: ContentMatcher + ?Sized>(path: &Path, content: &M, budget: u64) -> FileResult {
+    let Ok(file) = File::open(path) else { return FileResult::Failed };
+    let mut bounded = (&file).take(budget.saturating_add(1));
     SCRATCH.with_borrow_mut(|buf| {
         let needed = read::buffer_len(content, WINDOW);
         if buf.len() < needed {
             buf.resize(needed, 0);
         }
-        match read::one_pass(&mut file, buf, WINDOW, content, |head| macho::sniff(head).is_some()) {
+        let sniff = |head: &[u8]| macho::sniff(head).is_some();
+        match read::one_pass(&mut bounded, buf, WINDOW, content, sniff) {
+            Ok(Some(pass)) if pass.bytes > budget => match file.metadata() {
+                Ok(metadata) => FileResult::OverBudget(metadata.len().max(pass.bytes)),
+                Err(_) => FileResult::Failed,
+            },
             Ok(Some(pass)) => FileResult::Read(pass),
             Ok(None) => FileResult::NotCandidate,
             Err(_) => FileResult::Failed,
@@ -376,14 +417,22 @@ fn finish(
                 plan.files_read += 1;
                 plan.bytes_read += pass.bytes;
             }
+            FileResult::OverBudget(bytes) => {
+                let path = path.clone();
+                plan.over_budget(path, bytes);
+            }
             FileResult::Failed => plan.gaps.skipped(CoverageReason::Unreadable, Some(path.clone())),
         }
     }
 
+    // A value the property list declares but leaves empty is no value, so
+    // each one is cleaned and checked before the next is considered.
+    let declared = |value: Option<String>, max_bytes: usize| {
+        value.map(|value| text::clean(&value, max_bytes)).filter(|value| !value.is_empty())
+    };
     let parsed = plan.info.is_some();
     let info = plan.info.unwrap_or_default();
-    let declared_id = info.identifier.as_deref().map(|id| text::clean(id, text::MAX_ID_BYTES));
-    let id = match declared_id.filter(|id| !id.is_empty()) {
+    let id = match declared(info.identifier, text::MAX_ID_BYTES) {
         Some(id) => id,
         None => {
             // No usable app id: fall back to the folder's name so that the
@@ -397,11 +446,8 @@ fn finish(
             if name.is_empty() { String::from("unnamed.app") } else { name }
         }
     };
-    let version = info
-        .short_version
-        .or(info.build_version)
-        .map(|version| text::clean(&version, text::MAX_VERSION_BYTES))
-        .filter(|version| !version.is_empty());
+    let version = declared(info.short_version, text::MAX_VERSION_BYTES)
+        .or_else(|| declared(info.build_version, text::MAX_VERSION_BYTES));
     let subject = Subject {
         kind: SubjectKind::App,
         platform: Platform::Macos,
@@ -411,11 +457,8 @@ fn finish(
     };
 
     let mut records = Vec::new();
-    let name = info
-        .display_name
-        .or(info.name)
-        .map(|name| text::clean(&name, text::MAX_NAME_BYTES))
-        .filter(|name| !name.is_empty());
+    let name = declared(info.display_name, text::MAX_NAME_BYTES)
+        .or_else(|| declared(info.name, text::MAX_NAME_BYTES));
     records.push(Record::Artifact(ArtifactRecord {
         v: V1,
         collector: Collector::MacosBundle,
@@ -449,7 +492,7 @@ fn finish(
         }
     }
 
-    for ((status, reason, location), count) in plan.gaps.0 {
+    for ((status, reason, location, bytes), count) in plan.gaps.0 {
         records.push(Record::Coverage(CoverageRecord {
             v: V1,
             collector: Collector::MacosBundle,
@@ -457,8 +500,43 @@ fn finish(
             status,
             reason,
             location,
+            bytes,
             count,
         }));
     }
     (records, plan.files_read, plan.bytes_read)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write as _;
+
+    use super::*;
+
+    /// The byte budget must bind on what is actually read, not only on the
+    /// size the walk saw: a file can grow between the two. The oracle is the
+    /// file's length as written here.
+    #[test]
+    fn a_file_over_the_budget_when_read_is_set_aside_with_its_size() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut bytes = vec![0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01];
+        bytes.resize(100, 0);
+        file.write_all(&bytes).unwrap();
+
+        let whole = Sha256Digest::of(&bytes);
+        assert!(matches!(
+            read_file(file.path(), &NoContent, 100),
+            FileResult::Read(pass) if pass.bytes == 100 && pass.sha256 == whole
+        ));
+        for budget in [99, 50, 16] {
+            assert!(
+                matches!(read_file(file.path(), &NoContent, budget), FileResult::OverBudget(100)),
+                "budget {budget}"
+            );
+        }
+        // A file that is not a candidate is still told apart by its head.
+        let mut other = tempfile::NamedTempFile::new().unwrap();
+        other.write_all(&[b'x'; 100]).unwrap();
+        assert!(matches!(read_file(other.path(), &NoContent, 50), FileResult::NotCandidate));
+    }
 }

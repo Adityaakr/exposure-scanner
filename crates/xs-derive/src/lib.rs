@@ -469,6 +469,7 @@ mod tests {
                 status: CoverageStatus::Skipped,
                 reason: CoverageReason::Unreadable,
                 location: None,
+                bytes: None,
                 count: 1,
             }),
         ]);

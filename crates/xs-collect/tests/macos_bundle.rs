@@ -465,6 +465,78 @@ fn nesting_past_the_depth_budget_is_reported_not_followed() {
     assert_eq!(location.split('/').count(), 64, "{location}");
 }
 
+fn facts(evidence: &EvidenceSet) -> (u64, u64) {
+    evidence
+        .iter()
+        .find_map(|(_, record)| match record {
+            Record::Artifact(artifact) => {
+                Some((artifact.facts.files_scanned, artifact.facts.bytes_scanned))
+            }
+            _ => None,
+        })
+        .unwrap()
+}
+
+/// Every limit is a budget: a file over `MAX_FILE_BYTES` (2 GiB) is not
+/// read. The file here is sparse, so the test would take minutes and count
+/// two gibibytes if the collector read it.
+#[test]
+fn a_file_over_the_byte_budget_is_reported_with_its_size_and_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = bundle(dir.path(), "Example.app");
+    let reference = evidence(&root);
+    let huge = root.join("Contents/MacOS/Huge");
+    write(&huge, macho(b""));
+    let scan_with = |len: u64| {
+        fs::OpenOptions::new().write(true).open(&huge).unwrap().set_len(len).unwrap();
+        evidence(&root)
+    };
+    let size = (2u64 << 30) + 1;
+    assert_eq!(size, xs_collect::macos::MAX_FILE_BYTES + 1);
+    let evidence = scan_with(size);
+
+    let gap = gap(&evidence, CoverageReason::OverBudget);
+    assert_eq!(gap.status, CoverageStatus::Skipped);
+    assert_eq!(gap.location.as_ref().unwrap().as_str(), "Contents/MacOS/Huge");
+    assert_eq!(gap.bytes, Some(size));
+    assert_eq!(gap.count, 1);
+    // Nothing of it was read, and the rest of the bundle was scanned.
+    assert_eq!(facts(&evidence), facts(&reference));
+    assert_eq!(edges(&evidence).len(), 1);
+    // The bundle is a different subject with the file than without it, and
+    // again when only the file's size differs.
+    assert_ne!(digest(&evidence), digest(&reference));
+    assert_ne!(digest(&scan_with(size + 1)), digest(&evidence));
+}
+
+#[test]
+fn an_empty_declared_value_does_not_hide_the_next_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = bundle(dir.path(), "Example.app");
+    write(
+        &root.join("Contents/Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.app</string>
+<key>CFBundleShortVersionString</key><string></string>
+<key>CFBundleVersion</key><string>42</string>
+<key>CFBundleDisplayName</key><string></string>
+<key>CFBundleName</key><string>Foo</string>
+</dict></plist>"#,
+    );
+    let evidence = evidence(&root);
+    let artifact = evidence
+        .iter()
+        .find_map(|(_, record)| match record {
+            Record::Artifact(artifact) => Some(artifact),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(artifact.subject.version.as_deref(), Some("42"));
+    assert_eq!(artifact.facts.name.as_deref(), Some("Foo"));
+    assert!(coverage(&evidence).is_empty());
+}
+
 #[test]
 fn a_file_larger_than_one_window_hashes_correctly() {
     let dir = tempfile::tempdir().unwrap();
