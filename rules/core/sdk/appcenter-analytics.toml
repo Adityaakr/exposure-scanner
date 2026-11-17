@@ -1,0 +1,16 @@
+id = "sdk/appcenter-analytics"
+name = "Microsoft App Center Analytics"
+entity = "microsoft"
+category = "analytics"
+sources = [
+    "https://raw.githubusercontent.com/microsoft/appcenter-sdk-apple/develop/AppCenterAnalytics/AppCenterAnalytics.xcodeproj/project.pbxproj",
+    "https://raw.githubusercontent.com/microsoft/appcenter-sdk-apple/develop/AppCenterAnalytics/AppCenterAnalytics/MSACAnalytics.h",
+    "https://raw.githubusercontent.com/microsoft/appcenter-sdk-android/develop/sdk/appcenter-analytics/src/main/java/com/microsoft/appcenter/analytics/Analytics.java",
+    "https://learn.microsoft.com/en-us/appcenter/retirement",
+]
+notes = ["retired:2025-03-31"]
+
+[match]
+android_class_prefix = ["com.microsoft.appcenter.analytics."]
+apple_framework = ["AppCenterAnalytics.framework"]
+macho_objc_class = ["MSACAnalytics"]

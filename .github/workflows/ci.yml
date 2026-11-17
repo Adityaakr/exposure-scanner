@@ -1,0 +1,77 @@
+name: ci
+
+# Linux runs every check on every change. The macOS job lives in
+# ci-macos.yml and runs on merges and nightly: macOS runner minutes cost ten
+# times as much in a private repository (design report, section 10.2).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_DENY_VERSION: "0.21.0"
+  CARGO_DENY_SHA256: a2170b854ff697e79e39c4c538981c9c1bdd803addbae6719a4cb66b4585a903
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install || rustup show
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: linux-
+
+      - name: Install cargo-deny (pinned by hash) and strace
+        run: |
+          archive="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/cargo-deny.tgz" \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${archive}.tar.gz"
+          echo "${CARGO_DENY_SHA256}  $RUNNER_TEMP/cargo-deny.tgz" | sha256sum --check --strict
+          tar --extract --gzip --file "$RUNNER_TEMP/cargo-deny.tgz" --directory "$RUNNER_TEMP" "${archive}/cargo-deny"
+          install -m 0755 "$RUNNER_TEMP/${archive}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
+          command -v strace >/dev/null || { sudo apt-get update --quiet && sudo apt-get install --yes --quiet strace; }
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Lints (the API bans are lints)
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Tests (determinism, honesty, hostile inputs, pack lints)
+        run: cargo test --locked --workspace --all-features
+
+      - name: Pure crates build without the standard library
+        run: cargo build --locked --target wasm32v1-none -p xs-model -p xs-match -p xs-derive -p xs-render
+
+      - name: Dependency bans, licences and advisories
+        run: cargo deny check
+
+      - name: Rule pack is fresh, reproducible and signed
+        run: cargo xtask pack check
+
+      - name: Guardrails bite
+        run: cargo xtask guardrails
+
+      - name: A scan opens no socket
+        run: cargo xtask no-network --strict

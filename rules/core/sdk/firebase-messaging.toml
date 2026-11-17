@@ -1,0 +1,15 @@
+id = "sdk/firebase-messaging"
+name = "Firebase Cloud Messaging"
+entity = "google"
+category = "push_messaging"
+sources = [
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-messaging/src/main/AndroidManifest.xml",
+    "https://raw.githubusercontent.com/firebase/firebase-android-sdk/main/firebase-messaging/src/main/java/com/google/firebase/messaging/FirebaseMessagingRegistrar.java",
+]
+
+[match]
+manifest_component = [
+    "com.google.firebase.components:com.google.firebase.messaging.FirebaseMessagingRegistrar",
+    "com.google.firebase.messaging.FirebaseMessagingService",
+]
+android_class_prefix = ["com.google.firebase.messaging."]

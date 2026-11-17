@@ -1,0 +1,18 @@
+[package]
+name = "xs-formats"
+description = "Bounded parsers over byte slices for the file formats the exposure scanner reads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+plist.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,32 @@
+[package]
+name = "xs-rules"
+description = "Rule-pack loader, signature check and (for tooling) source compiler of the exposure scanner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# The source compiler and its lints. Only developer tooling enables this, so
+# the shipped binary contains no TOML parser.
+compile = ["dep:toml", "dep:psl", "dep:serde"]
+
+[dependencies]
+xs-model.workspace = true
+serde_json.workspace = true
+minisign-verify.workspace = true
+serde = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+psl = { workspace = true, optional = true }
+
+[dev-dependencies]
+minisign.workspace = true
+
+[[test]]
+name = "compile"
+required-features = ["compile"]
+
+[lints]
+workspace = true

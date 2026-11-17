@@ -1,0 +1,3 @@
+This file is a resource, not code. It mentions Sparkle.framework,
+doubleclick.net and google-analytics.com on purpose: names that merely
+appear in a resource must not produce a finding.

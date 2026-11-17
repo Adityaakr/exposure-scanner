@@ -1,0 +1,8 @@
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+# A target with no standard library. CI builds the pure crates for it, which
+# proves that neither they nor their dependencies can reach a file, a clock
+# or a socket.
+targets = ["wasm32v1-none"]
+profile = "minimal"

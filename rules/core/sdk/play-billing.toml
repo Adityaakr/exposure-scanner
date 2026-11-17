@@ -1,0 +1,15 @@
+id = "sdk/play-billing"
+name = "Google Play Billing Library"
+entity = "google"
+category = "payments"
+sources = [
+    "https://dl.google.com/android/maven2/com/android/billingclient/billing/9.1.0/billing-9.1.0.aar",
+    "https://developer.android.com/reference/com/android/billingclient/api/package-summary",
+]
+
+[match]
+manifest_component = [
+    "com.android.billingclient.api.ProxyBillingActivity",
+    "com.google.android.play.billingclient.version",
+]
+android_class_prefix = ["com.android.billingclient."]

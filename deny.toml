@@ -1,0 +1,94 @@
+# cargo-deny configuration. `cargo deny check` runs in CI on every change.
+#
+# The `bans` list is one of the four independent checks behind the "private"
+# property: the scanner opens no socket because nothing that could open one
+# is allowed into the dependency graph at all. During the spike a
+# public-suffix library pulled in an HTTP client that probed for IPv6 on
+# import, without anyone writing a line that asked for it. This list is what
+# stops that from happening again.
+
+[graph]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Exactly the licences the dependency graph uses today, all compatible with
+# shipping under Apache-2.0. A dependency under any other licence fails the
+# check and gets a deliberate decision.
+allow = ["Apache-2.0", "BSD-3-Clause", "MIT", "Unicode-3.0"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Path dependencies between the workspace's own crates carry no version.
+allow-wildcard-paths = true
+deny = [
+    # HTTP clients and servers
+    { crate = "ureq", reason = "the scanner opens no socket" },
+    { crate = "reqwest", reason = "the scanner opens no socket" },
+    { crate = "hyper", reason = "the scanner opens no socket" },
+    { crate = "hyper-util", reason = "the scanner opens no socket" },
+    { crate = "h2", reason = "the scanner opens no socket" },
+    { crate = "h3", reason = "the scanner opens no socket" },
+    { crate = "http", reason = "the scanner opens no socket" },
+    { crate = "isahc", reason = "the scanner opens no socket" },
+    { crate = "surf", reason = "the scanner opens no socket" },
+    { crate = "attohttpc", reason = "the scanner opens no socket" },
+    { crate = "minreq", reason = "the scanner opens no socket" },
+    { crate = "curl", reason = "the scanner opens no socket" },
+    { crate = "curl-sys", reason = "the scanner opens no socket" },
+    { crate = "tiny_http", reason = "the scanner opens no socket" },
+    { crate = "axum", reason = "the scanner opens no socket" },
+    { crate = "actix-web", reason = "the scanner opens no socket" },
+    { crate = "warp", reason = "the scanner opens no socket" },
+    { crate = "tonic", reason = "the scanner opens no socket" },
+    { crate = "tungstenite", reason = "the scanner opens no socket" },
+    # TLS and QUIC
+    { crate = "rustls", reason = "the scanner opens no socket" },
+    { crate = "native-tls", reason = "the scanner opens no socket" },
+    { crate = "openssl", reason = "the scanner opens no socket" },
+    { crate = "openssl-sys", reason = "the scanner opens no socket" },
+    { crate = "boring", reason = "the scanner opens no socket" },
+    { crate = "quinn", reason = "the scanner opens no socket" },
+    { crate = "security-framework", reason = "the scanner opens no socket" },
+    # Sockets, name resolution and asynchronous runtimes
+    { crate = "socket2", reason = "the scanner opens no socket" },
+    { crate = "mio", reason = "the scanner opens no socket" },
+    { crate = "tokio", reason = "the scanner opens no socket" },
+    { crate = "async-std", reason = "the scanner opens no socket" },
+    { crate = "smol", reason = "the scanner opens no socket" },
+    { crate = "async-io", reason = "the scanner opens no socket" },
+    { crate = "async-net", reason = "the scanner opens no socket" },
+    { crate = "polling", reason = "the scanner opens no socket" },
+    { crate = "hickory-resolver", reason = "the scanner opens no socket" },
+    { crate = "hickory-proto", reason = "the scanner opens no socket" },
+    { crate = "trust-dns-resolver", reason = "the scanner opens no socket" },
+    { crate = "dns-lookup", reason = "the scanner opens no socket" },
+    # Memory mapping: a mapped file that is truncated mid-scan raises SIGBUS
+    # (design report, section 6.2 decision 2).
+    { crate = "memmap2", reason = "files are read in bounded windows, never mapped" },
+    { crate = "memmap", reason = "files are read in bounded windows, never mapped" },
+    # Rules are literals plus a boundary. No pattern language.
+    { crate = "regex", reason = "rules are data: no regular expressions" },
+    { crate = "fancy-regex", reason = "rules are data: no regular expressions" },
+    { crate = "serde_yaml", reason = "deprecated; rule sources are TOML" },
+    # 0.10 silently falls back to a software SHA-256 at one seventh the speed.
+    # The one exception is the key-derivation crate behind the developer-only
+    # signing tool (xtask), which hashes a password, not app files.
+    { crate = "sha2:<0.11", wrappers = ["scrypt"], reason = "use sha2 0.11 or later (design report, section 6.2 decision 4)" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
