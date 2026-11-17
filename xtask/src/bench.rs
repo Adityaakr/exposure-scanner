@@ -24,7 +24,10 @@
 //! The scaling runs keep no results cache, or all but the first would read
 //! nothing. The warm scan is measured after them: one run fills a cache in
 //! a folder of the benchmark's own, never the user's, and the runs after it
-//! find every app unchanged.
+//! find every app unchanged. The scan keeps its cache in the user's cache
+//! folder and takes no option for another, so those runs are given a home
+//! folder of the benchmark's own. Its `Applications` leads to the user's,
+//! so that a scan of the installed apps covers the same apps.
 //!
 //! The scanner has no clock and takes no measurements of itself; all of that
 //! is here, in tooling that never ships.
@@ -97,14 +100,14 @@ fn peak_bytes(usage: &str) -> Option<u64> {
     }
 }
 
-/// Runs one scan of `paths` at `threads` threads and measures it, with its
-/// results cache in `cache` or without one. Files it needs are written into
-/// `dir`.
+/// Runs one scan of `paths` at `threads` threads and measures it, with the
+/// results cache of the user whose home folder is `home`, or without one.
+/// Files it needs are written into `dir`.
 fn run(
     exposure: &Path,
     paths: &[String],
     threads: usize,
-    cache: Option<&Path>,
+    home: Option<&Path>,
     dir: &Path,
 ) -> Result<Run> {
     let usage = dir.join("usage.txt");
@@ -117,8 +120,8 @@ fn run(
     }
     command.arg("-o").arg(&usage).arg(exposure).arg("scan");
     command.arg("--threads").arg(threads.to_string()).arg("--json").arg(&report);
-    match cache {
-        Some(cache) => command.arg("--cache-dir").arg(cache),
+    match home {
+        Some(home) => command.env("HOME", home).env_remove("XDG_CACHE_HOME"),
         None => command.arg("--no-cache"),
     };
     command.arg("--").args(paths);
@@ -241,13 +244,21 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
     }
 
     // The warm scan: one run fills the cache, the next ones find it full.
-    let cache = dir.join("cache");
-    let filled = run(exposure, paths, most, Some(&cache), dir)?;
+    let home = dir.join("home");
+    fs::create_dir(&home).map_err(|error| format!("cannot create {}: {error}", home.display()))?;
+    #[cfg(unix)]
+    if let Some(apps) = std::env::home_dir().map(|home| home.join("Applications"))
+        && apps.is_dir()
+    {
+        std::os::unix::fs::symlink(&apps, home.join("Applications"))
+            .map_err(|error| format!("cannot link {}: {error}", apps.display()))?;
+    }
+    let filled = run(exposure, paths, most, Some(&home), dir)?;
     same_report &= filled.report == first.report;
     peak = peak.max(filled.peak_bytes);
     let mut warm: Option<Run> = None;
     for _ in 0..RUNS {
-        let this = run(exposure, paths, most, Some(&cache), dir)?;
+        let this = run(exposure, paths, most, Some(&home), dir)?;
         same_report &= this.report == first.report;
         peak = peak.max(this.peak_bytes);
         if warm.as_ref().is_none_or(|warm| this.elapsed < warm.elapsed) {

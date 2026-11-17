@@ -8,8 +8,7 @@ use lexopt::prelude::*;
 /// Shown by `--help` and after a usage error.
 pub(crate) const USAGE: &str = "\
 usage:
-  exposure scan [PATH...] [--json FILE] [--threads N]
-                [--no-cache | --cache-dir DIR]
+  exposure scan [PATH...] [--json FILE] [--threads N] [--no-cache]
   exposure report FILE [--json FILE]
   exposure rules show
   exposure rules verify PACK --sig SIGNATURE
@@ -30,6 +29,7 @@ commands:
            ~/Library/Caches/exposure on macOS and in ~/.cache/exposure (or
            under XDG_CACHE_HOME) elsewhere. The report is the same with the
            cache and without it, and the folder can be deleted at any time.
+           A scan run as root does not use it.
   report   Derive the report again from the evidence saved in FILE.
   rules    Show the built-in rule pack, or verify a signed pack file.
 
@@ -39,9 +39,6 @@ options:
   --threads N   Worker threads for scan. Default: one per core. The report
                 does not depend on it.
   --no-cache    Read every app again, and neither use nor keep the cache.
-  --cache-dir DIR
-                Keep the cache in DIR, which is created if it is not there,
-                instead of the folder named above.
 ";
 
 /// What the user asked for.
@@ -70,8 +67,6 @@ pub(crate) enum Cache {
     /// In the user's cache folder.
     #[default]
     Default,
-    /// In this folder (`--cache-dir`).
-    Dir(PathBuf),
     /// Nowhere (`--no-cache`): every app is read and nothing is kept.
     Off,
 }
@@ -95,7 +90,6 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
     let mut threads: Option<usize> = None;
     let mut signature: Option<PathBuf> = None;
     let mut no_cache = false;
-    let mut cache_dir: Option<PathBuf> = None;
 
     while let Some(arg) = parser.next().map_err(|error| error.to_string())? {
         match arg {
@@ -104,7 +98,6 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
             Long("json") => json = Some(value(&mut parser, "--json")?.into()),
             Long("sig") => signature = Some(value(&mut parser, "--sig")?.into()),
             Long("no-cache") => no_cache = true,
-            Long("cache-dir") => cache_dir = Some(value(&mut parser, "--cache-dir")?.into()),
             Long("threads") => {
                 let text = value(&mut parser, "--threads")?;
                 let count = text.to_str().and_then(|text| text.parse::<usize>().ok());
@@ -128,21 +121,13 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
     match command.to_str() {
         Some("scan") => {
             reject("--sig", signature.is_some(), "scan")?;
-            let cache = match (no_cache, cache_dir) {
-                (true, Some(_)) => {
-                    return Err(String::from("--no-cache and --cache-dir do not go together"));
-                }
-                (true, None) => Cache::Off,
-                (false, Some(dir)) => Cache::Dir(dir),
-                (false, None) => Cache::Default,
-            };
+            let cache = if no_cache { Cache::Off } else { Cache::Default };
             Ok(Command::Scan(Scan { paths: rest, json, threads: threads.unwrap_or(0), cache }))
         }
         Some("report") => {
             reject("--sig", signature.is_some(), "report")?;
             reject("--threads", threads.is_some(), "report")?;
             reject("--no-cache", no_cache, "report")?;
-            reject("--cache-dir", cache_dir.is_some(), "report")?;
             match <[PathBuf; 1]>::try_from(rest) {
                 Ok([file]) => Ok(Command::Report(Report { file, json })),
                 Err(_) => Err(String::from("report takes exactly one FILE")),
@@ -152,7 +137,6 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
             reject("--json", json.is_some(), "rules")?;
             reject("--threads", threads.is_some(), "rules")?;
             reject("--no-cache", no_cache, "rules")?;
-            reject("--cache-dir", cache_dir.is_some(), "rules")?;
             let mut rest = rest.into_iter();
             let action = rest.next();
             let pack = rest.next();
@@ -229,8 +213,8 @@ mod tests {
         );
     }
 
-    /// The cache is on unless it is turned off, and sits in the user's
-    /// cache folder unless another is named.
+    /// The cache is on unless it is turned off, and always sits in the
+    /// user's cache folder: no option puts it anywhere else.
     #[test]
     fn scan_takes_the_cache_options() {
         let cache = |words: &[&str]| match parse_words(words) {
@@ -239,8 +223,11 @@ mod tests {
         };
         assert_eq!(cache(&["scan", "x.app"]), Cache::Default);
         assert_eq!(cache(&["scan", "--no-cache", "x.app"]), Cache::Off);
-        assert_eq!(cache(&["scan", "x.app", "--cache-dir", "kept"]), Cache::Dir("kept".into()));
-        assert_eq!(cache(&["--cache-dir=kept", "scan"]), Cache::Dir("kept".into()));
+        assert_eq!(cache(&["--no-cache", "scan"]), Cache::Off);
+        for words in [&["scan", "x.app", "--cache-dir", "kept"][..], &["--cache-dir=kept", "scan"]]
+        {
+            assert!(parse_words(words).is_err(), "{words:?} should be refused");
+        }
     }
 
     #[test]
@@ -304,11 +291,8 @@ mod tests {
             &["scan", "x.app", "--threads", "0"],
             &["scan", "x.app", "--threads", "many"],
             &["scan", "x.app", "--threads"],
-            &["scan", "x.app", "--no-cache", "--cache-dir", "kept"],
-            &["scan", "x.app", "--cache-dir"],
             &["scan", "x.app", "--cache"],
             &["report", "a.json", "--no-cache"],
-            &["report", "a.json", "--cache-dir", "kept"],
             &["rules", "show", "--no-cache"],
             &["scan", "x.app", "--sig", "s"],
             &["report"],

@@ -128,7 +128,7 @@ $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exp
 
 ```
 exposure scan [PATH...] [--json FILE] [--threads N]   scan .app bundles, .apk files, or folders of them
-              [--no-cache | --cache-dir DIR]          without the cache, or with it in DIR
+              [--no-cache]                            without the cache
 exposure report FILE [--json FILE]                    derive the report again from saved evidence
 exposure rules show                                   list the built-in rule pack
 exposure rules verify PACK --sig SIGNATURE            check a signed pack file offline
@@ -212,16 +212,23 @@ in a folder created for its owner only:
 | elsewhere | `$XDG_CACHE_HOME/exposure`, or `~/.cache/exposure` without that variable |
 
 A file holds the records about one app, the same records the report shows,
-and two hashes: of the four things above, and of the file's own content. It
-holds no path and no list of the app's files. The folder can be deleted at
-any time; the next scan reads everything and fills it again. A scan of the
-installed apps also removes what is kept about any app it no longer finds,
-so the cache does not go on holding an app you removed. A scan of given
-paths adds to the cache and removes nothing.
+and three hashes: of the four things above, of the file's own content, and
+of the root the app was found in (a PATH given, or a folder of installed
+apps). It holds no path and no list of the app's files. The folder can be
+deleted at any time; the next scan reads everything and fills it again.
+
+A scan also removes what is kept about an app that was found in a root it
+searched and is no longer there, so the cache does not go on holding an app
+you removed. What was found in any other root is left alone: a scan of the
+installed apps does not remove what scans of given paths kept, and the other
+way round.
 
 `--no-cache` reads every app, uses nothing that is kept and keeps nothing.
-`--cache-dir DIR` keeps the cache in `DIR` instead. A cache that cannot be
-used, such as a folder that cannot be written, is said in the summary and
+A scan run as root, with `sudo` for example, uses no cache either and
+creates nothing in one, so that it leaves no file in your cache folder that
+you cannot replace; the summary says `cache: not used when run as root`. A
+cache folder that belongs to another user is not used. A cache that cannot
+be used, such as a folder that cannot be written, is said in the summary and
 the scan runs without it.
 
 **What is not kept, and not trusted:**

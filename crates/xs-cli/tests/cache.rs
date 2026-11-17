@@ -60,15 +60,33 @@ impl Scanned {
     }
 }
 
-/// Scans `paths` with these options.
+/// A scan as the user whose home folder is `home`.
+fn at_home(home: &Path) -> Command {
+    let mut command = exposure();
+    command.env("HOME", home).env_remove("XDG_CACHE_HOME").arg("scan");
+    command
+}
+
+/// Where a scan as the user whose home folder is `home` keeps its cache.
+fn cache_in(home: &Path) -> PathBuf {
+    let caches = if cfg!(target_os = "macos") { "Library/Caches" } else { ".cache" };
+    home.join(caches).join("exposure")
+}
+
+/// Scans `paths` with these options, with no cache folder to go by.
 fn scan(paths: &[&Path], options: &[&str]) -> Scanned {
     let output = exposure().arg("scan").args(options).arg("--").args(paths).output().unwrap();
     Scanned::of(&output)
 }
 
-/// Scans `paths` with the cache in `dir`.
-fn scan_cached(paths: &[&Path], dir: &Path) -> Scanned {
-    scan(paths, &["--cache-dir", text(dir)])
+/// Scans `paths` with these options as the user whose home folder is `home`.
+fn scan_at(home: &Path, paths: &[&Path], options: &[&str]) -> Scanned {
+    Scanned::of(&at_home(home).args(options).arg("--").args(paths).output().unwrap())
+}
+
+/// Scans `paths` with the cache of the user whose home folder is `home`.
+fn scan_cached(paths: &[&Path], home: &Path) -> Scanned {
+    scan_at(home, paths, &[])
 }
 
 /// The latest time anything at `path` was touched, in seconds.
@@ -132,20 +150,21 @@ fn copy_tree(from: &Path, to: &Path) {
 fn a_scan_gives_the_same_report_with_the_cache_cold_warm_and_off() {
     let paths = fixtures();
     let dir = tempfile::tempdir().unwrap();
-    let cache = dir.path().join("cache");
+    let home = dir.path();
+    let cache = cache_in(home);
 
-    let off = scan(&paths, &["--no-cache"]);
+    let off = scan_at(home, &paths, &["--no-cache"]);
     assert_eq!(off.cache(), None, "{}", off.summary);
     assert!(off.summary.contains("scanned 3 apps"), "{}", off.summary);
     assert!(!cache.exists());
 
-    let cold = scan_cached(&paths, &cache);
+    let cold = scan_cached(&paths, home);
     cold.assert_read(0, APPS);
     assert_eq!(cold.report, off.report);
     assert_eq!(entries(&cache).len(), APPS);
 
     for threads in ["1", "2", "8"] {
-        let warm = scan(&paths, &["--cache-dir", text(&cache), "--threads", threads]);
+        let warm = scan_at(home, &paths, &["--threads", threads]);
         warm.assert_read(APPS, 0);
         assert_eq!(warm.report, off.report, "{threads} threads");
         // What the summary says of the scan is what the report covers,
@@ -154,11 +173,11 @@ fn a_scan_gives_the_same_report_with_the_cache_cold_warm_and_off() {
         assert_eq!(scanned(&warm.summary), scanned(&off.summary));
     }
     // An app named by itself is the app found in its folder.
-    let alone = scan_cached(&[&Path::new(BUNDLES).join("Skeleton.app")], &cache);
+    let alone = scan_cached(&[&Path::new(BUNDLES).join("Skeleton.app")], home);
     alone.assert_read(1, 0);
     // With the cache off, what it holds is neither used nor touched.
     let before = entries(&cache).iter().map(|path| fs::read(path).unwrap()).collect::<Vec<_>>();
-    assert_eq!(scan(&paths, &["--no-cache"]).report, off.report);
+    assert_eq!(scan_at(home, &paths, &["--no-cache"]).report, off.report);
     assert_eq!(
         entries(&cache).iter().map(|path| fs::read(path).unwrap()).collect::<Vec<_>>(),
         before
@@ -171,8 +190,8 @@ fn a_scan_gives_the_same_report_with_the_cache_cold_warm_and_off() {
 fn the_cache_is_readable_by_its_owner_only_and_names_no_path() {
     let paths = fixtures();
     let dir = tempfile::tempdir().unwrap();
-    let cache = dir.path().join("made/for/this");
-    let scanned = scan_cached(&paths, &cache);
+    let cache = cache_in(dir.path());
+    let scanned = scan_cached(&paths, dir.path());
     scanned.assert_read(0, APPS);
     assert!(!scanned.summary.contains(text(dir.path())), "{}", scanned.summary);
 
@@ -199,19 +218,20 @@ type Edit = fn(&[u8]) -> Vec<u8>;
 fn a_corrupt_or_edited_cache_file_falls_back_to_reading_the_app() {
     let paths = fixtures();
     let dir = tempfile::tempdir().unwrap();
-    let cache = dir.path().join("cache");
+    let home = dir.path();
+    let cache = cache_in(home);
     let off = scan(&paths, &["--no-cache"]);
-    scan_cached(&paths, &cache).assert_read(0, APPS);
+    scan_cached(&paths, home).assert_read(0, APPS);
     let sound: Vec<Vec<u8>> = entries(&cache).iter().map(|path| fs::read(path).unwrap()).collect();
 
     // Every file damaged at once: the whole scan is cold.
     for (entry, bytes) in entries(&cache).iter().zip(&sound) {
         fs::write(entry, &bytes[..bytes.len() / 2]).unwrap();
     }
-    let cold = scan_cached(&paths, &cache);
+    let cold = scan_cached(&paths, home);
     cold.assert_read(0, APPS);
     assert_eq!(cold.report, off.report);
-    scan_cached(&paths, &cache).assert_read(APPS, 0);
+    scan_cached(&paths, home).assert_read(APPS, 0);
 
     // One file at a time, damaged or edited in one way at a time.
     let edits: [(&str, Edit); 5] = [
@@ -238,13 +258,13 @@ fn a_corrupt_or_edited_cache_file_falls_back_to_reading_the_app() {
             let edited = edit(&sound[index]);
             assert_ne!(edited, sound[index], "{what} changed nothing in entry {index}");
             fs::write(entry, edited).unwrap();
-            let scanned = scan_cached(&paths, &cache);
+            let scanned = scan_cached(&paths, home);
             scanned.assert_read(APPS - 1, 1);
             assert_eq!(scanned.report, off.report, "{what}");
             assert_eq!(fs::read(entry).unwrap(), sound[index], "{what}: not put right");
         }
     }
-    scan_cached(&paths, &cache).assert_read(APPS, 0);
+    scan_cached(&paths, home).assert_read(APPS, 0);
 }
 
 /// Build plan, task 12, and design report, section 6.2 decision 7: changing
@@ -255,12 +275,12 @@ fn changing_one_app_reads_only_that_app_again() {
     let apps = dir.path().join("Apps");
     copy_tree(Path::new(BUNDLES), &apps);
     fs::copy(PACKAGE, apps.join("Skeleton.apk")).unwrap();
-    let cache = dir.path().join("cache");
+    let home = dir.path().join("home");
     let paths = [apps.as_path()];
     settle(&paths);
 
-    scan_cached(&paths, &cache).assert_read(0, APPS);
-    let before = scan_cached(&paths, &cache);
+    scan_cached(&paths, &home).assert_read(0, APPS);
+    let before = scan_cached(&paths, &home);
     before.assert_read(APPS, 0);
     assert!(before.report.contains("sdk/sentry"));
 
@@ -270,7 +290,7 @@ fn changing_one_app_reads_only_that_app_again() {
     assert!(declared.contains("org.example.exposure.skeleton"));
     fs::write(&plist, declared.replace("org.example.exposure.skeleton", "org.example.changed"))
         .unwrap();
-    let after = scan_cached(&paths, &cache);
+    let after = scan_cached(&paths, &home);
     after.assert_read(APPS - 1, 1);
     assert_eq!(after.report, scan(&paths, &["--no-cache"]).report);
     assert_ne!(after.report, before.report);
@@ -278,13 +298,13 @@ fn changing_one_app_reads_only_that_app_again() {
     assert!(after.report.contains("org.example.changed"));
     // A file that was written this close to the scan is not stored yet: it
     // could still be changing. The app is read again, and it alone.
-    let again = scan_cached(&paths, &cache);
+    let again = scan_cached(&paths, &home);
     again.assert_read(APPS - 1, 1);
     assert_eq!(again.report, after.report);
     // Once it has settled, it is stored like the others.
     settle(&paths);
-    scan_cached(&paths, &cache).assert_read(APPS - 1, 1);
-    let settled = scan_cached(&paths, &cache);
+    scan_cached(&paths, &home).assert_read(APPS - 1, 1);
+    let settled = scan_cached(&paths, &home);
     settled.assert_read(APPS, 0);
     assert_eq!(settled.report, after.report);
 }
@@ -296,9 +316,8 @@ fn the_cache_is_kept_in_the_user_s_cache_folder_unless_it_is_off() {
     let paths = fixtures();
     let home = tempfile::tempdir().unwrap();
     let at_home = || {
-        let mut command = exposure();
-        command.env("HOME", home.path()).env_remove("XDG_CACHE_HOME");
-        command.args(["scan", "--json", "/dev/null"]);
+        let mut command = at_home(home.path());
+        command.args(["--json", "/dev/null"]);
         command
     };
     let listed = |dir: &Path| fs::read_dir(dir).unwrap().count();
@@ -307,8 +326,7 @@ fn the_cache_is_kept_in_the_user_s_cache_folder_unless_it_is_off() {
     assert_eq!(listed(home.path()), 0, "--no-cache wrote into the home folder");
 
     Scanned::of(&at_home().args(paths).output().unwrap()).assert_read(0, APPS);
-    let caches = if cfg!(target_os = "macos") { "Library/Caches" } else { ".cache" };
-    let cache = home.path().join(caches).join("exposure");
+    let cache = cache_in(home.path());
     assert_eq!(entries(&cache).len(), APPS);
     Scanned::of(&at_home().args(paths).output().unwrap()).assert_read(APPS, 0);
 
@@ -326,19 +344,31 @@ fn the_cache_is_kept_in_the_user_s_cache_folder_unless_it_is_off() {
 #[test]
 fn a_cache_that_cannot_be_used_is_said_and_does_not_fail_the_scan() {
     let paths = fixtures();
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("a file");
-    fs::write(&file, "in the way").unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let cache = cache_in(home.path());
+    // A file where the folder the cache goes into belongs.
+    let file = cache.parent().unwrap();
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(file, "in the way").unwrap();
     let off = scan(&paths, &["--no-cache"]);
 
-    let scanned = scan_cached(&paths, &file);
+    let scanned = scan_cached(&paths, home.path());
     assert_eq!(scanned.report, off.report);
     let said = scanned.cache().unwrap();
-    assert!(said.starts_with(&format!("not used: cannot use {}: ", file.display())), "{said}");
-    assert_eq!(fs::read(&file).unwrap(), b"in the way");
+    assert!(said.starts_with(&format!("not used: cannot use {}: ", cache.display())), "{said}");
+    assert_eq!(fs::read(file).unwrap(), b"in the way");
+}
 
-    // The two options contradict each other.
-    let both =
-        exposure().args(["scan", "--no-cache", "--cache-dir", text(&file)]).output().unwrap();
-    assert_eq!(both.status.code(), Some(2));
+/// The cache is kept in the user's cache folder and nowhere else: no option
+/// names another folder.
+#[test]
+fn no_option_puts_the_cache_anywhere_else() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = dir.path().join("elsewhere");
+    for options in [&["--cache-dir", text(&elsewhere)][..], &["--no-cache", "--cache-dir", "x"]] {
+        let refused = at_home(dir.path()).args(options).arg(BUNDLES).output().unwrap();
+        assert_eq!(refused.status.code(), Some(2), "{options:?}");
+    }
+    assert!(!elsewhere.exists());
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
 }

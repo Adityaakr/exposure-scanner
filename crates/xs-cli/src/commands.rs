@@ -102,7 +102,6 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
     let matchers = Matchers::build(&pack).map_err(|error| error.to_string())?;
     let cache_dir = match &args.cache {
         args::Cache::Default => xs_collect::cache::default_dir(),
-        args::Cache::Dir(dir) => Some(dir.clone()),
         args::Cache::Off => None,
     };
     let options = xs_collect::ScanOptions { threads: args.threads, cache: cache_dir.as_deref() };
@@ -136,6 +135,9 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
     let cache = match (&args.cache, &cache_dir, &outcome.cache_failure) {
         (args::Cache::Off, ..) => None,
         (_, None, _) => Some(String::from("not used: there is no home folder to keep it in")),
+        (_, Some(_), Some(xs_collect::CacheError::Root)) => {
+            Some(String::from("not used when run as root"))
+        }
         (_, Some(_), Some(error)) => Some(format!("not used: {error}")),
         (_, Some(_), None) => Some(format!(
             "{} unchanged since an earlier scan and not read again, {} read",

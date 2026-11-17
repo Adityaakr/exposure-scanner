@@ -12,7 +12,7 @@ use xs_model::{MatcherKind, Pack};
 
 use super::*;
 use crate::schedule::Pool;
-use crate::{ScanStats, collect, discover};
+use crate::{ScanStats, collect, discover, forget_gone};
 
 fn write(path: &Path, bytes: impl AsRef<[u8]>) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -300,7 +300,8 @@ fn a_file_put_in_the_place_of_another_is_seen() {
 /// someone who took care to make the file whole again.
 fn with_sum(head: &str, body: &str) -> Vec<u8> {
     let words: Vec<&str> = head.split(' ').collect();
-    format!("{} {} {}\n{body}", words[0], words[1], Sha256Digest::of(body.as_bytes())).into_bytes()
+    let sum = Sha256Digest::of(body.as_bytes());
+    format!("{} {} {sum} {}\n{body}", words[0], words[1], words[3]).into_bytes()
 }
 
 /// Build plan, task 12: a corrupt cache file falls back to a cold scan. So
@@ -329,7 +330,12 @@ fn a_damaged_or_edited_entry_is_passed_over_and_replaced() {
         ("one byte more", [&sound[..], b" "].concat()),
         ("a bit flipped in the records", flipped(sound.len() - 40)),
         ("a bit flipped in the state", flipped(MAGIC.len() + 5)),
-        ("a bit flipped in the sum", flipped(head.len() - 5)),
+        ("a bit flipped in the sum", flipped(MAGIC.len() + 1 + 64 + 1 + 5)),
+        (
+            "no root",
+            text.replacen(&format!(" {}\n", head.rsplit(' ').next().unwrap()), "\n", 1)
+                .into_bytes(),
+        ),
         ("not an entry", b"not an entry\n{}".to_vec()),
         ("no records", format!("{head}\n").into_bytes()),
         ("another format", text.replacen("exposure-cache/1", "exposure-cache/2", 1).into_bytes()),
@@ -509,22 +515,32 @@ fn a_result_with_a_part_that_could_not_be_read_is_not_stored() {
     assert_same(&lab, &cache, APPS);
 }
 
-/// A scan of the installed apps drops what the cache holds about every app
-/// it did not find. It removes entries, and nothing else that may be in the
-/// folder.
+/// Scans `path` as a scan does with `cache`, including what it removes
+/// from the cache afterwards.
+fn scan_paths(lab: &Lab, path: &Path, cache: &Cache) -> ScanStats {
+    let found = discover::artifacts(&[path.to_path_buf()]).unwrap();
+    let matchers = Matchers::build(&lab.pack).unwrap();
+    let (_, stats) = collect(&found, &matchers, &Pool::new(3).unwrap(), Some(cache)).unwrap();
+    forget_gone(cache, &found);
+    stats
+}
+
+/// A scan drops what the cache holds about an app that was found in a root
+/// it searched and is not there any more, and nothing else: not the entries
+/// of apps found in another root, whatever the scan was, and not what else
+/// may be in the folder.
 #[test]
-fn only_the_entries_of_apps_that_are_gone_are_removed() {
+fn only_the_entries_of_apps_that_are_gone_from_a_root_searched_are_removed() {
     let lab = Lab::new();
     let cache = lab.cache();
-    assert_same(&lab, &cache, 0);
-    let stay = [lab.entry(Kind::Bundle, "Two.app"), lab.entry(Kind::Package, "one.apk")];
-    let keys: BTreeSet<Key> = [
-        Key::of(Kind::Bundle, &fs::canonicalize(lab.app("Two.app")).unwrap()),
-        Key::of(Kind::Package, &fs::canonicalize(lab.app("one.apk")).unwrap()),
-        // An app that is installed and has no entry.
-        Key::of(Kind::Bundle, Path::new("/Applications/Never Stored.app")),
-    ]
-    .into();
+    let elsewhere = lab.dir.path().join("Elsewhere");
+    let given = bundle(&elsewhere.join("Given.app"), "org.example.given");
+    let left = bundle(&elsewhere.join("Left.app"), "org.example.left");
+
+    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, 0);
+    assert_eq!(scan_paths(&lab, &given, &cache).reused, 0);
+    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
+    assert_eq!(lab.kept().len() as u64, APPS + 2);
 
     // Things that are not entries, some of them named almost like one.
     let key = "0".repeat(64);
@@ -535,15 +551,73 @@ fn only_the_entries_of_apps_that_are_gone_are_removed() {
     }
     let folder = format!("{}.entry", "1".repeat(64));
     fs::create_dir(lab.cache_dir().join(&folder)).unwrap();
+    let mut kept = lab.kept();
 
-    cache.keep_only(&keys);
-    let mut expected: Vec<String> = others.iter().map(ToString::to_string).collect();
-    expected.push(folder);
-    expected.extend(stay.iter().map(|path| path.file_name().unwrap().to_str().unwrap().to_owned()));
-    expected.sort();
-    assert_eq!(lab.kept(), expected);
-    // What is left still answers, and what was removed is read again.
-    assert_same(&lab, &cache, 2);
+    // Scans of one root leave the entries of apps found in another alone.
+    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS);
+    assert_eq!(scan_paths(&lab, &given, &cache).reused, 1);
+    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS);
+    assert_eq!(lab.kept(), kept);
+
+    // An app removed from a root is dropped by the next scan of that root.
+    let gone = [lab.entry(Kind::Bundle, "Two.app"), lab.entry(Kind::Package, "one.apk")];
+    fs::remove_dir_all(lab.app("Two.app")).unwrap();
+    fs::remove_file(lab.app("one.apk")).unwrap();
+    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 2);
+    assert_eq!(lab.kept(), kept, "a scan of another root removed an entry");
+    assert_eq!(scan_paths(&lab, &lab.apps(), &cache).reused, APPS - 2);
+    kept.retain(|name| !gone.iter().any(|entry| entry.ends_with(name)));
+    assert_eq!(lab.kept(), kept);
+    for name in others.iter().map(ToString::to_string).chain([folder]) {
+        assert!(kept.contains(&name), "{name} was removed");
+    }
+
+    // A folder given is a root like any other.
+    let left_entry = Key::of(Kind::Bundle, &fs::canonicalize(&left).unwrap()).file_name();
+    fs::remove_dir_all(&left).unwrap();
+    assert_eq!(scan_paths(&lab, &elsewhere, &cache).reused, 1);
+    kept.retain(|name| *name != left_entry);
+    assert_eq!(lab.kept(), kept);
+    assert_eq!(scan_paths(&lab, &given, &cache).reused, 1);
+    // What is left still answers.
+    assert_same(&lab, &cache, APPS - 2);
+}
+
+/// A scan run as root keeps no cache: it would leave files in the user's
+/// folder that the user cannot replace. Nothing is created, not even the
+/// folder.
+#[test]
+fn root_neither_creates_nor_uses_a_cache() {
+    let lab = Lab::new();
+    let matchers = Matchers::build(&lab.pack).unwrap();
+    let dir = lab.cache_dir().join("made");
+    assert_eq!(Cache::open_as(0, &dir, &matchers).unwrap_err(), CacheError::Root);
+    assert!(!lab.cache_dir().exists());
+
+    // Not even in a folder that is there and holds what the user stored.
+    assert_same(&lab, &lab.cache(), 0);
+    let kept = lab.kept();
+    assert_eq!(Cache::open_as(0, &lab.cache_dir(), &matchers).unwrap_err(), CacheError::Root);
+    assert_eq!(lab.kept(), kept);
+}
+
+/// A folder that is there and belongs to someone else is not used either,
+/// and nothing is written into it.
+#[test]
+fn a_folder_of_another_user_is_not_used() {
+    let lab = Lab::new();
+    let matchers = Matchers::build(&lab.pack).unwrap();
+    let dir = lab.cache_dir();
+    fs::create_dir(&dir).unwrap();
+    let owner = fs::metadata(&dir).unwrap().uid();
+    let error = Cache::open_as(owner.wrapping_add(1), &dir, &matchers).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("cannot use {}: it belongs to another user", dir.display())
+    );
+    assert!(lab.kept().is_empty());
+    // Its owner does use it.
+    Cache::open_as(owner, &dir, &matchers).unwrap();
 }
 
 #[test]

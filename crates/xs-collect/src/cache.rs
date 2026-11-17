@@ -38,14 +38,20 @@
 //! One file per app, in a folder of the user's own (see [`default_dir`]),
 //! created for its owner alone and written whole under another name before it
 //! takes its place, so that a reader never sees half of one. A file holds
-//! the app's records and two hashes: of the state above, and of its own
-//! content. It holds no path and no list of the app's files. The state is
-//! kept as its hash, because that is all a comparison needs (the spec's
-//! trust rule 5: store the minimum).
+//! the app's records and three hashes: of the state above, of its own
+//! content, and of the root the app was found in (a path given, or a folder
+//! of installed apps). It holds no path and no list of the app's files. The
+//! state is kept as its hash, because that is all a comparison needs (the
+//! spec's trust rule 5: store the minimum).
 //!
-//! A scan of the installed apps removes the entry of every app it did not
-//! find, so the cache does not go on holding an app that was removed. A
-//! scan of given paths adds entries and removes none.
+//! A scan removes the entry of an app that was found in a root the scan
+//! searched and that the scan did not find, so the cache does not go on
+//! holding an app that was removed. It touches no entry of an app found in
+//! any other root: a scan of the installed apps leaves what scans of given
+//! paths stored, and the other way round.
+//!
+//! The cache is the user's own, so a scan run as root keeps none: it would
+//! leave files in the user's folder that the user cannot replace.
 //!
 //! # What is not trusted
 //!
@@ -104,6 +110,8 @@ pub const SETTLE_SECONDS: i64 = 2;
 /// Why the cache could not be used. The scan then runs without it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheError {
+    /// The scan runs as root. Nothing is created or read.
+    Root,
     /// The folder cannot be created or written to.
     Folder {
         /// The folder.
@@ -119,6 +127,7 @@ pub enum CacheError {
 impl fmt::Display for CacheError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Root => f.write_str("it is not used when run as root"),
             Self::Folder { path, error } => write!(f, "cannot use {}: {error}", path.display()),
             Self::Program(error) => write!(f, "cannot read this program's own file: {error}"),
         }
@@ -289,6 +298,36 @@ impl Key {
     }
 }
 
+/// The hash of a root that artifacts are found in, which an entry holds.
+pub(crate) fn root_digest(root: &Path) -> Sha256Digest {
+    let mut hash = Sha256Stream::new();
+    hash.update(b"exposure cache root\0");
+    hash.update(root.as_os_str().as_encoded_bytes());
+    hash.finish()
+}
+
+/// The first line of an entry, and what follows it.
+struct Entry<'a> {
+    valid_for: Sha256Digest,
+    root: Sha256Digest,
+    body: &'a [u8],
+}
+
+impl<'a> Entry<'a> {
+    /// The parts of an entry whose content is whole, if `bytes` is one.
+    fn parse(bytes: &'a [u8]) -> Option<Self> {
+        let (head, body) = bytes.split_at_checked(bytes.iter().position(|byte| *byte == b'\n')?)?;
+        let body = body.get(1..)?;
+        let mut words = std::str::from_utf8(head).ok()?.split(' ');
+        let magic = words.next()?;
+        let valid_for = Sha256Digest::from_hex(words.next()?)?;
+        let sum = Sha256Digest::from_hex(words.next()?)?;
+        let root = Sha256Digest::from_hex(words.next()?)?;
+        let sound = magic == MAGIC && words.next().is_none() && sum == Sha256Digest::of(body);
+        sound.then_some(Self { valid_for, root, body })
+    }
+}
+
 /// What reading one artifact produced: what an entry holds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -335,7 +374,7 @@ pub(crate) struct Cache {
     /// What every result depends on besides the artifact: this program and
     /// the rules.
     context: Sha256Digest,
-    /// The user who runs the scan, as the file system numbers them.
+    /// The user who runs the scan.
     owner: u32,
     /// The file system's clock when the cache was opened, in seconds.
     opened: i64,
@@ -392,15 +431,36 @@ fn hash_program() -> io::Result<Sha256Digest> {
     }
 }
 
+/// The user this process acts as.
+#[cfg(unix)]
+fn effective_user() -> u32 {
+    rustix::process::geteuid().as_raw()
+}
+
+#[cfg(not(unix))]
+fn effective_user() -> u32 {
+    u32::MAX
+}
+
 impl Cache {
     /// Opens the cache in `dir`, which is created if it is not there, for
     /// results made with `matchers`.
     ///
     /// # Errors
     ///
-    /// Fails if the folder cannot be created or written to, or if this
-    /// program's own file cannot be read.
+    /// Fails if the scan runs as root, if the folder belongs to another user,
+    /// cannot be created or written to, or if this program's own file cannot
+    /// be read.
     pub(crate) fn open(dir: &Path, matchers: &Matchers<'_>) -> Result<Self, CacheError> {
+        Self::open_as(effective_user(), dir, matchers)
+    }
+
+    /// Opens the cache in `dir` for `user`. Who that is decides before
+    /// anything is created.
+    fn open_as(user: u32, dir: &Path, matchers: &Matchers<'_>) -> Result<Self, CacheError> {
+        if user == 0 {
+            return Err(CacheError::Root);
+        }
         let program = program_digest().map_err(CacheError::Program)?;
         let mut context = Sha256Stream::new();
         context.update(b"exposure cache context\0");
@@ -420,34 +480,77 @@ impl Cache {
             use std::os::unix::fs::DirBuilderExt as _;
             builder.mode(0o700);
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            if fs::metadata(dir).is_ok_and(|metadata| metadata.uid() != user) {
+                return Err(fail(io::Error::other("it belongs to another user")));
+            }
+        }
         builder.create(dir).map_err(fail)?;
-        let (owner, opened) = probe(dir).map_err(fail)?;
-        Ok(Self { dir: dir.to_path_buf(), context: context.finish(), owner, opened })
+        let opened = probe(dir).map_err(fail)?;
+        Ok(Self { dir: dir.to_path_buf(), context: context.finish(), owner: user, opened })
     }
 
-    /// The place in the cache of the artifact at `path` in `state`.
-    pub(crate) fn slot(&self, kind: Kind, path: &Path, state: State) -> Slot<'_> {
+    /// The place in the cache of the artifact at `path`, found in `root`,
+    /// in `state`.
+    pub(crate) fn slot(&self, kind: Kind, root: &Path, path: &Path, state: State) -> Slot<'_> {
         let key = Key::of(kind, path);
         let mut valid_for = Sha256Stream::new();
         valid_for.update(b"exposure cache state\0");
         valid_for.update(self.context.as_bytes());
         valid_for.update(key.0.as_bytes());
         valid_for.update(state.digest.as_bytes());
-        Slot { cache: self, key, valid_for: valid_for.finish(), newest: state.newest }
+        Slot {
+            cache: self,
+            key,
+            root: root_digest(root),
+            valid_for: valid_for.finish(),
+            newest: state.newest,
+        }
     }
 
-    /// Removes the entry of every artifact that is not among `keys`. Only
-    /// regular files named like an entry are removed, whatever else the
-    /// folder holds.
-    pub(crate) fn keep_only(&self, keys: &BTreeSet<Key>) {
+    /// Removes the entry of every artifact that was found in one of `roots`
+    /// and is not among `present`. Only entries of the user's are looked at,
+    /// whatever else the folder holds.
+    pub(crate) fn evict(&self, roots: &BTreeSet<Sha256Digest>, present: &BTreeSet<Key>) {
         let Ok(entries) = fs::read_dir(&self.dir) else { return };
         for entry in entries.flatten() {
             let name = entry.file_name();
             let Some(key) = name.to_str().and_then(Key::of_file_name) else { continue };
-            if !keys.contains(&key) && entry.file_type().is_ok_and(|kind| kind.is_file()) {
-                let _ = fs::remove_file(entry.path());
+            if present.contains(&key) {
+                continue;
+            }
+            let path = entry.path();
+            let bytes = self.read(&path);
+            if bytes
+                .as_deref()
+                .and_then(Entry::parse)
+                .is_some_and(|kept| roots.contains(&kept.root))
+            {
+                let _ = fs::remove_file(path);
             }
         }
+    }
+
+    /// The bytes of the entry at `path`, if it is one to read: no larger
+    /// than any entry is, and trusted.
+    fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        // Looked at before it is opened: opening a pipe that somebody left
+        // under this name would wait for its other end. And once more when
+        // it is open, since what is at a name can be exchanged in between.
+        if !fs::symlink_metadata(path).is_ok_and(|metadata| self.trusts(&metadata)) {
+            return None;
+        }
+        let file = File::open(path).ok()?;
+        let metadata = file.metadata().ok()?;
+        if !self.trusts(&metadata) || metadata.len() > MAX_ENTRY_BYTES {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        // One byte past the limit, so a file that grew since is noticed.
+        file.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut bytes).ok()?;
+        (bytes.len() as u64 <= MAX_ENTRY_BYTES).then_some(bytes)
     }
 
     /// Whether an entry with this `metadata` is one to read: a regular file
@@ -464,18 +567,17 @@ impl Cache {
     }
 }
 
-/// Asks the file system of `dir` who the user is and what time it is, by
-/// writing a file there and looking at it. The file is removed again.
+/// Asks the file system of `dir` what time it is, by writing a file there
+/// and looking at it. The file is removed again.
 ///
 /// The time is the file system's because it is compared with the times of
 /// files, which the file system set.
 #[cfg(unix)]
-fn probe(dir: &Path) -> io::Result<(u32, i64)> {
+fn probe(dir: &Path) -> io::Result<i64> {
     use std::os::unix::fs::MetadataExt as _;
     let path = dir.join(temp_name("probe"));
-    let seen = create_private(&path)
-        .and_then(|file| file.metadata())
-        .map(|metadata| (metadata.uid(), metadata.mtime()));
+    let seen =
+        create_private(&path).and_then(|file| file.metadata()).map(|metadata| metadata.mtime());
     let removed = fs::remove_file(&path);
     seen.and_then(|seen| removed.map(|()| seen))
 }
@@ -483,7 +585,7 @@ fn probe(dir: &Path) -> io::Result<(u32, i64)> {
 /// This build does not know how to tell one state of a file from another on
 /// a system that is not Unix, so it keeps no cache there.
 #[cfg(not(unix))]
-fn probe(_: &Path) -> io::Result<(u32, i64)> {
+fn probe(_: &Path) -> io::Result<i64> {
     Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
@@ -492,6 +594,8 @@ fn probe(_: &Path) -> io::Result<(u32, i64)> {
 pub(crate) struct Slot<'c> {
     cache: &'c Cache,
     key: Key,
+    /// The hash of the root the artifact was found in.
+    root: Sha256Digest,
     /// What a result kept here is valid for: the hash of the program, the
     /// rules, the artifact's path and its state.
     valid_for: Sha256Digest,
@@ -507,38 +611,9 @@ impl Slot<'_> {
     /// The result stored here, if one is and it was made from the artifact
     /// in this state. Anything else, a damaged file included, is no result.
     pub(crate) fn load(&self) -> Option<Collected> {
-        let path = self.path();
-        // Looked at before it is opened: opening a pipe that somebody left
-        // under this name would wait for its other end. And once more when
-        // it is open, since what is at a name can be exchanged in between.
-        if !fs::symlink_metadata(&path).is_ok_and(|metadata| self.cache.trusts(&metadata)) {
-            return None;
-        }
-        let file = File::open(path).ok()?;
-        let metadata = file.metadata().ok()?;
-        if !self.cache.trusts(&metadata) || metadata.len() > MAX_ENTRY_BYTES {
-            return None;
-        }
-        let mut bytes = Vec::new();
-        // One byte past the limit, so a file that grew since is noticed.
-        file.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut bytes).ok()?;
-        if bytes.len() as u64 > MAX_ENTRY_BYTES {
-            return None;
-        }
-        let (head, body) = bytes.split_at_checked(bytes.iter().position(|byte| *byte == b'\n')?)?;
-        let body = body.get(1..)?;
-        let mut words = std::str::from_utf8(head).ok()?.split(' ');
-        let magic = words.next()?;
-        let valid_for = Sha256Digest::from_hex(words.next()?)?;
-        let sum = Sha256Digest::from_hex(words.next()?)?;
-        let sound = magic == MAGIC
-            && words.next().is_none()
-            && valid_for == self.valid_for
-            && sum == Sha256Digest::of(body);
-        if !sound {
-            return None;
-        }
-        serde_json::from_slice(body).ok()
+        let bytes = self.cache.read(&self.path())?;
+        let entry = Entry::parse(&bytes).filter(|entry| entry.valid_for == self.valid_for)?;
+        serde_json::from_slice(entry.body).ok()
     }
 
     /// Stores `result` here, in place of whatever was. Says whether it did.
@@ -553,7 +628,8 @@ impl Slot<'_> {
             return false;
         }
         let Ok(body) = serde_json::to_vec(result) else { return false };
-        let head = format!("{MAGIC} {} {}\n", self.valid_for, Sha256Digest::of(&body));
+        let head =
+            format!("{MAGIC} {} {} {}\n", self.valid_for, Sha256Digest::of(&body), self.root);
         if (head.len() + body.len()) as u64 > MAX_ENTRY_BYTES {
             return false;
         }

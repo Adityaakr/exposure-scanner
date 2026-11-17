@@ -6,7 +6,7 @@
 //! They are found either below the paths a scan is given ([`artifacts`]) or,
 //! when it is given none, where macOS keeps installed apps ([`installed`]).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -78,6 +78,14 @@ pub struct Artifacts {
     pub bundles: Vec<PathBuf>,
     /// Android packages: regular files named `.apk`.
     pub packages: Vec<PathBuf>,
+    /// Every root that was searched in full, canonical: a path given, or a
+    /// folder of installed apps that exists. Whatever was in one and is not
+    /// among the artifacts is not there any more.
+    pub roots: BTreeSet<PathBuf>,
+    /// The root each artifact was found in: of those that led to it, the
+    /// first in order, so that the order the paths were given in does not
+    /// matter.
+    pub found_in: BTreeMap<PathBuf, PathBuf>,
 }
 
 /// What a search has found so far.
@@ -85,13 +93,34 @@ pub struct Artifacts {
 struct Found {
     bundles: BTreeSet<PathBuf>,
     packages: BTreeSet<PathBuf>,
+    roots: BTreeSet<PathBuf>,
+    found_in: BTreeMap<PathBuf, PathBuf>,
 }
 
 impl Found {
+    fn bundle(&mut self, path: PathBuf, root: &Path) {
+        self.place(&path, root);
+        self.bundles.insert(path);
+    }
+
+    fn package(&mut self, path: PathBuf, root: &Path) {
+        self.place(&path, root);
+        self.packages.insert(path);
+    }
+
+    fn place(&mut self, path: &Path, root: &Path) {
+        let first = self.found_in.entry(path.to_path_buf()).or_insert_with(|| root.to_path_buf());
+        if root < first.as_path() {
+            *first = root.to_path_buf();
+        }
+    }
+
     fn finish(self) -> Artifacts {
         Artifacts {
             bundles: self.bundles.into_iter().collect(),
             packages: self.packages.into_iter().collect(),
+            roots: self.roots,
+            found_in: self.found_in,
         }
     }
 }
@@ -119,14 +148,15 @@ pub fn artifacts(paths: &[PathBuf]) -> Result<Artifacts, ScanError> {
         let metadata = fs::metadata(&resolved).map_err(fail)?;
         let is_named = |test: fn(&Path) -> bool| test(path) || test(&resolved);
         if metadata.is_file() && is_named(is_package_name) {
-            found.packages.insert(resolved);
+            found.package(resolved.clone(), &resolved);
         } else if !metadata.is_dir() {
             return Err(ScanError::Unsupported(path.clone()));
         } else if is_named(is_bundle_name) {
-            found.bundles.insert(resolved);
+            found.bundle(resolved.clone(), &resolved);
         } else {
-            search_folder(&resolved, MAX_FOLDER_DEPTH, &mut found).map_err(fail)?;
+            search_folder(&resolved, &resolved, MAX_FOLDER_DEPTH, &mut found).map_err(fail)?;
         }
+        found.roots.insert(resolved);
     }
     Ok(found.finish())
 }
@@ -173,7 +203,8 @@ fn in_roots(roots: &[PathBuf]) -> Result<Artifacts, ScanError> {
         let fail = |error| ScanError::Path { path: root.clone(), error };
         match fs::canonicalize(root) {
             Ok(resolved) => {
-                search_folder(&resolved, MAX_FOLDER_DEPTH, &mut found).map_err(fail)?;
+                search_folder(&resolved, &resolved, MAX_FOLDER_DEPTH, &mut found).map_err(fail)?;
+                found.roots.insert(resolved);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(fail(error)),
@@ -182,10 +213,11 @@ fn in_roots(roots: &[PathBuf]) -> Result<Artifacts, ScanError> {
     Ok(found.finish())
 }
 
-/// Adds the artifacts inside `folder` to `found`. Sub-folders that cannot be
-/// listed are passed over: the user asked for the folder above them, and a
-/// locked sub-folder is not a reason to refuse the rest.
-fn search_folder(folder: &Path, depth: u32, found: &mut Found) -> io::Result<()> {
+/// Adds the artifacts inside `folder`, which is in `root`, to `found`.
+/// Sub-folders that cannot be listed are passed over: the user asked for the
+/// folder above them, and a locked sub-folder is not a reason to refuse the
+/// rest.
+fn search_folder(root: &Path, folder: &Path, depth: u32, found: &mut Found) -> io::Result<()> {
     for entry in fs::read_dir(folder)? {
         let path = entry?.path();
         // `metadata` follows a symbolic link, which is the "followed once".
@@ -196,17 +228,17 @@ fn search_folder(folder: &Path, depth: u32, found: &mut Found) -> io::Result<()>
                 && let Ok(resolved) = fs::canonicalize(&path)
                 && is_package_name(&resolved)
             {
-                found.packages.insert(resolved);
+                found.package(resolved, root);
             }
         } else if !metadata.is_dir() {
             // A socket, a pipe or a device node.
         } else if is_bundle_name(&path) {
             if let Ok(resolved) = fs::canonicalize(&path) {
-                found.bundles.insert(resolved);
+                found.bundle(resolved, root);
             }
         } else if depth > 1 && !linked() {
             // Plain sub-folders only; a link to a folder is not descended into.
-            let _ = search_folder(&path, depth - 1, found);
+            let _ = search_folder(root, &path, depth - 1, found);
         }
     }
     Ok(())
@@ -277,6 +309,34 @@ mod tests {
             names(dir.path(), &found),
             ["Apps/One.app", "Apps/Two.APP", "Apps/Utilities/Three.app", "Elsewhere/Five.app"]
         );
+    }
+
+    /// Every path given is a root that was searched, and an artifact that
+    /// several of them lead to is found in the first of those, whatever the
+    /// order they were given in.
+    #[test]
+    fn each_artifact_is_found_in_one_root_of_those_searched() {
+        let dir = package_tree();
+        let root = fs::canonicalize(dir.path()).unwrap();
+        let paths =
+            ["Apps/One.app", "Apps", "Elsewhere/five.apk"].map(|path| dir.path().join(path));
+        let mut backward = paths.clone();
+        backward.reverse();
+        let found = artifacts(&paths).unwrap();
+        assert_eq!(found, artifacts(&backward).unwrap());
+        assert_eq!(
+            names(dir.path(), &found.roots.iter().cloned().collect::<Vec<_>>()),
+            ["Apps", "Apps/One.app", "Elsewhere/five.apk"]
+        );
+        let found_in = |artifact: &str| {
+            let root_path = &found.found_in[&root.join(artifact)];
+            root_path.strip_prefix(&root).unwrap().display().to_string()
+        };
+        assert_eq!(found_in("Apps/One.app"), "Apps");
+        assert_eq!(found_in("Apps/Utilities/Three.app"), "Apps");
+        assert_eq!(found_in("Apps/one.apk"), "Apps");
+        assert_eq!(found_in("Elsewhere/five.apk"), "Elsewhere/five.apk");
+        assert_eq!(found.found_in.len(), found.bundles.len() + found.packages.len());
     }
 
     #[test]
@@ -410,7 +470,7 @@ mod tests {
         ));
         // A folder that happens to be named like a package is a folder.
         let found = artifacts(&[dir.path().join("Apps/folder.apk")]).unwrap();
-        assert_eq!(found, Artifacts::default());
+        assert_eq!((found.bundles, found.packages), (vec![], vec![]));
     }
 
     #[test]

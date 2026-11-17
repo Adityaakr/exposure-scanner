@@ -67,7 +67,7 @@ use xs_model::EvidenceSet;
 use xs_model::evidence::EvidenceError;
 
 pub use crate::cache::CacheError;
-use crate::cache::{Cache, Collected, Key, Kind, Slot, State};
+use crate::cache::{Cache, Collected, Key, Kind, Slot, State, root_digest};
 use crate::discover::Artifacts;
 pub use crate::discover::ScanScope;
 use crate::schedule::{Job, Pool};
@@ -179,9 +179,9 @@ impl From<EvidenceError> for ScanError {
 ///
 /// With a folder for the [`cache`], an artifact that has not changed since
 /// it was last read is not read again, and what is read is stored there. A
-/// scan of the installed apps also removes what is stored about every app it
-/// did not find. A cache that cannot be used does not fail the scan: the
-/// outcome says why, and every artifact is read.
+/// scan also removes what is stored about every app that was found in a root
+/// it searched and that it did not find. A cache that cannot be used does not
+/// fail the scan: the outcome says why, and every artifact is read.
 ///
 /// # Errors
 ///
@@ -207,14 +207,25 @@ pub fn scan(
         None => (None, None),
     };
     let (evidence, stats) = collect(&found, matchers, &pool, cache.as_ref())?;
-    if let (Some(cache), ScanScope::Installed) = (&cache, scope) {
-        // The installed apps are all there is to this scan, so what the
-        // cache holds about anything else is about an app that is gone.
-        let bundles = found.bundles.iter().map(|path| Key::of(Kind::Bundle, path));
-        let packages = found.packages.iter().map(|path| Key::of(Kind::Package, path));
-        cache.keep_only(&bundles.chain(packages).collect::<BTreeSet<Key>>());
+    if let Some(cache) = &cache {
+        forget_gone(cache, &found);
     }
     Ok(ScanOutcome { evidence, stats, scope, cache_failure })
+}
+
+/// Removes from `cache` what it holds about the apps that were found in a
+/// root of `found` before and are not there now. Every root was searched in
+/// full, so such an app is gone from it.
+fn forget_gone(cache: &Cache, found: &Artifacts) {
+    let bundles = found.bundles.iter().map(|path| Key::of(Kind::Bundle, path));
+    let packages = found.packages.iter().map(|path| Key::of(Kind::Package, path));
+    let roots = found.roots.iter().map(|root| root_digest(root));
+    cache.evict(&roots.collect(), &bundles.chain(packages).collect::<BTreeSet<Key>>());
+}
+
+/// The root `artifact` was found in.
+fn root_of<'a>(found: &'a Artifacts, artifact: &'a Path) -> &'a Path {
+    found.found_in.get(artifact).map_or(artifact, PathBuf::as_path)
 }
 
 /// An artifact once it is listed, which reads none of its content.
@@ -271,9 +282,10 @@ fn collect<'c>(
     cache: Option<&'c Cache>,
 ) -> Result<(EvidenceSet, ScanStats), EvidenceError> {
     // Listing is stat-bound and independent per artifact.
-    let bundles: Vec<Listed<'c, macos::Plan>> = pool.map(&found.bundles, |root| {
-        let plan = macos::plan(root);
-        let slot = cache.map(|cache| cache.slot(Kind::Bundle, root, plan.state()));
+    let bundles: Vec<Listed<'c, macos::Plan>> = pool.map(&found.bundles, |bundle| {
+        let plan = macos::plan(bundle);
+        let slot = cache
+            .map(|cache| cache.slot(Kind::Bundle, root_of(found, bundle), bundle, plan.state()));
         Listed::new(plan, slot)
     });
     let packages: Vec<Listed<'c, u64>> = pool.map(&found.packages, |path| {
@@ -282,7 +294,9 @@ fn collect<'c>(
         let metadata = fs::metadata(path).ok();
         let size = metadata.as_ref().map_or(0, fs::Metadata::len);
         let state = metadata.as_ref().map(State::of_file);
-        let slot = cache.zip(state).map(|(cache, state)| cache.slot(Kind::Package, path, state));
+        let slot = cache
+            .zip(state)
+            .map(|(cache, state)| cache.slot(Kind::Package, root_of(found, path), path, state));
         Listed::new(size, slot)
     });
 

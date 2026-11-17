@@ -52,6 +52,8 @@ miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-a
 psl = "2.1.256"
 rayon = "1.12.0"
 lexopt = "0.3.2"
+# Who the scan runs as, without `unsafe`: the cache is not used by root.
+rustix = { version = "1.1.6", default-features = false, features = ["process"] }
 
 # Developer tooling and tests only. None of these reach the `exposure` binary.
 toml = { version = "1.2.1", default-features = false, features = ["parse", "serde"] }
