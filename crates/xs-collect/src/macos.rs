@@ -33,7 +33,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use xs_formats::{Budget, FormatError, info_plist, macho};
-use xs_match::{ContentMatcher, Matchers, NoContent};
+use xs_match::{ContentMatcher, HitAcc, Matchers, NoContent};
 use xs_model::digest::BundleManifest;
 use xs_model::record::{
     ArtifactRecord, Collector, CoverageReason, CoverageRecord, CoverageStatus, EdgeRecord,
@@ -200,8 +200,9 @@ pub fn collect(
         b.size.cmp(&a.size).then(a.bundle.cmp(&b.bundle)).then(a.file.cmp(&b.file))
     });
 
-    // The content engine arrives with task 5; until then no content tokens
-    // are searched for, and the pass hashes only.
+    // Which bytes of a Mach-O file are searched for which tokens is decided
+    // by the section table, which task 6 reads. Until then the pass hashes
+    // only.
     let content = NoContent;
     let results: Vec<FileResult> = pool.map(&jobs, |job| {
         let found = plans.get(job.bundle).and_then(|plan| Some((plan, plan.files.get(job.file)?)));
@@ -552,28 +553,32 @@ fn finish(
     }));
 
     if let Some(location) = rel(FRAMEWORKS) {
-        let table = matchers.exact(MatcherKind::AppleFramework);
+        // The folder listing is one table: every name is matched, then the
+        // hits are judged together.
+        let scope = Scope::Dependency;
+        let mut hits = HitAcc::new();
         for folder in &plan.frameworks {
-            for hit in table.lookup(folder) {
-                records.push(Record::Edge(EdgeRecord {
-                    v: V1,
-                    collector: Collector::MacosBundle,
-                    subject: subject.clone(),
-                    edge: EdgeType::Channel,
-                    grade: MatcherKind::AppleFramework.grade(),
-                    object: ObjectRef { kind: ObjectKind::Sdk, id: hit.rule.id.clone() },
-                    rule: hit.rule.id.clone(),
-                    proof: Proof {
-                        matcher: MatcherKind::AppleFramework,
-                        token: hit.token.lit.clone(),
-                        count: 1,
-                        example: Some(text::clean(folder, text::MAX_EXAMPLE_BYTES)),
-                        location: location.clone(),
-                        region: Region::DirEntries,
-                        scope: Scope::Dependency,
-                    },
-                }));
-            }
+            matchers.match_value(MatcherKind::AppleFramework, scope, folder.as_bytes(), &mut hits);
+        }
+        for finding in matchers.judge(&hits).edges {
+            records.push(Record::Edge(EdgeRecord {
+                v: V1,
+                collector: Collector::MacosBundle,
+                subject: subject.clone(),
+                edge: EdgeType::Channel,
+                grade: finding.matcher.grade(),
+                object: ObjectRef { kind: ObjectKind::Sdk, id: finding.rule.id.clone() },
+                rule: finding.rule.id.clone(),
+                proof: Proof {
+                    matcher: finding.matcher,
+                    token: finding.token.lit.clone(),
+                    count: finding.count,
+                    example: finding.example,
+                    location: location.clone(),
+                    region: Region::DirEntries,
+                    scope,
+                },
+            }));
         }
     }
 
@@ -830,7 +835,7 @@ mod tests {
             min_distinct: BTreeMap::new(),
         };
         let pack = pack(vec![sentry]);
-        let matchers = Matchers::build(&pack);
+        let matchers = Matchers::build(&pack).unwrap();
         let frameworks = [
             "Contents/Frameworks/A.framework/",
             "Contents/Frameworks/B.framework/",
@@ -908,7 +913,7 @@ mod tests {
     #[test]
     fn an_over_budget_file_of_any_size_yields_a_record_with_an_id() {
         let pack = pack(Vec::new());
-        let matchers = Matchers::build(&pack);
+        let matchers = Matchers::build(&pack).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let records_for = |bytes: u64| {
             let mut plan = plan(dir.path(), MAX_ENTRIES);

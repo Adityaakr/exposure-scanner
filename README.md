@@ -19,7 +19,8 @@ the foundation and a walking skeleton:
 | Evidence format v1, canonical JSON, record ids, evidence set | Done |
 | Rule pack: source format, compiler and lints, signature check, built-in signed pack, 12 seed rules | Done |
 | `exposure scan` on a macOS app bundle, through derivation, to a JSON report | Done, with one witness: framework folder names |
-| Content matching, Mach-O internals, Electron and Android collectors, company and party resolution, HTML report, cache | Not yet (build plan tasks 5 to 14) |
+| Match engine: literal search with boundary rules, exact and prefix tables, and the controls against false positives | Done; no collector searches file contents with it yet |
+| Mach-O internals, Electron and Android collectors, company and party resolution, HTML report, cache | Not yet (build plan tasks 6 to 14) |
 
 So today a scan finds an SDK only when it ships as a framework folder under
 `Contents/Frameworks`. An SDK that is linked statically or bundled into a
@@ -88,9 +89,21 @@ than left to discipline.
 | **Honest.** Every finding shows its grade and the raw record behind it. | The renderer refuses a claim that cites a record the report does not carry. | A test deletes a cited record and expects the render to fail. |
 | **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary that large is reported with its size instead. Symbolic links are never followed. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. |
 | **Rules are data.** A rule pack cannot run code. | A rule is a literal plus one boundary from a fixed list. The scanner only loads a compiled pack whose signature verifies against a key built into the binary; it contains no parser for rule sources. | A tampered pack is refused; the pack compiler's lints are tested. |
-| **Finds what is there / does not cry wolf.** | Several independent witnesses per SDK, with controls against coincidental hits. | Mostly later tasks: the canary and the negative corpus arrive with the collectors. |
+| **Finds what is there / does not cry wolf.** | Several independent witnesses per SDK, with controls against coincidental hits (below). | Each control has its own tests, and a property test checks that cutting a file into windows never changes what is found. The canary and the negative corpus arrive with the collectors. |
 
-`cargo xtask guardrails` proves the first two rows from the other side. It
+The controls against coincidental hits, each one there because of a failure
+seen on real apps:
+
+| Control | What it does |
+|---|---|
+| Scope | Every file is app code, a dependency, a runtime or a resource. Free-form bytes of a runtime, such as an embedded browser engine, are not searched: it holds the names of ad hosts as data. |
+| Boundaries | A token found in free-form bytes must sit on a word or hostname boundary. `i.posthog.com` hits in `us.i.posthog.com` and not in `xi.posthog.com` or `i.posthog.com.evil.example`. |
+| Token lints | The pack compiler refuses short content tokens and bare brand domains before a pack is signed. |
+| Breadth guard | A file that names eight or more companies is a list, such as an ad blocker's filter list. Its hits are mentions and never findings. The guard counts companies over content-matcher hits only and holds back content-matcher hits only. Table-matcher hits, such as framework names, class tables and manifest entries, say what a file is made of and stay edges. This includes the `dex_string` hits of an Android app whose string table names eight or more companies: they are mentions, and the app's edges come from its class table and manifest. |
+| Distinct-token minimum | A rule can demand that several different tokens hit before a kind of witness counts. |
+
+`cargo xtask guardrails` proves the first two rows of the properties table
+from the other side. It
 breaks each rule on purpose in a copy of the workspace (uses `std::fs` in a
 pure crate, opens a socket, adds an HTTP client as a dependency) and requires
 the build to fail for the right reason.
@@ -103,7 +116,7 @@ One Cargo workspace. A crate may depend only on crates above it in this list.
 |---|---|---|
 | `xs-model` | Evidence, claim and pack types; canonical JSON; ids | `no_std` |
 | `xs-formats` | Bounded parsers over byte slices | std without file, network, clock or environment APIs |
-| `xs-match` | Matchers compiled from a pack; hit collection | `no_std` |
+| `xs-match` | Matchers compiled from a pack; hit collection; the controls against false positives | `no_std` |
 | `xs-rules` | Pack loader and signature check; source compiler behind a tooling-only feature | std without file access |
 | `xs-derive` | Evidence and pack in, claims out | `no_std` |
 | `xs-render` | Claims and evidence in, report out | `no_std` |
