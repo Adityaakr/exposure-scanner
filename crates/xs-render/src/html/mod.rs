@@ -38,7 +38,7 @@ use xs_model::pack::Pack;
 use xs_model::record::{
     CoverageRecord, EdgeRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject,
 };
-use xs_model::{Claim, EvidenceSet};
+use xs_model::{Claim, EvidenceSet, Headline};
 
 use self::view::{App, AppFindings, Company, Finding, Found, View};
 use self::words::{list_words, plural, short};
@@ -406,10 +406,12 @@ fn headline(page: &mut Markup, view: &View<'_>) {
     );
     page.close();
     page.raw("\n");
-    if view.claims > 0 && view.found.iter().all(|thing| !thing.counted) {
+    if view.claims > 0 && view.headline == Headline::default() {
         page.raw(
-            "<p class=\"zero\">None of the findings above names a company in a counted \
-             category, which is why these three counts are zero.</p>\n",
+            "<p class=\"zero\">None of the findings above adds to these three counts, which is \
+             why they are zero. A count takes a finding that names a company in a counted \
+             category: a company is counted from grade <code>contains</code> up, and an app \
+             only for a third-party finding.</p>\n",
         );
     }
     page.raw("<div class=\"counts\">\n");

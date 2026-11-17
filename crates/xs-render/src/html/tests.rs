@@ -920,7 +920,7 @@ fn the_summary_is_the_headline_of_the_claims_and_says_what_it_counts() {
     assert!(text.contains("These three numbers do not count every finding."));
     assert!(text.contains("in the categories Analytics and Session replay."));
     assert!(text.contains("There is no score."));
-    assert!(!text.contains("which is why these three counts are zero"));
+    assert!(summary.descendants().into_iter().all(|e| !e.has_class("zero")));
     // What was found, then the counts, then the totals.
     let at = |part: &str| text.find(part).unwrap_or_else(|| panic!("no `{part}`"));
     let order = [
@@ -952,6 +952,13 @@ fn the_summary_is_the_headline_of_the_claims_and_says_what_it_counts() {
     );
 }
 
+/// What the summary says of three zero counts beside findings. It holds
+/// whichever way the findings missed the counts.
+const ZEROS: &str = "None of the findings above adds to these three counts, which is why they \
+                     are zero. A count takes a finding that names a company in a counted \
+                     category: a company is counted from grade contains up, and an app only for \
+                     a third-party finding.";
+
 /// The case the owner reported: findings, none of them in a counted
 /// category. Three zeros must not read as "nothing found": the findings
 /// lead, and the page says why the counts are zero.
@@ -980,11 +987,38 @@ fn three_zeros_beside_findings_are_explained() {
         .filter(|e| e.has_class("zero"))
         .map(Element::text)
         .collect();
+    assert_eq!(explained, [ZEROS]);
+
+    // A finding in a counted category that adds to no count: an app whose
+    // publisher nothing identifies declares Acme's analytics. It is tagged
+    // counted, the company is below `contains` and the finding is not
+    // third party, so the counts stay zero, and the same sentence says
+    // what they would have needed.
+    let own = subject(Platform::Macos, "Notes", 3);
+    let evidence = set([
+        artifact(&own, "Acme Notes", None),
+        sdk(&own, "sdk/acme-analytics", MatcherKind::PrivacyManifest, None),
+    ]);
+    let claims = xs_derive::derive(&evidence, &pack).unwrap();
+    let [declared] = claims.as_slice() else { panic!("one claim: {claims:#?}") };
+    assert!(declared.headline);
+    assert_eq!((declared.grade, declared.party), (Grade::Declares, Party::Unknown));
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    assert_eq!(found(&root)[0][4], "counted");
     assert_eq!(
-        explained,
-        ["None of the findings above names a company in a counted category, which is why these \
-          three counts are zero."]
+        counts(&root),
+        [
+            "0 companies with a recorded connection",
+            "0 companies whose code the scanned apps ship",
+            "0 apps with a third-party channel",
+        ]
     );
+    let zero = section(&root, "summary")
+        .descendants()
+        .into_iter()
+        .find(|e| e.has_class("zero"))
+        .expect("three zeros beside a counted finding are explained");
+    assert_eq!(zero.text(), ZEROS);
 
     // With no finding there is nothing to explain, and no list: the plain
     // statement that nothing matched stands where the findings would lead.
