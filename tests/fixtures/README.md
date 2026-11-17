@@ -34,9 +34,9 @@ The archive holds:
 |---|---|
 | `main.js` | The app's own script, with the two literals a bundler leaves of the Sentry and PostHog browser SDKs. Both must be found, as `app_code` |
 | `main.js.map` | A source map that names both SDKs. Not searched |
-| `renderer/index.html`, `renderer/app.js` | The app's own page and script, with nothing in them |
+| `renderer/index.html`, `renderer/app.js` | The app's own page and script, with nothing in them. The script is searched, the page is not |
 | `node_modules/@sentry/electron/` | An installed package: found by name in the file table, and by the literal in its script, as `dependency` |
-| `node_modules/lunr/index.html` | The demo page of a library, with a PostHog host in it. Not searched: dependencies count for scripts only |
+| `node_modules/lunr/index.html` | The demo page of a library, with a PostHog host in it. Not searched: only scripts are |
 | `node_modules/keytar/build/Release/keytar.node` | Listed as unpacked; the file is in `app.asar.unpacked` beside the archive |
 
 Scanning it must yield two claims: Sentry with two kinds of witness, and

@@ -13,7 +13,11 @@
 //!
 //! * `npm_package`: the root's file table lists
 //!   `node_modules/<package>/package.json`. A table lookup, high confidence,
-//!   and gone as soon as the app is bundled into one script.
+//!   and gone as soon as the app is bundled into one script. The table is
+//!   the header of an archive, or the folder listing of
+//!   `Contents/Resources/app`, which has no header. A `*.asar.unpacked`
+//!   folder has no table of its own: the header of its archive already
+//!   lists what it holds, so a package is reported once.
 //! * `content_literal`: a script holds a literal the SDK cannot work
 //!   without. This is the witness that survives bundling and minification.
 //!
@@ -25,14 +29,15 @@
 //! | File | Scope | Searched |
 //! |---|---|---|
 //! | `.js`, `.cjs`, `.mjs` outside `node_modules` | `app_code` | yes |
-//! | `.html`, `.htm` outside `node_modules` | `app_code` | yes |
 //! | `.js`, `.cjs`, `.mjs` under a `node_modules` folder | `dependency` | yes |
 //! | anything else | | no |
 //!
-//! Dependencies count for scripts only, because they ship demo pages and
-//! documentation: Bitwarden desktop 2026.10.4 carries an analytics snippet
-//! in `node_modules/lunr/index.html`, the demo page of a search library.
-//! Source maps are not searched for the same reason: a `.map` beside a
+//! Scripts only. A page is not searched, the app's own or a dependency's:
+//! a link or a sentence in it names a company without the app talking to
+//! it, and dependencies ship demo pages and documentation. Bitwarden
+//! desktop 2026.10.4 carries an analytics snippet in
+//! `node_modules/lunr/index.html`, the demo page of a search library.
+//! Source maps are not searched for a like reason: a `.map` beside a
 //! bundle repeats the source of every dependency. V8 bytecode (`.jsc`)
 //! cannot be searched for literals at all, so each such file is reported as
 //! a gap instead of passing for clean.
@@ -105,8 +110,6 @@ pub(crate) const MAX_EDGES: usize = 1000;
 enum Code {
     /// JavaScript the runtime loads as is.
     Script,
-    /// A page, which may hold scripts.
-    Page,
     /// V8 bytecode. Its literals are not contiguous bytes.
     Bytecode,
     /// Not code.
@@ -118,8 +121,6 @@ fn code_of(name: &str) -> Code {
     let is = |wanted: &str| extension.eq_ignore_ascii_case(wanted);
     if is("js") || is("cjs") || is("mjs") {
         Code::Script
-    } else if is("html") || is("htm") {
-        Code::Page
     } else if is("jsc") {
         Code::Bytecode
     } else {
@@ -130,10 +131,7 @@ fn code_of(name: &str) -> Code {
 /// Whether the content of a file is searched. See the table in the module
 /// documentation.
 const fn searched(code: Code, scope: Scope) -> bool {
-    matches!(
-        (code, scope),
-        (Code::Script, Scope::AppCode | Scope::Dependency) | (Code::Page, Scope::AppCode)
-    )
+    matches!((code, scope), (Code::Script, Scope::AppCode | Scope::Dependency))
 }
 
 /// Whether one of the folders in `folders`, a path, is `node_modules`.
@@ -591,8 +589,9 @@ struct Root {
     archive: bool,
     tables: Tables,
     /// For a loose folder: the paths inside it that evidence was drawn from
-    /// without reading the file, which is its `package.json` files under
-    /// `node_modules` and its bytecode files.
+    /// without reading the file, which is its bytecode files and, in
+    /// `Contents/Resources/app`, its `package.json` files under
+    /// `node_modules`.
     listed: Vec<String>,
     gaps: Gaps,
 }
@@ -628,11 +627,13 @@ impl Roots {
     }
 
     /// Takes in a regular file the walk listed, read or not: in a loose
-    /// folder the listing alone names the npm packages and the bytecode.
+    /// folder the listing alone names the bytecode, and in
+    /// `Contents/Resources/app` the npm packages. The packages of a
+    /// `*.asar.unpacked` folder are the ones its archive's header lists.
     pub(crate) fn listed(&mut self, path: &RelPath, matchers: &Matchers<'_>) {
         let Some((root, inner)) = loose_root(path.as_str()) else { return };
         let name = split_name(inner).1;
-        let package = name == PACKAGE_JSON && npm_package(inner).is_some();
+        let package = root == LOOSE_APP && name == PACKAGE_JSON && npm_package(inner).is_some();
         let bytecode = code_of(name) == Code::Bytecode;
         if !(package || bytecode) {
             return;
@@ -773,8 +774,8 @@ mod tests {
             ("worker.MJS", Code::Script),
             ("preload.cjs", Code::Script),
             (".js", Code::Script),
-            ("index.html", Code::Page),
-            ("about.HTM", Code::Page),
+            ("index.html", Code::Other),
+            ("about.HTM", Code::Other),
             ("main.jsc", Code::Bytecode),
             ("main.js.map", Code::Other),
             ("types.d.ts", Code::Other),
@@ -789,18 +790,14 @@ mod tests {
 
     /// Design report, section 5.2, controls 1 and 7.
     #[test]
-    fn dependencies_count_for_scripts_only() {
+    fn only_scripts_of_the_app_and_its_dependencies_are_searched() {
         assert!(searched(Code::Script, Scope::AppCode));
-        assert!(searched(Code::Page, Scope::AppCode));
         assert!(searched(Code::Script, Scope::Dependency));
-        assert!(!searched(Code::Page, Scope::Dependency));
+        assert!(!searched(Code::Script, Scope::Runtime));
+        assert!(!searched(Code::Script, Scope::Resource));
         for scope in [Scope::AppCode, Scope::Dependency, Scope::Runtime, Scope::Resource] {
             assert!(!searched(Code::Other, scope));
             assert!(!searched(Code::Bytecode, scope));
-        }
-        for code in [Code::Script, Code::Page] {
-            assert!(!searched(code, Scope::Runtime));
-            assert!(!searched(code, Scope::Resource));
         }
     }
 
@@ -846,7 +843,6 @@ mod tests {
                 FileKind::Archive { dependency: true },
             ),
             ("Contents/Resources/app/main.js", script(app, "main.js", Scope::AppCode)),
-            ("Contents/Resources/app/ui/index.html", script(app, "ui/index.html", Scope::AppCode)),
             (
                 "Contents/Resources/app/node_modules/a/index.js",
                 script(app, "node_modules/a/index.js", Scope::Dependency),
@@ -868,7 +864,9 @@ mod tests {
                 "a.asar.unpacked/b.asar.unpacked/c.js",
                 script("a.asar.unpacked", "b.asar.unpacked/c.js", Scope::AppCode),
             ),
-            // A page of a dependency, a source map and data are not searched.
+            // A page, a source map and data are not searched.
+            ("Contents/Resources/app/ui/index.html", FileKind::Other),
+            ("Contents/Resources/app.asar.unpacked/about.htm", FileKind::Other),
             ("Contents/Resources/app/node_modules/lunr/index.html", FileKind::Other),
             ("Contents/Resources/app/main.js.map", FileKind::Other),
             ("Contents/Resources/app/package.json", FileKind::Other),
@@ -1065,9 +1063,9 @@ mod tests {
             ("package.json", text("{\"name\":\"app\"}")),
             ("js/main.js", text(&format!("boot();{SENTRY}{POSTHOG}{SENTRY}"))),
             ("js/extra.js", text(SENTRY)),
+            // Not searched: the app's own page, a source map, data, a style
+            // sheet, a page of a dependency, and a file with no extension.
             ("index.html", text(&format!("<script>{POSTHOG}</script>"))),
-            // Not searched: a source map, data, a style sheet, a page of a
-            // dependency, and a file with no extension.
             ("js/main.js.map", text(SENTRY)),
             ("config.json", text(POSTHOG)),
             ("app.css", text(SENTRY)),
@@ -1095,7 +1093,7 @@ mod tests {
         );
         assert_eq!(
             rows(&matchers, &tables.app_code),
-            [row("app.posthog.com", 2, "index.html"), row("sentry.javascript.", 2, "js/extra.js")]
+            [row("app.posthog.com", 1, "js/main.js"), row("sentry.javascript.", 2, "js/extra.js")]
         );
         assert_eq!(
             rows(&matchers, &tables.dependency),
@@ -1164,7 +1162,7 @@ mod tests {
             ("js/main.js", text(&format!("{filler}{SENTRY}{filler}{POSTHOG}{filler}{SENTRY}"))),
             ("js/list.js", text(&format!("{filler}{}{filler}", filter_list()))),
             ("node_modules/x/y.js", text(&format!("{POSTHOG}{filler}"))),
-            ("z.html", text(&format!("{filler}us.i.posthog.com"))),
+            ("z.mjs", text(&format!("{filler}us.i.posthog.com"))),
         ]);
         let reference = scan(&bytes, bytes.len() * 2, false);
         assert_eq!(reference.0.app_code.iter().count(), 3);

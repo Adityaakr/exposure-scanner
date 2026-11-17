@@ -20,7 +20,7 @@ the foundation and a walking skeleton:
 | Rule pack: source format, compiler and lints, signature check, built-in signed pack, 12 seed rules | Done |
 | `exposure scan` on a macOS app bundle, through derivation, to a JSON report | Done, with one witness for native code: framework folder names |
 | Match engine: literal search with boundary rules, exact and prefix tables, and the controls against false positives | Done |
-| Electron apps: npm packages listed in an asar archive, literals in the app's scripts, scope labels, breadth guard | Done |
+| Electron apps: npm packages listed in an asar archive or in the `Contents/Resources/app` folder, literals in the app's scripts, scope labels, breadth guard | Done |
 | Mach-O internals, the Android collector, company and party resolution, HTML report, cache | Not yet (build plan tasks 6 and 8 to 14) |
 
 So today a scan finds an SDK when it ships as a framework folder under
@@ -103,7 +103,7 @@ seen on real apps:
 
 | Control | What it does |
 |---|---|
-| Scope | Every file is app code, a dependency, a runtime or a resource. Free-form bytes of a runtime, such as an embedded browser engine, are not searched: it holds the names of ad hosts as data. In an Electron app, what sits under a `node_modules` folder is a dependency and counts for scripts only, because libraries ship demo pages and documentation; source maps and data files are not searched anywhere. |
+| Scope | Every file is app code, a dependency, a runtime or a resource. Free-form bytes of a runtime, such as an embedded browser engine, are not searched: it holds the names of ad hosts as data. In an Electron app only script files (`.js`, `.cjs`, `.mjs`) are searched, and what sits under a `node_modules` folder is a dependency. Pages, source maps and data files are not searched anywhere: a link in a page names a company without the app talking to it, and libraries ship demo pages and documentation. |
 | Boundaries | A token found in free-form bytes must sit on a word or hostname boundary. `i.posthog.com` hits in `us.i.posthog.com` and not in `xi.posthog.com` or `i.posthog.com.evil.example`. |
 | Token lints | The pack compiler refuses short content tokens and bare brand domains before a pack is signed. |
 | Breadth guard | A file that names eight or more companies is a list, such as an ad blocker's filter list. Its hits are mentions and never findings. The guard counts companies over content-matcher hits only and holds back content-matcher hits only. Table-matcher hits, such as framework names, class tables and manifest entries, say what a file is made of and stay edges. This includes the `dex_string` hits of an Android app whose string table names eight or more companies: they are mentions, and the app's edges come from its class table and manifest. |

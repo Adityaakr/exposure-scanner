@@ -25,9 +25,17 @@ const POSTHOG: &str = "init({api_host:\"https://app.posthog.com\"});";
 /// way `@electron/asar` writes one: a 16-byte prefix, the JSON header padded
 /// to four bytes, and the files back to back in the order given.
 fn archive(files: &[(&str, &str)]) -> Vec<u8> {
+    archive_with_unpacked(files, &[])
+}
+
+/// As [`archive`], with `unpacked` listed in the header the way the packer
+/// lists a file it leaves in the folder beside the archive.
+fn archive_with_unpacked(files: &[(&str, &str)], unpacked: &[&str]) -> Vec<u8> {
     let mut data = Vec::new();
     let mut tree = serde_json::Map::new();
-    for (path, content) in files {
+    let stored = files.iter().map(|(path, content)| (*path, Some(*content)));
+    let beside = unpacked.iter().map(|path| (*path, None));
+    for (path, content) in stored.chain(beside) {
         let mut folder = &mut tree;
         let (folders, name) = path.rsplit_once('/').unwrap_or(("", path));
         for part in folders.split('/').filter(|part| !part.is_empty()) {
@@ -38,10 +46,15 @@ fn archive(files: &[(&str, &str)]) -> Vec<u8> {
                 .and_then(serde_json::Value::as_object_mut)
                 .unwrap();
         }
-        let offset = data.len().to_string();
-        data.extend_from_slice(content.as_bytes());
-        folder
-            .insert(name.to_string(), serde_json::json!({"offset": offset, "size": content.len()}));
+        let entry = match content {
+            Some(content) => {
+                let offset = data.len().to_string();
+                data.extend_from_slice(content.as_bytes());
+                serde_json::json!({"offset": offset, "size": content.len()})
+            }
+            None => serde_json::json!({"size": 2, "unpacked": true}),
+        };
+        folder.insert(name.to_string(), entry);
     }
     let json = serde_json::json!({"files": tree}).to_string();
     let len = u32::try_from(json.len()).unwrap();
@@ -329,6 +342,9 @@ fn only_scripts_are_searched_and_dependencies_for_scripts_only() {
     let files: Vec<(&'static str, String)> = vec![
         ("js/main.js", String::from("boot()")),
         ("js/main.js.map", both.clone()),
+        // The app's own page: a link in it is not the app talking.
+        ("about.html", format!("<script>{POSTHOG}</script>")),
+        ("legal/privacy.htm", both.clone()),
         ("config.json", both.clone()),
         ("docs/readme.md", both.clone()),
         ("styles/app.css", both.clone()),
@@ -345,15 +361,6 @@ fn only_scripts_are_searched_and_dependencies_for_scripts_only() {
     let evidence = evidence(&root);
     assert!(edges(&evidence).is_empty(), "{:#?}", edges(&evidence));
     assert!(coverage(&evidence).is_empty());
-
-    // The same text in the app's own page is a finding.
-    let mut with_page = files;
-    with_page.push(("about.html", format!("<script>{POSTHOG}</script>")));
-    write(&root.join(ASAR), archive_of(&with_page));
-    assert_eq!(
-        rows(&self::evidence(&root)),
-        [row("app.posthog.com", ASAR, Region::Files, Scope::AppCode, 1, "about.html")]
-    );
 }
 
 /// Design report, section 5.2 control 4.
@@ -384,6 +391,7 @@ fn a_loose_code_folder_is_read_like_an_archive() {
     // Not searched in a folder either.
     write(&root.join("Contents/Resources/app/js/main.js.map"), format!("{SENTRY}{POSTHOG}"));
     write(&root.join("Contents/Resources/app/node_modules/lodash/demo.html"), POSTHOG);
+    write(&root.join("Contents/Resources/app/about.html"), format!("<script>{POSTHOG}</script>"));
     // A script outside the code folder is not the app's code.
     write(&root.join("Contents/Resources/help/search.js"), POSTHOG);
     let evidence = evidence(&root);
@@ -423,18 +431,25 @@ fn a_loose_code_folder_is_read_like_an_archive() {
         ]
     );
     assert!(coverage(&evidence).is_empty());
-    // The property list, two Mach-O files, and the five scripts and pages
-    // of the code folder. The package files are listed, not read.
-    assert_eq!(facts(&evidence).files_scanned, 3 + 5);
+    // The property list, two Mach-O files, and the four scripts of the code
+    // folder. The pages are not read, and the package files are listed.
+    assert_eq!(facts(&evidence).files_scanned, 3 + 4);
 }
 
 /// A file an archive lists as unpacked lives in the folder beside it, and
-/// is searched there.
+/// is searched there. Its package is named by the archive's header, which
+/// lists it, and not a second time by the folder.
 #[test]
-fn the_folder_beside_an_archive_is_a_code_root_of_its_own() {
+fn the_folder_beside_an_archive_is_searched_and_its_packages_are_the_headers() {
     let dir = tempfile::tempdir().unwrap();
     let root = electron_bundle(dir.path(), "Example.app");
-    write(&root.join(ASAR), archive(&[("main.js", "boot()")]));
+    write(
+        &root.join(ASAR),
+        archive_with_unpacked(
+            &[("main.js", "boot()")],
+            &["node_modules/posthog-js/package.json", "node_modules/posthog-js/dist/main.js"],
+        ),
+    );
     let unpacked = "Contents/Resources/app.asar.unpacked";
     write(&root.join(unpacked).join("node_modules/posthog-js/package.json"), "{}");
     write(&root.join(unpacked).join("node_modules/posthog-js/dist/main.js"), POSTHOG);
@@ -454,8 +469,8 @@ fn the_folder_beside_an_archive_is_a_code_root_of_its_own() {
             ),
             row(
                 "posthog-js",
-                unpacked,
-                Region::DirEntries,
+                ASAR,
+                Region::AsarHeader,
                 Scope::Dependency,
                 1,
                 "node_modules/posthog-js/package.json"
@@ -469,6 +484,14 @@ fn the_folder_beside_an_archive_is_a_code_root_of_its_own() {
                 "workers/sync.mjs"
             ),
         ]
+    );
+
+    // A package the header does not list is not taken from the folder.
+    write(&root.join(ASAR), archive(&[("main.js", "boot()")]));
+    assert!(
+        !rows(&evidence(&root)).iter().any(|row| row.0 == "posthog-js"),
+        "{:#?}",
+        rows(&evidence(&root))
     );
 }
 
@@ -526,15 +549,19 @@ fn the_digest_covers_archives_scripts_and_the_package_listing() {
     let after_edit = digest(&evidence(&root));
     assert_ne!(after_edit, after_script);
 
-    // A package in a loose folder, which is listed and not read: its
-    // presence changes the digest, its content does not.
-    write(&loose.join("node_modules/left-pad/package.json"), "{}");
+    // A package in the folder Electron runs, which is listed and not read:
+    // its presence changes the digest, its content does not.
+    let app = root.join("Contents/Resources/app");
+    write(&app.join("node_modules/left-pad/package.json"), "{}");
     let after_package = digest(&evidence(&root));
     assert_ne!(after_package, after_edit);
-    write(&loose.join("node_modules/left-pad/package.json"), "{\"version\":\"2\"}");
+    write(&app.join("node_modules/left-pad/package.json"), "{\"version\":\"2\"}");
     assert_eq!(digest(&evidence(&root)), after_package);
-    // A loose file that is neither read nor listed for evidence.
-    write(&loose.join("node_modules/left-pad/README.md"), POSTHOG);
+    // Loose files that are neither read nor listed for evidence: a page, a
+    // text, and a package beside an archive, which the header speaks for.
+    write(&app.join("node_modules/left-pad/README.md"), POSTHOG);
+    write(&app.join("about.html"), POSTHOG);
+    write(&loose.join("node_modules/left-pad/package.json"), "{}");
     assert_eq!(digest(&evidence(&root)), after_package);
 }
 
