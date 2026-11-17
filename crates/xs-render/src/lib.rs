@@ -94,7 +94,9 @@ pub enum RenderError {
     /// The rule pack handed to the renderer is not the one the report names,
     /// so its names would be put on claims derived with other rules.
     PackMismatch,
-    /// A claim names a company or a category the rule pack does not hold.
+    /// A claim names a company or a category the rule pack does not hold. The
+    /// category of an access claim is looked up in the fixed access list of
+    /// `xs_model::access` instead.
     NotInPack {
         /// The claim.
         claim: String,
