@@ -7,6 +7,7 @@
 //!
 //! | Key | What is taken |
 //! |---|---|
+//! | `manifest_version` | the whole number |
 //! | `name`, `version`, `default_locale` | the text |
 //! | `author` | the text; the object form that holds an e-mail address is not taken |
 //! | `homepage_url` | the text; the caller keeps the host only |
@@ -52,6 +53,8 @@ const MAX_LOCALE_BYTES: usize = 35;
 /// What a manifest says about its extension and what it asks for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Manifest {
+    /// `manifest_version`, when it is a whole number.
+    pub manifest_version: Option<u64>,
     /// `name`, as written. It may be a reference into the message catalogue;
     /// see [`message_key`].
     pub name: Option<String>,
@@ -92,6 +95,16 @@ pub struct ContentScript {
 }
 
 impl Manifest {
+    /// Whether the browser takes the site patterns listed under
+    /// `permissions` and `optional_permissions`, as it does up to version 2.
+    /// From version 3 sites are granted only under `host_permissions` and
+    /// `optional_host_permissions`. A manifest that states no version is
+    /// read as version 2.
+    #[must_use]
+    pub fn sites_in_permissions(&self) -> bool {
+        self.manifest_version.is_none_or(|version| version < 3)
+    }
+
     fn entries(&self) -> usize {
         let scripts: usize = self.content_scripts.iter().map(|script| script.matches.len()).sum();
         [
@@ -278,6 +291,40 @@ impl<'de> Deserialize<'de> for Text {
         }
 
         deserializer.deserialize_any(TextVisitor)
+    }
+}
+
+/// A whole number, or none for a value of another type.
+#[derive(Default)]
+struct Number(Option<u64>);
+
+impl<'de> Deserialize<'de> for Number {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct NumberVisitor;
+
+        impl<'de> Visitor<'de> for NumberVisitor {
+            type Value = Number;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("any value")
+            }
+
+            pass_over!(visit_bool(bool), visit_i64(i64), visit_f64(f64), visit_str(&str));
+
+            fn visit_u64<E: serde::de::Error>(self, number: u64) -> Result<Number, E> {
+                Ok(Number(Some(number)))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Number, A::Error> {
+                drop_seq(seq).map(|()| Number(None))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Number, A::Error> {
+                drop_map(map).map(|()| Number(None))
+            }
+        }
+
+        deserializer.deserialize_any(NumberVisitor)
     }
 }
 
@@ -491,6 +538,9 @@ impl<'de> Deserialize<'de> for Manifest {
                 while let Some(key) = map.next_key::<String>()? {
                     let mut text = || map.next_value::<Text>().map(|Text(text)| text);
                     match key.as_str() {
+                        "manifest_version" => {
+                            manifest.manifest_version = map.next_value::<Number>()?.0;
+                        }
                         "name" => manifest.name = text()?,
                         "version" => manifest.version = text()?,
                         "default_locale" => manifest.default_locale = text()?,
@@ -679,6 +729,7 @@ mod tests {
         assert_eq!(
             manifest,
             Manifest {
+                manifest_version: Some(3),
                 name: Some("Example".into()),
                 version: Some("1.2.3".into()),
                 default_locale: Some("en".into()),
@@ -721,6 +772,7 @@ mod tests {
     fn keys_of_an_unexpected_type_are_passed_over() {
         let manifest = parse(
             br#"{
+              "manifest_version": "3",
               "name": ["not", "text"],
               "version": 7,
               "default_locale": null,

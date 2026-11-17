@@ -832,14 +832,19 @@ fn asked(manifest: &Manifest) -> Asked<'_> {
     let mut asked = Asked::new();
 
     // An interface name, or in a version 2 manifest a site pattern.
+    let sites_in_permissions = manifest.sites_in_permissions();
     let named = [
         (ManifestKey::Permissions, &manifest.permissions),
         (ManifestKey::OptionalPermissions, &manifest.optional_permissions),
     ];
     for (key, entries) in named {
         for entry in entries {
-            let permission = Permission::from_manifest_name(entry)
-                .or_else(|| breadth(entry, Paths::Ignored).map(Breadth::permission));
+            let permission = Permission::from_manifest_name(entry).or_else(|| {
+                sites_in_permissions
+                    .then(|| breadth(entry, Paths::Ignored))
+                    .flatten()
+                    .map(Breadth::permission)
+            });
             if let Some(permission) = permission {
                 ask(&mut asked, permission, key, entry);
             }
@@ -1449,6 +1454,20 @@ mod tests {
                 "extension/web-request permissions 2 webRequest",
                 "extension/cookies permissions 1 cookies",
                 "extension/clipboard-read optional_permissions 1 clipboardRead",
+            ]
+        );
+        // From version 3 the browser grants sites only under the host keys:
+        // a pattern left under `permissions` is refused, and grants nothing.
+        assert_eq!(
+            asks(
+                r#"{"manifest_version": 3,
+                    "permissions": ["<all_urls>", "storage", "tabs"],
+                    "optional_permissions": ["*://*/*"],
+                    "host_permissions": ["*://*.com/*"]}"#
+            ),
+            [
+                "extension/broad-sites host_permissions 1 *://*.com/*",
+                "extension/tabs permissions 1 tabs",
             ]
         );
     }
