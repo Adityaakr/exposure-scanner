@@ -112,9 +112,10 @@ pub const RUNTIME_FRAMEWORKS: [&str; 3] = [
 /// manifest is, from where the file sits in the bundle.
 ///
 /// A file inside a browser-engine framework is `runtime`. Any other file
-/// below a folder named `Frameworks` is a `dependency`: that is where a
-/// bundle keeps the libraries it ships. Everything else, the main
-/// executable, helpers, plug-ins and extensions, is the app's own code.
+/// below a folder named `Frameworks` or `node_modules` is a `dependency`:
+/// that is where a bundle keeps the libraries and the packages it ships.
+/// Everything else, the main executable, helpers, plug-ins and extensions,
+/// is the app's own code.
 fn binary_scope(path: &RelPath) -> Scope {
     let mut folders = path.as_str().split('/');
     folders.next_back();
@@ -123,7 +124,7 @@ fn binary_scope(path: &RelPath) -> Scope {
         if RUNTIME_FRAMEWORKS.contains(&folder) {
             return Scope::Runtime;
         }
-        if folder == "Frameworks" {
+        if folder == "Frameworks" || folder == electron::NODE_MODULES {
             scope = Scope::Dependency;
         }
     }
@@ -1069,6 +1070,17 @@ mod tests {
             // A file that is merely named like one is not inside one.
             ("Contents/MacOS/Electron Framework.framework", Scope::AppCode),
             ("Contents/MacOS/Frameworks", Scope::AppCode),
+            (
+                "Contents/Resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node",
+                Scope::Dependency,
+            ),
+            ("Contents/Resources/app/node_modules/a/node_modules/b/b.node", Scope::Dependency),
+            (
+                "Contents/Frameworks/Electron Framework.framework/Resources/node_modules/x/x.node",
+                Scope::Runtime,
+            ),
+            ("Contents/Resources/my_node_modules/x.node", Scope::AppCode),
+            ("Contents/MacOS/node_modules", Scope::AppCode),
         ] {
             assert_eq!(binary_scope(&location(path)), scope, "{path}");
         }

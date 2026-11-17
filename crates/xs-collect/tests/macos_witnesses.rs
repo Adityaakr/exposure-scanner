@@ -618,7 +618,8 @@ fn tracking_domains_in_privacy_manifests_are_declared_hosts() {
 
 /// A privacy manifest is the declaration of whatever holds it, by the folder
 /// rule that says whose code a binary is: an extension or a helper is the
-/// app's own, anything below a `Frameworks` folder is something it ships.
+/// app's own, anything below a `Frameworks` or `node_modules` folder is
+/// something it ships.
 #[test]
 fn a_privacy_manifest_has_the_scope_of_the_code_beside_it() {
     let dir = tempfile::tempdir().unwrap();
@@ -650,6 +651,11 @@ fn a_privacy_manifest_has_the_scope_of_the_code_beside_it() {
             "dep.example",
             Scope::Dependency,
         ),
+        (
+            "Contents/Resources/app.asar.unpacked/node_modules/keytar/PrivacyInfo.xcprivacy",
+            "keytar.example",
+            Scope::Dependency,
+        ),
     ];
     for (path, domain, _) in placed {
         write(&root.join(path), privacy_manifest(&[domain, "eu.i.posthog.com"]));
@@ -668,6 +674,34 @@ fn a_privacy_manifest_has_the_scope_of_the_code_beside_it() {
         assert_eq!(host.proof.scope, scope, "{path}");
         // The edge a rule adds for a host carries the same scope.
         assert!(sdk_edges.contains(&(path, scope)), "{path}: {sdk_edges:#?}");
+    }
+}
+
+/// A native add-on of a package is the package's code, not the app's: the
+/// spec counts what sits below `node_modules` as a dependency, as it does
+/// for a script in the same folder.
+#[test]
+fn a_native_add_on_below_node_modules_is_a_dependency() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = bundle(dir.path(), &Binary::new().build(), "");
+    let add_on =
+        "Contents/Resources/app.asar.unpacked/node_modules/keytar/build/Release/keytar.node";
+    let binary = Binary::new()
+        .library("@rpath/Sentry.framework/Sentry")
+        .section(Section::data("__TEXT", "__objc_classname", b"MSACAppCenter\0"))
+        .section(Section::data("__TEXT", "__cstring", b"https://in.appcenter.ms\0"))
+        .build();
+    write(&root.join(add_on), binary);
+    let evidence = evidence(&root);
+
+    for (object, matcher) in [
+        ("sdk/appcenter", MatcherKind::MachoObjcClass),
+        ("sdk/appcenter", MatcherKind::MachoToken),
+        ("sdk/sentry", MatcherKind::MachoDylib),
+    ] {
+        let edge = edge(&evidence, object, matcher);
+        assert_eq!(edge.proof.location.as_str(), add_on);
+        assert_eq!(edge.proof.scope, Scope::Dependency, "{matcher}");
     }
 }
 
