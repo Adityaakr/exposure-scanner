@@ -42,7 +42,7 @@ jobs:
           key: linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
           restore-keys: linux-
 
-      - name: Install cargo-deny (pinned by hash) and strace
+      - name: Install cargo-deny (pinned by hash), strace and time
         run: |
           archive="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
           curl --fail --silent --show-error --location --output "$RUNNER_TEMP/cargo-deny.tgz" \
@@ -50,7 +50,7 @@ jobs:
           echo "${CARGO_DENY_SHA256}  $RUNNER_TEMP/cargo-deny.tgz" | sha256sum --check --strict
           tar --extract --gzip --file "$RUNNER_TEMP/cargo-deny.tgz" --directory "$RUNNER_TEMP" "${archive}/cargo-deny"
           install -m 0755 "$RUNNER_TEMP/${archive}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
-          command -v strace >/dev/null || { sudo apt-get update --quiet && sudo apt-get install --yes --quiet strace; }
+          { command -v strace >/dev/null && test -x /usr/bin/time; } || { sudo apt-get update --quiet && sudo apt-get install --yes --quiet strace time; }
 
       # Real apps are pinned by hash in tests/fixtures/real-apps.txt and
       # never stored in the repository. The cache spares their publishers a
@@ -94,6 +94,14 @@ jobs:
 
       - name: A scan opens no socket
         run: cargo xtask no-network --strict
+
+      # The committed fixtures are far too small for the scaling gate, which
+      # is skipped here and is checked on the reference laptop with
+      # `cargo xtask bench --strict`. What this run does check: the benchmark
+      # itself works, memory stays under its gate, and 13 runs at 1 to 8
+      # threads give one report.
+      - name: Benchmark runs, within its memory gate, with one report
+        run: cargo xtask bench tests/fixtures/macos tests/fixtures/android/Skeleton.apk
 
   # The parsers of hostile files, under libFuzzer with the address
   # sanitizer: one target per parser and one for the Android collector as a

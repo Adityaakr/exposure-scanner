@@ -12,8 +12,8 @@ nothing anywhere.
 ## Status
 
 Milestone 1 ("static truth") is in progress. This repository currently holds
-the foundation, the macOS, Electron and Android collectors, and the
-resolver:
+the foundation, the macOS, Electron and Android collectors, the resolver and
+the scan scheduler:
 
 | Part | State |
 |---|---|
@@ -25,8 +25,8 @@ resolver:
 | Electron apps: npm packages listed in an asar archive or in the `Contents/Resources/app` folder, literals in the app's scripts, scope labels, breadth guard | Done |
 | `exposure scan` on an Android package (`.apk`) | Done, with four witnesses: manifest components, classes defined in the DEX files, DEX string constants, and entry names |
 | Resolver: the company behind an SDK or a host, the app's vendor by Team ID then app id, first or third party, headline counts | Done (below) |
-| HTML report, cache | Not yet (build plan tasks 9 to 14) |
-| Finding `.apk` files inside a folder that is scanned | Not yet: it comes with the scan scheduler (build plan task 9), which decides what one found package that cannot be read does to the rest of the scan |
+| Scan scheduler: finding the installed apps, and bundles and packages in a folder; one queue of files for the whole scan, largest first; an app that cannot be read is reported and does not stop the scan | Done (below) |
+| HTML report, cache | Not yet (build plan tasks 11 to 14) |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
 
@@ -111,6 +111,7 @@ $ cargo build --release --package exposure
 $ target/release/exposure scan tests/fixtures/macos/Skeleton.app --json report.json
 exposure: scanned 1 app (3 files, 676 bytes): 1 claim, 0 coverage notes
 exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
+exposure: scope: the paths given and nothing else; the installed-app folders were not searched
 ```
 
 To install the binary instead of running it from the build folder:
@@ -120,15 +121,58 @@ $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exp
 ```
 
 ```
-exposure scan PATH... [--json FILE] [--threads N]   scan .app bundles, folders of them, or .apk files
-exposure report FILE [--json FILE]                  derive the report again from saved evidence
-exposure rules show                                 list the built-in rule pack
-exposure rules verify PACK --sig SIGNATURE          check a signed pack file offline
+exposure scan [PATH...] [--json FILE] [--threads N]   scan .app bundles, .apk files, or folders of them
+exposure report FILE [--json FILE]                    derive the report again from saved evidence
+exposure rules show                                   list the built-in rule pack
+exposure rules verify PACK --sig SIGNATURE            check a signed pack file offline
 ```
 
 Without `--json` the report goes to standard output. A report file is
 created readable by its owner only, because the list of apps a person uses is
 sensitive in itself.
+
+### What is scanned
+
+A `PATH` is a macOS `.app` bundle, an Android `.apk` file, or a folder. A
+folder is searched for both, in itself and in its sub-folders, never inside
+a bundle. An app reached two ways, such as directly and through a symbolic
+link, is scanned once.
+
+Without a `PATH`, on macOS, the installed apps are scanned: those in
+`/Applications` and in your own `~/Applications`. On another system there is
+no folder this build knows to look in, and a scan without a `PATH` says so.
+
+A `PATH` replaces the installed-app folders, it is not added to them: when
+any `PATH` is given, only what the `PATH`s name is scanned.
+
+Apple's own apps on the sealed system volume, in `/System/Applications`, are
+a documented omission: name that folder to scan it. Every scan without a
+`PATH` states the omission in its scope line, the last line of the summary on
+standard error. It is not a coverage record, which differs from the design
+report (section 4.8), which asked for one: a coverage record needs an app as
+its subject, and a folder is not one. The scope line is fixed text. It is
+not part of the JSON report, and it never holds a path you gave.
+
+```console
+$ target/release/exposure scan --json report.json
+exposure: scanned 16 apps (11658 files, 6813162633 bytes): 19 claims, 2 coverage notes
+exposure: headline: 0 companies at contacts or above, 0 companies at contains, 0 apps with a third-party channel
+exposure: scope: the apps installed in /Applications and ~/Applications; /System/Applications (Apple's own apps on the sealed system volume) was not searched: name the folder to scan it
+```
+
+A path that does not exist, or that is not something to scan, is a mistake
+in the command and is refused before anything is read. After that, nothing
+one app does can cost the scan the others. What could not be read is in the
+report as a coverage note, never passed off as "nothing found":
+
+| What cannot be read | What the report says |
+|---|---|
+| A file inside a bundle, or a bundle's folder | `skipped`, `unreadable`, under that bundle, with the place inside it |
+| An `.apk` file: no permission, a read error, or the file changes while it is read | `skipped`, `unreadable`, under the name of the file |
+
+An `.apk` file is identified by its hash. One that was not read to its end
+as one file has none, so its coverage note carries the digest `unread` and
+the file's name, and no other record can be about it.
 
 ### What a finding looks like
 
@@ -160,6 +204,7 @@ all that is known is the domain its app id spells.
 $ target/release/exposure scan tests/fixtures/android/Skeleton.apk --json report.json
 exposure: scanned 1 app (1 file, 1818 bytes): 2 claims, 0 coverage notes
 exposure: headline: 0 companies at contacts or above, 1 company at contains, 1 app with a third-party channel
+exposure: scope: the paths given and nothing else; the installed-app folders were not searched
 ```
 
 An `.apk` file is read once, from start to end, for its SHA-256, which is its
@@ -184,11 +229,9 @@ Android loads from a package are read (`classes.dex`, `classes2.dex`, ...);
 an entry over 256 MiB, or past 1 GiB in total, is set aside with its size;
 archives with the 64-bit zip extension and DEX container files (version 041)
 are reported as unsupported. The seed pack has no `apk_file` tokens yet, and
-split packages are scanned one file at a time. A package is scanned when
-its path is given: a folder is searched for app bundles only, not for `.apk`
-files. A package that cannot be read
-to its end, or that changes while it is read, fails the scan: without the
-hash of one version of the file there is no subject to report on.
+split packages are scanned one file at a time. A package that cannot be
+read to its end, or that changes while it is read, has no hash to report
+its content under: it is reported as skipped (see "What is scanned").
 
 ## The six properties
 
@@ -251,10 +294,38 @@ Everything left of the evidence set touches the file system. Everything right
 of it is a pure function.
 
 Files are read once, in bounded 1 MiB windows, with the same bytes feeding
-the hash and the matcher; one task per file, largest first. On an Apple M5
-that scans 5.7 GB of installed app binaries in 1.7 s using 28 MB of memory.
-A Mach-O file says where to look in it, so its headers and load commands are
-picked out of the windows as they go by; the file is still read exactly once.
+the hash and the matcher. A Mach-O file says where to look in it, so its
+headers and load commands are picked out of the windows as they go by; the
+file is still read exactly once.
+
+The scan has one queue. Every bundle is listed first, which only looks at
+names and sizes. Then every file to read, of every bundle and every package,
+is one task in one list, largest first. A few files hold most of the bytes
+(on the laptop below, half of them sit in 12 files), so the order matters:
+they start at once on separate threads, and no thread is left reading a
+large file alone at the end. Which thread reads what, and in which order,
+cannot reach the report.
+
+Measured with `cargo xtask bench` on an Apple M5 (10 cores) over the 16
+installed apps, 11,658 files and 6.8 GB read, page cache warm:
+
+| Threads | Time | Speed-up | Peak memory |
+|---|---|---|---|
+| 1 | 5.96 s | 1.00x | 20 MB |
+| 2 | 2.23 s | 2.66x | 25 MB |
+| 4 | 1.37 s | 4.32x | 30 MB |
+| 8 | 0.91 s | 6.48x | 39 MB |
+
+All 13 runs gave the same report, byte for byte. The benchmark fails below
+3x at 8 threads or at 200 MB of memory. With Rayon's default splitting in
+place of one task per file it measures 1.19x and fails. A cold disk was not
+measured.
+
+Memory does not grow with the bytes read. It grows with the number of files
+listed: a bundle of 300,000 small files took 84 MB. And it grows with the
+largest entry of a package that is read whole to be parsed, a DEX file or a
+manifest: up to the 256 MiB budget, stored and inflated, per worker thread.
+DEX files of real apps are a few megabytes.
 
 ## Development
 
@@ -266,6 +337,7 @@ $ cargo deny check                          # needs cargo-deny
 $ cargo xtask pack check                    # rule sources, compiled pack and signature agree
 $ cargo xtask guardrails                    # the guardrails refuse deliberate violations
 $ cargo xtask no-network                    # a scan opens no socket
+$ cargo xtask bench --strict                # scaling and memory gates on the installed apps (macOS)
 $ fuzz/run.sh 60                            # every fuzz target for 60 s; see fuzz/README.md
 ```
 

@@ -5,6 +5,7 @@
 //! build the rule pack and to prove the scanner's guarantees from outside.
 #![allow(clippy::print_stdout, clippy::print_stderr, reason = "a command-line tool for developers")]
 
+mod bench;
 mod fixtures;
 mod guard;
 mod key;
@@ -35,6 +36,12 @@ guarantees
   no-network [--strict]   prove a scan opens no socket (--strict: no check may be skipped)
   audit-symbols FILE      list socket functions a binary imports
   netprobe                control program: exits 0 if it can open a socket, 3 if blocked
+
+speed
+  bench [--strict] [PATH...]  time a scan at 1, 2, 4 and 8 threads and measure its peak
+                          memory; gates: 3x at 8 threads, under 200 MB, one report.
+                          Without a PATH: the apps installed on this machine.
+                          --strict: no gate may be skipped
 ";
 
 fn main() -> ExitCode {
@@ -51,6 +58,7 @@ fn main() -> ExitCode {
         ["no-network", "--strict"] => net::run(true),
         ["audit-symbols", file] => symbols::report(Path::new(file)),
         ["netprobe"] => return net::probe(),
+        ["bench", rest @ ..] => bench::run_all(rest),
         _ => {
             eprint!("{USAGE}");
             return ExitCode::from(2);
