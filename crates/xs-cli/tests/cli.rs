@@ -239,6 +239,20 @@ fn the_json_option_writes_an_owner_only_file() {
     assert!(fs::read_to_string(&file).unwrap() == scan(&[Path::new(FIXTURE)], 1));
 }
 
+/// `--json /dev/null` is the ordinary way to discard a report and keep the
+/// summary. A device is not the scanner's file to change the mode of, and a
+/// normal user may not change it at all.
+#[test]
+fn the_json_option_writes_to_a_device_without_changing_its_mode() {
+    let mode = || fs::metadata("/dev/null").unwrap().permissions().mode();
+    let before = mode();
+    let output = exposure(&["scan", FIXTURE, "--json", "/dev/null"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(output.stdout.is_empty());
+    assert!(stderr(&output).contains("scanned 1 app"));
+    assert_eq!(mode(), before);
+}
+
 #[test]
 fn the_terminal_summary_names_no_app_and_no_path() {
     let dir = tempfile::tempdir().unwrap();

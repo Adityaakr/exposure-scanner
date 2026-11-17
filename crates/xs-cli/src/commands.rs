@@ -46,7 +46,8 @@ pub(crate) fn print(text: &str) -> Result<()> {
 }
 
 /// Writes a report to `path`, readable by its owner only, or to standard
-/// output when no path is given.
+/// output when no path is given. A `path` that is not a regular file, such
+/// as `/dev/null`, is written to and otherwise left as it is.
 fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
     let Some(path) = path else { return print(report) };
     let fail = |error| format!("cannot write {}: {error}", path.display());
@@ -62,7 +63,9 @@ fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
     {
         // `mode` only applies to a new file; tighten one that existed.
         use std::os::unix::fs::PermissionsExt as _;
-        file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(fail)?;
+        if file.metadata().map_err(fail)?.is_file() {
+            file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(fail)?;
+        }
     }
     file.write_all(report.as_bytes()).map_err(fail)
 }

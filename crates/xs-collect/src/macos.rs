@@ -47,7 +47,9 @@ use crate::schedule::Pool;
 
 /// Deepest folder nesting the collector follows inside a bundle.
 pub const MAX_DEPTH: u32 = 64;
-/// Most files the collector considers in one bundle.
+/// Most files the collector considers in one bundle. A folder that holds
+/// more entries than are left of this budget is not listed at all, so no
+/// listing is ever held in memory beyond it.
 pub const MAX_FILES: usize = 1_000_000;
 /// Largest file the collector reads: 2 GiB. The budget applies to the files
 /// it would read, those whose first bytes say Mach-O. A larger one is not
@@ -315,29 +317,40 @@ fn list_frameworks(plan: &mut Plan) {
 /// without following symbolic links.
 ///
 /// The order of the visit is fixed: a folder's own files in name order, then
-/// its sub-folders in name order, each to its full depth. So when the file
-/// budget cuts the listing short, it cuts at the same place whatever order
-/// the file system returns entries in.
+/// its sub-folders in name order, each to its full depth. A folder with more
+/// entries than are left of the file budget is skipped whole and reported as
+/// over budget. Both rules look only at names and counts, so the budget cuts
+/// at the same place whatever order the file system returns entries in, and
+/// no more than `max_files` entries are ever held at once.
 fn walk(plan: &mut Plan, max_files: usize) {
     // Depth-first with an explicit stack: nesting is bounded by the budget,
     // not by the call stack.
     let mut pending: Vec<(PathBuf, Option<RelPath>, u32)> = vec![(plan.root.clone(), None, 0)];
-    'folders: while let Some((dir, dir_rel, depth)) = pending.pop() {
+    while let Some((dir, dir_rel, depth)) = pending.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
             plan.gaps.skipped(CoverageReason::Unreadable, dir_rel);
             continue;
         };
+        let remaining = max_files.saturating_sub(plan.files.len());
         let mut listed = Vec::new();
+        let mut over_budget = false;
         for entry in entries {
             match entry {
-                Ok(entry) => listed.push(entry),
+                Ok(_) if listed.len() >= remaining => {
+                    over_budget = true;
+                    break;
+                }
+                Ok(entry) => listed.push((entry.file_name(), entry.file_type())),
                 Err(_) => plan.gaps.skipped(CoverageReason::Unreadable, dir_rel.clone()),
             }
         }
-        listed.sort_by_cached_key(fs::DirEntry::file_name);
+        if over_budget {
+            plan.gaps.skipped(CoverageReason::OverBudget, dir_rel);
+            continue;
+        }
+        listed.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         let mut folders = Vec::new();
-        for entry in listed {
-            let name = entry.file_name();
+        for (name, kind) in listed {
             let path = name.to_str().and_then(|name| match &dir_rel {
                 Some(parent) => parent.join(name).ok(),
                 None => rel(name),
@@ -348,7 +361,7 @@ fn walk(plan: &mut Plan, max_files: usize) {
                 plan.gaps.skipped(CoverageReason::Unreadable, None);
                 continue;
             };
-            let Ok(kind) = entry.file_type() else {
+            let Ok(kind) = kind else {
                 plan.gaps.skipped(CoverageReason::Unreadable, Some(path));
                 continue;
             };
@@ -359,20 +372,15 @@ fn walk(plan: &mut Plan, max_files: usize) {
                 if depth + 1 >= MAX_DEPTH {
                     plan.gaps.skipped(CoverageReason::OverBudget, Some(path));
                 } else {
-                    folders.push((entry.path(), Some(path), depth + 1));
+                    folders.push((dir.join(&name), Some(path), depth + 1));
                 }
             } else if kind.is_file() {
                 if path.as_str() == INFO_PLIST {
                     continue; // Already read.
                 }
-                if plan.files.len() >= max_files {
-                    // Stop listing. What was listed so far is still scanned.
-                    plan.gaps.skipped(CoverageReason::OverBudget, None);
-                    break 'folders;
-                }
-                match entry.metadata() {
-                    Ok(metadata) => plan.files.push((path, metadata.len())),
-                    Err(_) => plan.gaps.skipped(CoverageReason::Unreadable, Some(path)),
+                match fs::symlink_metadata(dir.join(&name)) {
+                    Ok(metadata) if metadata.is_file() => plan.files.push((path, metadata.len())),
+                    _ => plan.gaps.skipped(CoverageReason::Unreadable, Some(path)),
                 }
             } else {
                 // A socket, pipe or device node. Not app content.
@@ -572,8 +580,10 @@ mod tests {
 
     /// Every limit is a deterministic budget (design report, C3): the same
     /// bundle must lose the same files to the file budget on every file
-    /// system. The expected list follows from the documented visiting order
-    /// alone: a folder's files by name, then its sub-folders by name.
+    /// system, and a listing must never be held beyond the budget. The
+    /// expected lists follow from the documented rules alone: a folder's
+    /// files by name, then its sub-folders by name, and a folder with more
+    /// entries than are left of the budget skipped whole.
     #[test]
     fn the_file_budget_cuts_at_the_same_place_whatever_order_files_were_made_in() {
         let names = ["a/1", "a/2", "a/sub/1", "b/1", "b/2", "c/1", "c/2", "top"];
@@ -590,30 +600,39 @@ mod tests {
             walk(&mut plan, max_files);
             let files: Vec<String> =
                 plan.files.iter().map(|(path, _)| path.as_str().to_string()).collect();
-            (files, plan.gaps.0.len())
+            let skipped: Vec<String> = plan
+                .gaps
+                .0
+                .keys()
+                .map(|(status, reason, location, _)| {
+                    assert_eq!(
+                        (*status, *reason),
+                        (CoverageStatus::Skipped, CoverageReason::OverBudget)
+                    );
+                    location.as_ref().map_or("<root>", RelPath::as_str).to_string()
+                })
+                .collect();
+            (files, skipped)
+        };
+        let expect = |files: &[&str], skipped: &[&str]| {
+            let owned = |list: &[&str]| list.iter().map(|item| (*item).to_string()).collect();
+            (owned(files), owned(skipped))
         };
         let forward: Vec<usize> = (0..names.len()).collect();
         let backward: Vec<usize> = forward.iter().rev().copied().collect();
         let shuffled = [5, 2, 7, 0, 4, 1, 6, 3];
         for order in [&forward[..], &backward, &shuffled] {
+            // Everything fits.
+            assert_eq!(listed(order, 8), expect(&names, &[]), "{order:?}");
+            // `top`, then `a` (3 entries, 4 left) and `a/sub` (1 entry, 2
+            // left). One file is left of the budget; `b` and `c` hold two.
             assert_eq!(
                 listed(order, 5),
-                (
-                    vec!["a/1", "a/2", "a/sub/1", "b/1", "top"]
-                        .into_iter()
-                        .map(String::from)
-                        .collect(),
-                    1
-                ),
+                expect(&["a/1", "a/2", "a/sub/1", "top"], &["b", "c"]),
                 "{order:?}"
             );
-            assert_eq!(
-                listed(order, 2),
-                (vec!["a/1", "top"].into_iter().map(String::from).collect(), 1),
-                "{order:?}"
-            );
-            assert_eq!(listed(order, 8).0, names, "{order:?}");
-            assert_eq!(listed(order, 8).1, 0, "{order:?}");
+            // The bundle's own folder holds four entries.
+            assert_eq!(listed(order, 3), expect(&[], &["<root>"]), "{order:?}");
         }
     }
 
