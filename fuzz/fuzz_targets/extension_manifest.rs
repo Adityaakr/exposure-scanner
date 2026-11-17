@@ -11,7 +11,8 @@ use xs_formats::extension_manifest::{self, MAX_ENTRIES};
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(manifest) = extension_manifest::parse(data) {
-        let scripts: usize = manifest.content_scripts.iter().map(|script| script.matches.len()).sum();
+        let scripts: usize =
+            manifest.content_scripts.iter().map(|script| script.matches.len()).sum();
         let entries = manifest.permissions.len()
             + manifest.optional_permissions.len()
             + manifest.host_permissions.len()
