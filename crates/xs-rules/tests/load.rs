@@ -104,8 +104,9 @@ fn a_pack_signed_by_an_unknown_key_is_refused() {
 #[test]
 fn a_tampered_signature_file_is_refused() {
     // Swap the trusted comment: the global signature covers it.
-    // Whatever the version is, so that a rule change does not break this.
-    let forged = BUILT_IN_SIGNATURE.replace("version=", "version=9");
+    // (The layer name is edited, not the version, so that this test does
+    // not have to follow every rule change.)
+    let forged = BUILT_IN_SIGNATURE.replace("layer=core", "layer=other");
     assert_ne!(forged, BUILT_IN_SIGNATURE);
     assert_eq!(verify_signature(BUILT_IN, &forged, TRUSTED_KEYS), Err(LoadError::Untrusted));
 

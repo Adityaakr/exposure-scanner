@@ -85,9 +85,11 @@ fn write(path: &Path, bytes: impl AsRef<[u8]>) {
     fs::write(path, bytes).unwrap();
 }
 
-/// The first bytes of a 64-bit little-endian Mach-O file, then filler.
+/// The header of a 64-bit little-endian Mach-O file that has no load
+/// commands, then filler.
 fn macho(filler: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01];
+    bytes.resize(32, 0);
     bytes.extend_from_slice(filler);
     bytes
 }

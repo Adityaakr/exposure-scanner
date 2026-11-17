@@ -284,6 +284,36 @@ fn a_boundary_must_suit_its_matcher() {
     assert_one(&problems, "unknown boundary `regex`");
 }
 
+/// The two matchers for hosts an app declares: a token is a whole host or,
+/// with the `host` boundary, a parent of one. Nothing is searched for.
+#[test]
+fn declared_host_matchers_take_exact_and_host_tokens() {
+    let table = r#"
+update_feed = ["updates.vendor.example", { lit = "vendor.example", at = "host" }]
+privacy_manifest = [{ lit = "i.posthog.com", at = "host" }]
+"#;
+    let rule = with_match(table);
+    let files = files(&[("sdk/sentry.toml", &rule), ("sdk/sparkle.toml", SPARKLE)]);
+    let layer = compiled(&files).layer;
+    let boundaries = |kind| -> Vec<(&str, Boundary)> {
+        layer.rules[0].matchers[&kind].iter().map(|token| (token.lit.as_str(), token.at)).collect()
+    };
+    assert_eq!(
+        boundaries(MatcherKind::UpdateFeed),
+        [("updates.vendor.example", Boundary::Exact), ("vendor.example", Boundary::Host)]
+    );
+    assert_eq!(boundaries(MatcherKind::PrivacyManifest), [("i.posthog.com", Boundary::Host)]);
+
+    for refused in ["word", "prefix", "none"] {
+        let table =
+            format!(r#"update_feed = [{{ lit = "updates.vendor.example", at = "{refused}" }}]"#);
+        assert_one(
+            &problems_for(&with_match(&table)),
+            &format!("cannot use the `{refused}` boundary"),
+        );
+    }
+}
+
 #[test]
 fn malformed_tokens_and_tables_are_rejected() {
     assert_one(&problems_for(&with_match(r#"npm_package = ["has space"]"#)), "printable ASCII");

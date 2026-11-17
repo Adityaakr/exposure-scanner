@@ -19,6 +19,11 @@ pub const MAX_TOKEN_BYTES: usize = 255;
 /// Longest proof example a record carries, in bytes (design report, 4.3).
 pub const MAX_EXAMPLE_BYTES: usize = 160;
 
+/// Longest host name a record carries, in bytes: the limit of the DNS.
+pub const MAX_HOST_BYTES: usize = 253;
+/// Longest Apple Team ID a record carries, in bytes.
+pub const MAX_TEAM_ID_BYTES: usize = 32;
+
 /// What an unprintable character is replaced with.
 const REPLACEMENT: char = '\u{fffd}';
 /// Appended when text was cut, so a reader can tell.
@@ -41,6 +46,28 @@ pub fn is_storable(character: char) -> bool {
 #[must_use]
 pub fn is_clean(text: &str, max_bytes: usize) -> bool {
     text.len() <= max_bytes && text.chars().all(is_storable)
+}
+
+/// Whether `text` is a host name in the one form a record stores: lowercase
+/// ASCII labels of letters, digits, hyphens and underscores, joined by single
+/// dots, at most [`MAX_HOST_BYTES`] long. No scheme, port, path or trailing
+/// dot, so two records that name one host always agree byte for byte.
+///
+/// An IPv4 address has this shape and is accepted. A bracketed IPv6 address
+/// and a name that is not ASCII are not.
+#[must_use]
+pub fn is_host(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= MAX_HOST_BYTES
+        && text.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'-' | b'_')
+                })
+        })
 }
 
 /// Makes hostile text safe to store: unprintable characters become U+FFFD and
@@ -105,6 +132,35 @@ mod tests {
         assert_eq!(clean("日本語日本語", 6), "日…");
         assert_eq!(clean("abcdef", 6), "abcdef");
         assert_eq!(clean("abcdef", 2), "");
+    }
+
+    #[test]
+    fn a_host_is_lowercase_labels_and_nothing_else() {
+        for host in
+            ["ranchero.com", "raw.githubusercontent.com", "a", "x_y.z-1.example", "10.0.0.1"]
+        {
+            assert!(is_host(host), "{host}");
+        }
+        let long_label = alloc::format!("{}.example", "a".repeat(64));
+        let long_name = alloc::vec!["abcdefgh"; 29].join(".");
+        assert_eq!(long_name.len(), 260);
+        for not in [
+            "",
+            "Ranchero.com",
+            "ranchero.com.",
+            ".ranchero.com",
+            "ranchero..com",
+            "ranchero.com:443",
+            "ranchero.com/feed.xml",
+            "https://ranchero.com",
+            "user@ranchero.com",
+            "[::1]",
+            "b\u{fc}cher.example",
+            long_label.as_str(),
+            long_name.as_str(),
+        ] {
+            assert!(!is_host(not), "{not}");
+        }
     }
 
     proptest! {

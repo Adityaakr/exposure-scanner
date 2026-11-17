@@ -37,7 +37,13 @@ pub struct BundleInfo {
     pub name: Option<String>,
     /// `CFBundleExecutable`, the file name of the main binary.
     pub executable: Option<String>,
+    /// `SUFeedURL`, the address of the update feed the Sparkle updater
+    /// reads. The caller keeps only its host.
+    pub feed_url: Option<String>,
 }
+
+/// The key of the update feed address in an `Info.plist`.
+pub const FEED_URL_KEY: &str = "SUFeedURL";
 
 impl BundleInfo {
     fn slot(&mut self, key: &str) -> Option<&mut Option<String>> {
@@ -48,6 +54,7 @@ impl BundleInfo {
             "CFBundleDisplayName" => &mut self.display_name,
             "CFBundleName" => &mut self.name,
             "CFBundleExecutable" => &mut self.executable,
+            FEED_URL_KEY => &mut self.feed_url,
             _ => return None,
         })
     }
@@ -163,6 +170,8 @@ mod tests {
 	<string>42</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
+	<key>SUFeedURL</key>
+	<string>https://updates.example.com/appcast.xml</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -184,6 +193,7 @@ mod tests {
             display_name: None,
             name: Some("Example".into()),
             executable: Some("Example".into()),
+            feed_url: Some("https://updates.example.com/appcast.xml".into()),
         }
     }
 

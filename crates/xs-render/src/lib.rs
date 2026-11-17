@@ -210,7 +210,12 @@ mod tests {
             v: V1,
             collector: Collector::MacosBundle,
             subject: subject(),
-            facts: Facts { name: Some("Example".into()), files_scanned: 2, bytes_scanned: 64 },
+            facts: Facts {
+                name: Some("Example".into()),
+                team_id: None,
+                files_scanned: 2,
+                bytes_scanned: 64,
+            },
         })
     }
 

@@ -72,7 +72,9 @@ fn variant(parent: &Path, name: &str, id: &str, binary: &[u8]) -> PathBuf {
     let plist = fs::read_to_string(root.join("Contents/Info.plist")).unwrap();
     fs::write(root.join("Contents/Info.plist"), plist.replace("org.example.exposure.skeleton", id))
         .unwrap();
+    // The header of a 64-bit Mach-O file that has no load commands.
     let mut bytes = vec![0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01];
+    bytes.resize(32, 0);
     bytes.extend_from_slice(binary);
     fs::write(root.join("Contents/MacOS/Skeleton"), bytes).unwrap();
     root
@@ -304,16 +306,18 @@ fn help_and_version() {
     );
 }
 
+/// The version the committed pack file declares. The expectations below
+/// follow it, so a rule change does not have to touch these tests.
+fn pack_version() -> u64 {
+    let pack: serde_json::Value = serde_json::from_str(&fs::read_to_string(PACK).unwrap()).unwrap();
+    pack["version"].as_u64().unwrap()
+}
+
 #[test]
 fn rules_show_lists_the_built_in_pack() {
     let listing = stdout(&exposure(&["rules", "show"]));
-    // The version rises with every rule change, so it is not pinned here.
-    let rest = listing.strip_prefix("layer core version ").unwrap_or_else(|| panic!("{listing}"));
-    let after_version = rest.trim_start_matches(|c: char| c.is_ascii_digit());
-    assert!(
-        rest != after_version && after_version.starts_with(" (CC-BY-4.0), sha256 "),
-        "{listing}"
-    );
+    let heading = format!("layer core version {} (CC-BY-4.0), sha256 ", pack_version());
+    assert!(listing.starts_with(&heading), "{listing}");
     for expected in
         ["sdk/sentry", "sdk/firebase-crashlytics", "sdk/posthog", "sdk/appcenter-crashes"]
     {
@@ -327,7 +331,7 @@ fn rules_show_lists_the_built_in_pack() {
 #[test]
 fn rules_verify_accepts_the_signed_pack_and_refuses_a_tampered_one() {
     let ok = stdout(&exposure(&["rules", "verify", PACK, "--sig", PACK_SIGNATURE]));
-    assert!(ok.starts_with("ok: layer core version "), "{ok}");
+    assert!(ok.starts_with(&format!("ok: layer core version {},", pack_version())), "{ok}");
     assert!(ok.contains("signed by exposure-pack-1"), "{ok}");
 
     let dir = tempfile::tempdir().unwrap();

@@ -60,6 +60,26 @@ digit: one that starts or ends with a dot cannot sit on a hostname boundary.
 two different `macho_token` tokens of the rule must hit in one file before
 any of them counts.
 
+## What the macOS matchers are given
+
+A token is matched against values the collector takes from a bundle. Write
+the token as that value is stored:
+
+| Matcher | The value | Example token |
+|---|---|---|
+| `apple_framework` | The name of a folder directly under `Contents/Frameworks` | `Sentry.framework` |
+| `macho_dylib` | One path component of the install name of a library a Mach-O file links. A token therefore names the framework folder or the library file, not where it is installed: `Sentry.framework` hits `@rpath/Sentry.framework/Versions/A/Sentry` | `Sentry.framework` |
+| `macho_objc_class` | One name of the `__objc_classname` section: an Objective-C class, category or protocol the file defines. Swift classes are not listed there under their plain names | `MSACAppCenter` |
+| `macho_token` | Searched for in the bytes of a Mach-O file outside its sections of instructions and outside an encrypted part. Not searched for in a runtime, such as a browser engine | `{ lit = "…", at = "host" }` |
+| `content_literal` | Besides script files: searched for in a section that holds script text, such as `__BUN,__bun` | `{ lit = "sentry.javascript.", at = "word" }` |
+| `privacy_manifest` | A host listed under `NSPrivacyTrackingDomains` in a `PrivacyInfo.xcprivacy` file, in lowercase, without scheme, port or trailing dot | `{ lit = "i.posthog.com", at = "host" }` |
+| `update_feed` | The host of the address under `SUFeedURL` in `Contents/Info.plist`, in the same form. For a hosted update service; an app's own feed host needs no rule | `{ lit = "updates.vendor.example", at = "host" }` |
+
+The last two are declarations: a hit is graded `declares`, not `contains`.
+Every declared host is also reported as itself, with or without a rule, under
+the category `tracking_domain` or `update_feed`. Those two categories are for
+declared hosts; a rule does not use them.
+
 ## What the compiler refuses
 
 These lints exist because of failures seen on real apps (design report,

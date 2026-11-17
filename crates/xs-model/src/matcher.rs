@@ -36,11 +36,13 @@ pub enum MatcherKind {
     MachoToken,
     /// Tracking domains declared in a `PrivacyInfo.xcprivacy` file.
     PrivacyManifest,
+    /// The host of the update feed an app's own property list names.
+    UpdateFeed,
 }
 
 impl MatcherKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::ManifestComponent,
         Self::AndroidClassPrefix,
         Self::ApkFile,
@@ -52,6 +54,7 @@ impl MatcherKind {
         Self::MachoObjcClass,
         Self::MachoToken,
         Self::PrivacyManifest,
+        Self::UpdateFeed,
     ];
 
     /// The name used in rule files and records.
@@ -69,6 +72,7 @@ impl MatcherKind {
             Self::MachoObjcClass => "macho_objc_class",
             Self::MachoToken => "macho_token",
             Self::PrivacyManifest => "privacy_manifest",
+            Self::UpdateFeed => "update_feed",
         }
     }
 
@@ -91,7 +95,7 @@ impl MatcherKind {
                 &[Boundary::Exact]
             }
             Self::ManifestComponent | Self::MachoObjcClass => &[Boundary::Exact, Boundary::Prefix],
-            Self::PrivacyManifest => &[Boundary::Exact, Boundary::Host],
+            Self::PrivacyManifest | Self::UpdateFeed => &[Boundary::Exact, Boundary::Host],
             Self::DexString => &[Boundary::Host, Boundary::Word, Boundary::Exact, Boundary::None],
             Self::ContentLiteral | Self::MachoToken => {
                 &[Boundary::Host, Boundary::Word, Boundary::None]
@@ -112,12 +116,13 @@ impl MatcherKind {
         }
     }
 
-    /// The grade a hit of this kind supports. A privacy manifest is the app's
-    /// own declaration; everything else shows that code is shipped.
+    /// The grade a hit of this kind supports. A privacy manifest and an
+    /// update feed are the app's own declarations; everything else shows
+    /// that code is shipped.
     #[must_use]
     pub const fn grade(self) -> Grade {
         match self {
-            Self::PrivacyManifest => Grade::Declares,
+            Self::PrivacyManifest | Self::UpdateFeed => Grade::Declares,
             _ => Grade::Contains,
         }
     }
@@ -210,14 +215,14 @@ mod tests {
     }
 
     #[test]
-    fn only_a_privacy_manifest_declares() {
+    fn only_the_app_s_own_declarations_declare() {
         for kind in MatcherKind::ALL {
-            let expected = if kind == MatcherKind::PrivacyManifest {
-                Grade::Declares
-            } else {
-                Grade::Contains
-            };
-            assert_eq!(kind.grade(), expected);
+            let declaration =
+                matches!(kind, MatcherKind::PrivacyManifest | MatcherKind::UpdateFeed);
+            let expected = if declaration { Grade::Declares } else { Grade::Contains };
+            assert_eq!(kind.grade(), expected, "{kind}");
+            // A declared host is a whole value: it is matched, not searched.
+            assert!(!(declaration && kind.is_content()), "{kind}");
         }
     }
 }

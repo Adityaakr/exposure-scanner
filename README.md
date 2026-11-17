@@ -12,22 +12,43 @@ nothing anywhere.
 ## Status
 
 Milestone 1 ("static truth") is in progress. This repository currently holds
-the foundation and a walking skeleton:
+the foundation, the macOS collector and the Electron collector:
 
 | Part | State |
 |---|---|
 | Evidence format v1, canonical JSON, record ids, evidence set | Done |
 | Rule pack: source format, compiler and lints, signature check, built-in signed pack, 12 seed rules | Done |
-| `exposure scan` on a macOS app bundle, through derivation, to a JSON report | Done, with one witness for native code: framework folder names |
+| `exposure scan` on a macOS app bundle, through derivation, to a JSON report | Done |
 | Match engine: literal search with boundary rules, exact and prefix tables, and the controls against false positives | Done |
+| macOS collector: Mach-O load commands, Objective-C class names, data and embedded-script sections, Team ID, privacy manifests, update feed | Done (below) |
 | Electron apps: npm packages listed in an asar archive or in the `Contents/Resources/app` folder, literals in the app's scripts, scope labels, breadth guard | Done |
-| Mach-O internals, the Android collector, company and party resolution, HTML report, cache | Not yet (build plan tasks 6 and 8 to 14) |
+| The Android collector, company and party resolution, HTML report, cache | Not yet (build plan tasks 8 to 14) |
 
-So today a scan finds an SDK when it ships as a framework folder under
-`Contents/Frameworks`, or in the scripts of an Electron app: installed as an
-npm package, or bundled into the app's own code. An SDK that is linked
-statically into a binary is not found yet. A clean report from this build
-does not mean an app is clean.
+What a scan of a macOS bundle reads, and what each part is a witness of:
+
+| Where | Witness | Finds |
+|---|---|---|
+| Folder names under `Contents/Frameworks` | `apple_framework` | An SDK shipped as a framework |
+| Load commands of every Mach-O file | `macho_dylib` | A linked library, wherever it is installed |
+| The `__objc_classname` section | `macho_objc_class` | An SDK linked statically into a binary: the Objective-C runtime needs these names, so stripping does not remove them |
+| Bytes outside the sections of instructions | `macho_token` | Literals of a statically linked SDK. Not searched in a browser engine or another runtime |
+| Embedded-script sections such as `__BUN,__bun` | `content_literal` | SDK literals in the script of an app compiled into its runtime |
+| `NSPrivacyTrackingDomains` of every `PrivacyInfo.xcprivacy` | `privacy_manifest` | Tracking domains the app or a library declares, each shown as a host |
+| `SUFeedURL` of `Contents/Info.plist` | `update_feed` | The host the app fetches its updates from |
+| Code signature of the main executable | (a fact, not a witness) | The Apple Team ID the signature names. It is read, not verified |
+
+A declared address is cut down to its host; no URL is stored. A host is shown
+as itself and names no company yet: mapping hosts and vendors to companies is
+build plan task 10. An encrypted binary, such as an iOS app installed on a
+Mac, is reported as a coverage note and its ciphertext is not searched.
+
+An Electron app is a macOS bundle too, so all of the above applies to it.
+Its scripts are read as well: an SDK is found when it is installed as an npm
+package, or bundled into the app's own code.
+
+So today a scan covers macOS bundles, Electron apps among them. Android
+packages are not read. A clean report from this build does not mean an app
+is clean.
 
 Measured on the three Electron apps this part is tested against: Logseq
 2.0.2 reports Sentry and PostHog, both from `js/main.js` inside its archive
@@ -42,7 +63,7 @@ it on first use).
 ```console
 $ cargo build --release --package exposure
 $ target/release/exposure scan tests/fixtures/macos/Skeleton.app --json report.json
-exposure: scanned 1 app (3 files, 628 bytes): 1 claim, 0 coverage notes
+exposure: scanned 1 app (3 files, 676 bytes): 1 claim, 0 coverage notes
 ```
 
 To install the binary instead of running it from the build folder:
@@ -94,7 +115,7 @@ than left to discipline.
 | **Private.** A scan opens no socket. | No crate that can open one is allowed into the dependency graph. The lint lists ban the socket, process, clock and environment APIs. | `cargo deny check`; `cargo xtask no-network`: the binary imports no socket function, and the scan runs in a network namespace with no interfaces, under `strace`, and under a macOS sandbox that denies the network. Each check is paired with a control program that must be caught. |
 | **Deterministic.** Same evidence and rule pack, same bytes. | Derivation and rendering live in `no_std` crates that cannot read a clock, a file or the environment and have no randomly seeded map. Records hold paths inside the artifact only. Evidence is a set keyed by content hash. | One report across input orders, thread counts and install locations; the committed fixture report must be reproduced byte for byte on Linux and macOS. |
 | **Honest.** Every finding shows its grade and the raw record behind it. | The renderer refuses a claim that cites a record the report does not carry. | A test deletes a cited record and expects the render to fail. |
-| **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary or archive that large is reported with its size instead. Symbolic links are never followed. The file table of an asar archive is not trusted: an entry that overlaps another or reaches past the end of the archive is counted as a gap and not read, and a header in a shape no archive writer produces is refused whole. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. |
+| **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary or archive that large is reported with its size instead. Of a Mach-O file only the headers and at most 1 MiB of load commands per architecture are held in memory, whatever its size. Symbolic links are never followed. The file table of an asar archive is not trusted: an entry that overlaps another or reaches past the end of the archive is counted as a gap and not read, and a header in a shape no archive writer produces is refused whole. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. |
 | **Rules are data.** A rule pack cannot run code. | A rule is a literal plus one boundary from a fixed list. The scanner only loads a compiled pack whose signature verifies against a key built into the binary; it contains no parser for rule sources. | A tampered pack is refused; the pack compiler's lints are tested. |
 | **Finds what is there / does not cry wolf.** | Several independent witnesses per SDK, with controls against coincidental hits (below). | Each control has its own tests, and a property test checks that cutting a file into windows never changes what is found. The canary and the negative corpus arrive with the collectors. |
 
@@ -142,7 +163,9 @@ of it is a pure function.
 
 Files are read once, in bounded 1 MiB windows, with the same bytes feeding
 the hash and the matcher; one task per file, largest first. On an Apple M5
-that scans 5.7 GB of installed app binaries in 1.7 s using 24 MB of memory.
+that scans 5.7 GB of installed app binaries in 1.7 s using 28 MB of memory.
+A Mach-O file says where to look in it, so its headers and load commands are
+picked out of the windows as they go by; the file is still read exactly once.
 
 ## Development
 
