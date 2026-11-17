@@ -8,7 +8,8 @@
 //! * the fixed list of **permissions** an access edge from an app can point
 //!   at ([`access`]), and of what a browser extension may be allowed to
 //!   reach ([`permission`]);
-//! * the compiled **rule pack** ([`pack`]);
+//! * the compiled **rule pack** ([`pack`]), and the advice it carries on
+//!   what a person can do about a finding ([`fix`]);
 //! * the **report** document that carries claims together with the evidence
 //!   they cite ([`report`]);
 //! * the **canonical JSON** encoding (RFC 8785) that record ids, claim ids and
@@ -29,6 +30,7 @@ pub mod canon;
 pub mod claim;
 pub mod digest;
 pub mod evidence;
+pub mod fix;
 pub mod matcher;
 pub mod pack;
 pub mod path;

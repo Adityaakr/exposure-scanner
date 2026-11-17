@@ -13,6 +13,7 @@ on, so any statement in a report can be checked by hand against the app.
 - [What is not counted](#what-is-not-counted)
 - [Access claims](#access-claims)
 - [The HTML report](#the-html-report)
+- [What you can do](#what-you-can-do)
 
 ## Claims
 
@@ -171,6 +172,7 @@ It holds:
 | Part | What it says |
 |---|---|
 | Summary | What was found, first: one sentence with the totals, then each thing found once (an SDK or a declared host, under its company or under none) with its category, its grade as a fact with a count (`ships in 10 of 16 apps`), the apps as links to their findings, and whether it is counted. Then the three headline counts, said to count the counted categories only; when findings exist and all three counts are zero, the page says why. Then the totals. No score. |
+| What you can do | A checklist with what exposes the most first, one entry per service with the apps it is in, per System Settings pane with the apps that may ask for it, per extension and per Android app. Each entry links to the findings it is about. See [What you can do](#what-you-can-do). |
 | How to read it | What each grade shows and does not show, in one word each: declares, ships, contacted, confirmed; and, when the scan found what an app may access, the access grades too (may access). |
 | Findings by company | Companies with a counted finding first, then the others by name. Under each, the apps, and for each finding its grade, its confidence, how many kinds of evidence agree, whether the company is the app's publisher, and each record it rests on in words: the marker, the file, the table, an example, a count. Components and unmapped hosts come after the companies, under no company. Findings about what an app may access have a part of their own, by app. A company with no counted finding is tagged as outside the counted categories, as visibly as a counted one. |
 | Coverage | Where the scan looked, and where it deliberately did not. Every app that was read, with what was read of it, also the apps with no finding. Then everything that was skipped or not understood, and why. |
@@ -197,3 +199,35 @@ still read; its page says that the scope is not on record.
 A test scans a bundle and a package whose app names, ids, versions and class
 names are markup, reads the page back with a reader stricter than a browser,
 and requires the same elements as the page of two harmless apps.
+
+## What you can do
+
+The HTML report has a **What you can do** checklist near the top, and the
+same steps under every finding. It is advice: the scanner changes nothing.
+The checklist lists what exposes the most first:
+
+| Priority | What it covers |
+|---|---|
+| **High** | Code of a company in a counted category (advertising, analytics, attribution, profiling, session replay) in an app it does not publish; and a browser extension that may read the pages you visit or what you do in the browser, unless that access is only optional. |
+| **Medium** | What an app may reach of you and your surroundings: the camera, the microphone, the screen, location, personal data and communications. A domain an app itself declares it tracks through. Any other browser extension. |
+| **Low** | The rest you can act on: other services of a company in an app, such as crash reporting, and access to files, nearby devices or other apps. |
+
+Within a priority, services come first, then extensions, System Settings
+panes and Android apps. An update feed and a service of the app's own
+publisher get no entry.
+
+For a service of another company in an app, the page gives the app's own
+setting where its publisher documents one, says so plainly where the
+publisher documents that there is none, and says the setting is not on
+record otherwise; it never claims a setting stops a given SDK, which no scan
+of files can show. Hosts to block, with an outbound firewall such as LuLu or
+Little Snitch on macOS, are given only for the counted categories and for
+domains an app declares for tracking, never for a crash reporter or an app's
+own publisher, since blocking those breaks more than it protects. For a
+permission it names the pane of **System Settings > Privacy & Security** on
+macOS, or **Settings > Apps > the app > Permissions** on Android, and says
+when the platform has no switch at all. For an extension it names the
+browser's own extensions page, how to narrow its site access to *On click*,
+and how to remove it. What holds for one app or one SDK is data in the rule
+pack, `rules/core/fixes.toml`, with a source for every entry (see
+[`rules/README.md`](../rules/README.md#fixes)).

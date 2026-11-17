@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-FfPh1a5CrdCRxQbdjeFLYRUqW9y5h2BrjEWQB+KVgiU='; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-5OjasZD0iUXLT0sEVi0QpfCWEPt0sJvAa3WV1FeQ8+U='; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
@@ -22,6 +22,9 @@
   --confirmed-bg: #fbdcdc; --confirmed-ink: #8b1a1a;
   --access-bg: #e3ecfb; --access-ink: #1d4a8f;
   --counted-bg: #1b1f24; --counted-ink: #ffffff;
+  --high-bg: #fbdcdc; --high-ink: #8b1a1a;
+  --medium-bg: #fff1cc; --medium-ink: #6f4a00;
+  --low-bg: #e7ecf1; --low-ink: #3d4752;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -38,6 +41,9 @@
     --confirmed-bg: #561c1c; --confirmed-ink: #ffb8b8;
     --access-bg: #1c3157; --access-ink: #b5cdf7;
     --counted-bg: #e6e9ed; --counted-ink: #14171b;
+    --high-bg: #561c1c; --high-ink: #ffb8b8;
+    --medium-bg: #4a3a0c; --medium-ink: #f5d98a;
+    --low-bg: #2b323a; --low-ink: #c5cdd6;
   }
 }
 * { box-sizing: border-box; }
@@ -168,6 +174,37 @@ th { color: var(--soft-ink); font-size: 0.8rem; font-weight: 600; white-space: n
 .what { font-weight: 600; font-size: 0.9rem; }
 .evidence .facts { margin-top: 0.3rem; }
 
+.prio {
+  border-radius: 0.3rem;
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
+  min-width: 4.2rem;
+  padding: 0 0.45rem;
+  text-align: center;
+  text-transform: uppercase;
+  vertical-align: 0.1em;
+}
+.p-high { background: var(--high-bg); color: var(--high-ink); }
+.p-medium { background: var(--medium-bg); color: var(--medium-ink); }
+.p-low { background: var(--low-bg); color: var(--low-ink); }
+.priorities { list-style: none; margin-top: 0.75rem; padding: 0; font-size: 0.9rem; }
+.priorities li + li { margin-top: 0.35rem; }
+.priorities .prio { margin-right: 0.4rem; }
+.checklist { list-style: none; margin-top: 1rem; padding: 0; }
+.checklist > li { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 0.7rem 1rem 0.8rem; }
+.checklist > li + li { margin-top: 0.5rem; }
+.checklist .meta { margin-top: 0.2rem; }
+.todo-head { font-weight: 600; }
+.todo-head strong { font-size: 1.05rem; }
+.finding .todo-head { font-size: 0.9rem; margin-top: 0.9rem; }
+.steps { margin-top: 0.4rem; padding-left: 1.3rem; font-size: 0.925rem; }
+.steps li { list-style: "☐  "; }
+.steps li + li { margin-top: 0.3rem; }
+.steps code { overflow-wrap: anywhere; }
+
 .limits { padding-left: 1.2rem; }
 .limits li + li { margin-top: 0.5rem; }
 #coverage h3, #records h3 { margin-top: 1.5rem; margin-bottom: 0.4rem; }
@@ -193,6 +230,9 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
     --confirmed-bg: #eeeeee; --confirmed-ink: #000000;
     --access-bg: #eeeeee; --access-ink: #000000;
     --counted-bg: #000000; --counted-ink: #ffffff;
+    --high-bg: #ffffff; --high-ink: #000000;
+    --medium-bg: #ffffff; --medium-ink: #000000;
+    --low-bg: #ffffff; --low-ink: #000000;
   }
   @page { margin: 16mm 14mm; }
   body { font-size: 10pt; max-width: none; padding: 0; }
@@ -200,9 +240,9 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
   a { text-decoration: none; }
   section { margin-top: 1.6rem; }
   h2, h3, h4, h5 { break-after: avoid; }
-  .count, .finding, .record, .evidence li, .found li, tr { break-inside: avoid; }
+  .count, .finding, .record, .evidence li, .found li, .checklist > li, tr { break-inside: avoid; }
   .scroll { overflow: visible; }
-  .grade, .tag { border: 1px solid #888888; }
+  .grade, .tag, .prio { border: 1px solid #888888; }
 }
 </style>
 </head>
@@ -215,6 +255,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </header>
 <nav class="toc">
 <a href="#summary">Summary</a>
+<a href="#actions">What you can do</a>
 <a href="#reading">How to read it</a>
 <a href="#findings">Findings</a>
 <a href="#coverage">Coverage</a>
@@ -258,6 +299,35 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <li>0 coverage notes</li>
 <li>12 evidence records</li>
 </ul>
+</section>
+<section id="actions">
+<h2>What you can do</h2>
+<p>What you can do about what was found, with what exposes the most first. Nothing here is done for you: the scanner changes nothing on this device. Each entry links to the findings it is about, which show the evidence.</p>
+<ul class="priorities">
+<li><span class="prio p-high">High</span> Code of a company that does advertising, analytics, attribution, profiling or session replay, in an app that company does not publish; and a browser extension that may read the pages you visit or what you do in the browser.</li>
+<li><span class="prio p-medium">Medium</span> What apps may reach of you and your surroundings: camera, microphone, screen, location and personal data; and a domain an app declares for tracking.</li>
+<li><span class="prio p-low">Low</span> Other services of a company in an app, such as crash reporting, and access to files, nearby devices and other apps.</li>
+</ul>
+<ul class="checklist">
+<li class="todo">
+<p class="todo-head"><span class="prio p-high">High</span> <strong>PostHog</strong> <span class="tag">Analytics</span></p>
+<p class="meta">PostHog Inc. · 2 apps</p>
+<ul class="steps">
+<li>No setting that turns it off is on record for <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a>, <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a>.</li>
+<li>Block these hosts for <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a>, <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a> with an outbound firewall such as LuLu (free) or Little Snitch: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on it.</li>
+<li>Or remove the apps you can do without.</li>
+</ul>
+</li>
+<li class="todo">
+<p class="todo-head"><span class="prio p-low">Low</span> <strong>Sentry</strong> <span class="tag">Crash reporting</span></p>
+<p class="meta">Functional Software, Inc. (Sentry) · 3 apps</p>
+<ul class="steps">
+<li>No setting that turns it off is on record for <a href="#f-c606554f70326e31474b5a98b99c610cec1d381190e534fa355e06e528ce30ac">ElectronSkeleton</a>, <a href="#f-898645fdb677a58f33e217cd971a0611720c3194cacbf704edf996890c7403db">Skeleton</a>, <a href="#f-2fc3cee02feee2e8db8c7eaa9879b54c28ac4f8e6ac3783a84be89276050b8a6">Skeleton</a>.</li>
+<li>Or remove the apps you can do without.</li>
+</ul>
+</li>
+</ul>
+<p class="note">The steps name menus as the publishers and the operating systems name them. A setting can move between versions of an app, and what a setting covers is what its publisher documents: a scan of files cannot show what an app sends once it is turned off. Block lists name only hosts of advertising, analytics, attribution, profiling and session replay, and domains an app declares for tracking: blocking a crash reporter or an app's own servers breaks more than it protects.</p>
 </section>
 <section id="reading">
 <h2>How to read this report</h2>
@@ -306,6 +376,12 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <dt>Party</dt><dd>Third party: PostHog Inc. is not this app's publisher.</dd>
 <dt>In the summary</dt><dd>Counted.</dd>
 </dl>
+<p class="todo-head">What you can do</p>
+<ul class="steps">
+<li>No setting of this app that turns it off is on record.</li>
+<li>Block these hosts for ElectronSkeleton with an outbound firewall such as LuLu (free) or Little Snitch: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
+<li>Or remove ElectronSkeleton if you can do without it.</li>
+</ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
 <li><p class="what">Text in a script</p>
@@ -336,6 +412,12 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <dt>Party</dt><dd>Third party: PostHog Inc. is not this app's publisher.</dd>
 <dt>In the summary</dt><dd>Counted.</dd>
 </dl>
+<p class="todo-head">What you can do</p>
+<ul class="steps">
+<li>No setting of this app that turns it off is on record.</li>
+<li>Block these hosts for Skeleton with a firewall app that works without root, such as NetGuard: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
+<li>Or remove Skeleton if you can do without it.</li>
+</ul>
 <p class="evidence-head">Evidence: 2 records</p>
 <ul class="evidence">
 <li><p class="what">Classes defined in the app&#39;s code</p>
@@ -380,6 +462,11 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <dt>Party</dt><dd>Third party: Functional Software, Inc. (Sentry) is not this app's publisher.</dd>
 <dt>In the summary</dt><dd>Not counted: Crash reporting is not one of the counted categories.</dd>
 </dl>
+<p class="todo-head">What you can do</p>
+<ul class="steps">
+<li>No setting of this app that turns it off is on record.</li>
+<li>Or remove ElectronSkeleton if you can do without it.</li>
+</ul>
 <p class="evidence-head">Evidence: 3 records</p>
 <ul class="evidence">
 <li><p class="what">Text in a script</p>
@@ -432,6 +519,11 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <dt>Party</dt><dd>Third party: Functional Software, Inc. (Sentry) is not this app's publisher.</dd>
 <dt>In the summary</dt><dd>Not counted: Crash reporting is not one of the counted categories.</dd>
 </dl>
+<p class="todo-head">What you can do</p>
+<ul class="steps">
+<li>No setting of this app that turns it off is on record.</li>
+<li>Or remove Skeleton if you can do without it.</li>
+</ul>
 <p class="evidence-head">Evidence: 2 records</p>
 <ul class="evidence">
 <li><p class="what">A component registered in the app&#39;s manifest</p>
@@ -473,6 +565,11 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <dt>Party</dt><dd>Third party: Functional Software, Inc. (Sentry) is not this app's publisher.</dd>
 <dt>In the summary</dt><dd>Not counted: Crash reporting is not one of the counted categories.</dd>
 </dl>
+<p class="todo-head">What you can do</p>
+<ul class="steps">
+<li>No setting of this app that turns it off is on record.</li>
+<li>Or remove Skeleton if you can do without it.</li>
+</ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
 <li><p class="what">A framework folder</p>
@@ -588,7 +685,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <h2>About this report</h2>
 <dl class="facts">
 <dt>Scanner</dt><dd>exposure 0.1.0</dd>
-<dt>Rule pack</dt><dd>core version 5, SHA-256 <code>9b3b32f784059ce651c29e26bd550ef19915bb40aac4520c6335aa3a09af6217</code></dd>
+<dt>Rule pack</dt><dd>core version 6, SHA-256 <code>b18b99f2d2bd8d78d04af94700e87bec6efe93c60e3e9242ea0d07e169b70044</code></dd>
 </dl>
 <p>The same evidence, the same rule pack and the same scan scope always give this same file, byte for byte. It holds no date, no device name and no path outside an app.</p>
 </section>

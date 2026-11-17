@@ -12,7 +12,9 @@ use alloc::vec::Vec;
 use core::cmp::Reverse;
 
 use xs_model::pack::{Entity, Pack};
-use xs_model::record::{CoverageRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject};
+use xs_model::record::{
+    Browser, CoverageRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject,
+};
 use xs_model::{Claim, EvidenceSet, Headline, SubjectDigest};
 use xs_model::{access, permission};
 
@@ -45,6 +47,8 @@ pub(crate) struct App<'a> {
     pub(crate) name: Option<&'a str>,
     /// How many files and bytes were read, when an artifact record says.
     pub(crate) read: Option<(u64, u64)>,
+    /// For a browser extension, the browser it was found installed in.
+    pub(crate) browser: Option<Browser>,
     /// How many claims are about this build.
     pub(crate) findings: u64,
     /// Every record about this build, in id order.
@@ -53,7 +57,7 @@ pub(crate) struct App<'a> {
 
 impl<'a> App<'a> {
     fn new(subject: &'a Subject) -> Self {
-        Self { subject, name: None, read: None, findings: 0, records: Vec::new() }
+        Self { subject, name: None, read: None, browser: None, findings: 0, records: Vec::new() }
     }
 
     /// Whether the scan read the app. If not, all that is known of it is
@@ -82,6 +86,9 @@ impl<'a> App<'a> {
             // counts.
             if let Some(name) = artifact.facts.name.as_deref() {
                 self.name = Some(self.name.map_or(name, |current| current.min(name)));
+            }
+            if let Some(browser) = artifact.facts.browser {
+                self.browser = Some(self.browser.map_or(browser, |current| current.min(browser)));
             }
             let (files, bytes) = self.read.unwrap_or((0, 0));
             self.read = Some((
@@ -193,6 +200,8 @@ impl<'a> Found<'a> {
 pub(crate) struct View<'a> {
     /// The scanned builds, in the order a reader looks them up.
     pub(crate) apps: Vec<App<'a>>,
+    /// Where each build is in [`Self::apps`].
+    index: BTreeMap<Build<'a>, usize>,
     /// The companies findings name: those with a counted finding first, each
     /// group by name.
     pub(crate) companies: Vec<Company<'a>>,
@@ -290,6 +299,7 @@ impl<'a> View<'a> {
             evidence.iter().filter(|(_, record)| matches!(record, Record::Coverage(_))).count();
         Ok(Self {
             apps,
+            index,
             companies,
             unnamed: group(unnamed),
             access: group(access),
@@ -306,6 +316,11 @@ impl<'a> View<'a> {
                 .map(|category| category.name.as_str())
                 .collect(),
         })
+    }
+
+    /// The build a claim or a record is about.
+    pub(crate) fn app_of(&self, subject: &Subject) -> Option<&App<'a>> {
+        self.apps.get(*self.index.get(&Build::of(subject))?)
     }
 
     /// The apps the scan read, in the order a reader looks them up.

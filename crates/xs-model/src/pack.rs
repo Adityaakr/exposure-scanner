@@ -22,8 +22,9 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::digest::Sha256Digest;
+use crate::fix::{self, AppFix, Fixes, SdkFix};
 use crate::matcher::{Boundary, MatcherKind};
-use crate::record::V1;
+use crate::record::{Platform, V1};
 use crate::text;
 
 /// One independently licensed and signed file of a rule pack.
@@ -45,6 +46,10 @@ pub struct Layer {
     pub entities: Vec<Entity>,
     /// The rules.
     pub rules: Vec<Rule>,
+    /// What a person can do about the findings ([`crate::fix`]). A layer
+    /// without advice has no such key.
+    #[serde(default, skip_serializing_if = "Fixes::is_empty")]
+    pub fixes: Fixes,
 }
 
 /// A kind of service an SDK provides.
@@ -184,6 +189,8 @@ pub enum PackError {
     /// A `min_distinct` entry names a matcher the rule does not use, or a
     /// number outside 2 ..= the number of tokens.
     BadMinDistinct(String, MatcherKind),
+    /// A fix is not usable advice. Payload: the fix, and what is wrong.
+    BadFix(String, &'static str),
 }
 
 impl fmt::Display for PackError {
@@ -210,6 +217,7 @@ impl fmt::Display for PackError {
                 "rule `{rule}`: min_distinct for {matcher} must be between 2 and the number of \
                  {matcher} tokens"
             ),
+            Self::BadFix(item, what) => write!(f, "fix `{item}`: {what}"),
         }
     }
 }
@@ -292,6 +300,10 @@ pub struct Pack {
     team_ids: BTreeMap<String, Position>,
     app_ids: BTreeMap<String, Position>,
     domains: BTreeMap<String, Position>,
+    /// The app fix of each app, by platform and lowercase app id.
+    app_fixes: BTreeMap<(Platform, String), Position>,
+    /// The SDK fix of each rule id.
+    sdk_fixes: BTreeMap<String, Position>,
 }
 
 impl Pack {
@@ -316,6 +328,8 @@ impl Pack {
             team_ids: BTreeMap::new(),
             app_ids: BTreeMap::new(),
             domains: BTreeMap::new(),
+            app_fixes: BTreeMap::new(),
+            sdk_fixes: BTreeMap::new(),
         };
         pack.index()?;
         pack.check_references()?;
@@ -395,6 +409,25 @@ impl Pack {
                 check_rule(rule)?;
                 insert_unique(&mut self.rules, "rule", &rule.id, (layer_index, index))?;
             }
+            let mut fix_ids: Vec<&str> = Vec::new();
+            for (index, app_fix) in layer.fixes.apps.iter().enumerate() {
+                check_app_fix(app_fix)?;
+                if fix_ids.contains(&app_fix.id.as_str()) {
+                    return Err(PackError::Duplicate("fix", app_fix.id.clone()));
+                }
+                fix_ids.push(&app_fix.id);
+                for key in &app_fix.apps {
+                    // An app has one entry, in whichever layer it is.
+                    let lookup = (key.platform, key.id.to_ascii_lowercase());
+                    if self.app_fixes.insert(lookup, (layer_index, index)).is_some() {
+                        return Err(PackError::SharedIdentifier("fix app id", key.id.clone()));
+                    }
+                }
+            }
+            for (index, sdk_fix) in layer.fixes.sdks.iter().enumerate() {
+                check_sdk_fix(sdk_fix)?;
+                insert_unique(&mut self.sdk_fixes, "sdk fix", &sdk_fix.rule, (layer_index, index))?;
+            }
         }
         Ok(())
     }
@@ -449,6 +482,33 @@ impl Pack {
                     "category",
                     rule.category.clone(),
                 ));
+            }
+        }
+        for loaded in &self.layers {
+            for app_fix in &loaded.layer.fixes.apps {
+                let covered = app_fix
+                    .settings
+                    .iter()
+                    .flat_map(|setting| &setting.covers)
+                    .chain(app_fix.no_setting.iter().flat_map(|none| &none.covers));
+                for category in covered {
+                    if self.category(category).is_none() {
+                        return Err(PackError::Dangling(
+                            app_fix.id.clone(),
+                            "category",
+                            category.clone(),
+                        ));
+                    }
+                }
+            }
+            for sdk_fix in &loaded.layer.fixes.sdks {
+                if self.rule(&sdk_fix.rule).is_none() {
+                    return Err(PackError::Dangling(
+                        sdk_fix.rule.clone(),
+                        "rule",
+                        sdk_fix.rule.clone(),
+                    ));
+                }
             }
         }
         Ok(())
@@ -563,6 +623,24 @@ impl Pack {
             .any(|entity| self.company_of(&entity.id).is_some_and(|top| top.id == company_id))
     }
 
+    /// What the publisher of the app with this platform and app id documents
+    /// about turning off what it sends. Letter case of the app id is
+    /// ignored; the id must be listed as it is, not an id above it, since
+    /// two apps of one publisher can have different settings.
+    #[must_use]
+    pub fn app_fix(&self, platform: Platform, app_id: &str) -> Option<&AppFix> {
+        let &(layer, index) = self.app_fixes.get(&(platform, app_id.to_ascii_lowercase()))?;
+        self.layers.get(layer)?.layer.fixes.apps.get(index)
+    }
+
+    /// The hosts beyond its own that the rule with this id is known to send
+    /// to.
+    #[must_use]
+    pub fn sdk_fix(&self, rule_id: &str) -> Option<&SdkFix> {
+        let &(layer, index) = self.sdk_fixes.get(rule_id)?;
+        self.layers.get(layer)?.layer.fixes.sdks.get(index)
+    }
+
     /// Every rule, in id order.
     pub fn rules(&self) -> impl Iterator<Item = &Rule> {
         self.rules.keys().filter_map(|id| self.rule(id))
@@ -614,6 +692,99 @@ fn check_text(item: &str, field: &'static str, value: &str) -> Result<(), PackEr
     Ok(())
 }
 
+/// Checks everything about one app fix that does not cross to another item.
+fn check_app_fix(app_fix: &AppFix) -> Result<(), PackError> {
+    let id = &app_fix.id;
+    let bad = |what| Err(PackError::BadFix(id.clone(), what));
+    if !is_entity_id(id) {
+        return Err(PackError::BadId("fix", id.clone()));
+    }
+    check_text(id, "name", &app_fix.name)?;
+    if app_fix.apps.is_empty() {
+        return bad("it names no app");
+    }
+    for key in &app_fix.apps {
+        if !matches!(key.platform, Platform::Macos | Platform::Android) {
+            return bad("an app of a fix is a macOS or an Android app");
+        }
+        if !fix::is_app_key_id(&key.id) {
+            return Err(PackError::BadIdentifier("fix app id", key.id.clone()));
+        }
+    }
+    if app_fix.settings.is_empty() && app_fix.no_setting.is_empty() {
+        return bad("it states neither a setting nor that there is none");
+    }
+    let mut set: Vec<&str> = Vec::new();
+    for setting in &app_fix.settings {
+        if setting.covers.is_empty() {
+            return bad("a setting covers no category");
+        }
+        if !fix::is_step_text(&setting.steps) {
+            return Err(PackError::BadText(id.clone(), "steps"));
+        }
+        if let Some(note) = &setting.note
+            && !fix::is_step_text(note)
+        {
+            return Err(PackError::BadText(id.clone(), "note"));
+        }
+        set.extend(setting.covers.iter().map(String::as_str));
+    }
+    let mut unset: Vec<&str> = Vec::new();
+    for none in &app_fix.no_setting {
+        if none.covers.is_empty() {
+            return bad("a statement that there is no setting covers no category");
+        }
+        if !fix::is_step_text(&none.says) {
+            return Err(PackError::BadText(id.clone(), "says"));
+        }
+        for category in &none.covers {
+            // A setting for a category and the statement that there is none
+            // cannot both be true.
+            if set.contains(&category.as_str()) || unset.contains(&category.as_str()) {
+                return bad("a category is both covered by a setting and said to have none");
+            }
+            unset.push(category);
+        }
+    }
+    for alternative in &app_fix.alternatives {
+        check_text(id, "alternative", &alternative.name)?;
+        check_text(id, "website", &alternative.website)?;
+        if !fix::is_step_text(&alternative.about) {
+            return Err(PackError::BadText(id.clone(), "about"));
+        }
+    }
+    if app_fix.sources.is_empty() {
+        return Err(PackError::BadText(id.clone(), "source"));
+    }
+    for source in &app_fix.sources {
+        check_text(id, "source", source)?;
+    }
+    Ok(())
+}
+
+/// Checks one SDK fix: a rule id, hosts in the stored form, and sources.
+fn check_sdk_fix(sdk_fix: &SdkFix) -> Result<(), PackError> {
+    let rule = &sdk_fix.rule;
+    if !is_rule_id(rule) {
+        return Err(PackError::BadId("rule", rule.clone()));
+    }
+    if sdk_fix.block.is_empty() {
+        return Err(PackError::BadFix(rule.clone(), "it lists no host"));
+    }
+    for host in &sdk_fix.block {
+        if !is_domain_entry(host) {
+            return Err(PackError::BadIdentifier("host", host.clone()));
+        }
+    }
+    if sdk_fix.sources.is_empty() {
+        return Err(PackError::BadText(rule.clone(), "source"));
+    }
+    for source in &sdk_fix.sources {
+        check_text(rule, "source", source)?;
+    }
+    Ok(())
+}
+
 fn check_rule(rule: &Rule) -> Result<(), PackError> {
     check_text(&rule.id, "name", &rule.name)?;
     for source in &rule.sources {
@@ -660,6 +831,7 @@ pub(crate) mod tests {
     pub(crate) fn layer() -> Layer {
         Layer {
             format: V1,
+            fixes: crate::fix::Fixes::default(),
             layer: "core".into(),
             version: 1,
             license: "CC-BY-4.0".into(),
@@ -1013,6 +1185,169 @@ pub(crate) mod tests {
                 l.rules[0].min_distinct.insert(MatcherKind::DexString, 2);
             }),
             PackError::BadMinDistinct("sdk/firebase-crashlytics".into(), MatcherKind::DexString)
+        );
+    }
+
+    /// A layer that says what a person can do about Crashlytics in one
+    /// app, and adds a host to a rule.
+    fn with_fixes() -> Layer {
+        use crate::fix::{Alternative, AppKey, NoSetting, Setting};
+        let mut layer = layer();
+        layer.fixes = Fixes {
+            apps: vec![AppFix {
+                id: "example-mail".into(),
+                name: "Example Mail".into(),
+                apps: vec![
+                    AppKey { platform: Platform::Macos, id: "com.example.Mail".into() },
+                    AppKey { platform: Platform::Android, id: "com.example.mail".into() },
+                ],
+                settings: vec![Setting {
+                    covers: vec!["crash_reporting".into()],
+                    steps: "Settings > Privacy > Send crash reports: off".into(),
+                    note: None,
+                }],
+                no_setting: vec![NoSetting {
+                    covers: vec!["component".into()],
+                    says: "Example documents no setting for its updater.".into(),
+                }],
+                alternatives: vec![Alternative {
+                    name: "Other Mail".into(),
+                    website: "https://other.example/".into(),
+                    about: "a mail app built without telemetry".into(),
+                }],
+                sources: vec!["https://example.com/help/privacy".into()],
+            }],
+            sdks: vec![SdkFix {
+                rule: "sdk/firebase-crashlytics".into(),
+                block: vec!["reports.crashlytics.example".into()],
+                sources: vec!["https://example.com/hosts".into()],
+            }],
+        };
+        layer
+    }
+
+    #[test]
+    fn fixes_are_looked_up_by_platform_and_app_id() {
+        let pack = pack_of(with_fixes()).unwrap();
+        let fix = pack.app_fix(Platform::Macos, "com.example.Mail").unwrap();
+        assert_eq!(fix.id, "example-mail");
+        // Letter case is ignored, the platform is not, and an app id below
+        // a listed one is another app.
+        assert!(pack.app_fix(Platform::Macos, "COM.EXAMPLE.MAIL").is_some());
+        assert!(pack.app_fix(Platform::Android, "com.example.Mail").is_some());
+        assert!(pack.app_fix(Platform::Chromium, "com.example.mail").is_none());
+        assert!(pack.app_fix(Platform::Macos, "com.example.Mail.helper").is_none());
+        assert_eq!(pack.sdk_fix("sdk/firebase-crashlytics").unwrap().block.len(), 1);
+        assert!(pack.sdk_fix("sdk/sparkle").is_none());
+    }
+
+    /// A layer without advice is the layer it was before advice existed:
+    /// its file holds no `fixes` key, and it reads back the same.
+    #[test]
+    fn a_layer_without_fixes_reads_and_writes_as_before() {
+        let plain = crate::canon::to_string(&layer()).unwrap();
+        assert!(!plain.contains("fixes"));
+        let advised = crate::canon::to_string(&with_fixes()).unwrap();
+        assert!(advised.contains("\"fixes\""));
+        assert_ne!(plain, advised);
+    }
+
+    #[test]
+    fn rejects_fixes_that_are_not_usable_advice() {
+        let fix = |change: fn(&mut AppFix)| {
+            let mut layer = with_fixes();
+            change(&mut layer.fixes.apps[0]);
+            pack_of(layer).unwrap_err()
+        };
+        assert_eq!(fix(|f| f.id = "Mail".into()), PackError::BadId("fix", "Mail".into()));
+        assert_eq!(
+            fix(|f| f.apps.clear()),
+            PackError::BadFix("example-mail".into(), "it names no app")
+        );
+        assert!(matches!(
+            fix(|f| f.apps[0].platform = Platform::Chromium),
+            PackError::BadFix(_, "an app of a fix is a macOS or an Android app")
+        ));
+        assert_eq!(
+            fix(|f| f.apps[0].id = "com example".into()),
+            PackError::BadIdentifier("fix app id", "com example".into())
+        );
+        assert!(matches!(
+            fix(|f| {
+                f.settings.clear();
+                f.no_setting.clear();
+            }),
+            PackError::BadFix(_, "it states neither a setting nor that there is none")
+        ));
+        assert!(matches!(fix(|f| f.settings[0].covers.clear()), PackError::BadFix(..)));
+        assert_eq!(
+            fix(|f| f.settings[0].steps = "one\ntwo".into()),
+            PackError::BadText("example-mail".into(), "steps")
+        );
+        assert!(matches!(
+            fix(|f| f.no_setting[0].covers = vec!["crash_reporting".into()]),
+            PackError::BadFix(_, "a category is both covered by a setting and said to have none")
+        ));
+        assert_eq!(
+            fix(|f| f.settings[0].covers = vec!["astrology".into()]),
+            PackError::Dangling("example-mail".into(), "category", "astrology".into())
+        );
+        assert_eq!(fix(|f| f.sources.clear()), PackError::BadText("example-mail".into(), "source"));
+        assert_eq!(
+            fix(|f| f.alternatives[0].about = String::new()),
+            PackError::BadText("example-mail".into(), "about")
+        );
+
+        // An app has one entry: two that name it would contradict each other.
+        let mut twice = with_fixes();
+        let mut other = twice.fixes.apps[0].clone();
+        other.id = "example-mail-two".into();
+        other.apps.truncate(1);
+        other.apps[0].id = "COM.example.mail".into();
+        twice.fixes.apps.push(other);
+        assert_eq!(
+            pack_of(twice).unwrap_err(),
+            PackError::SharedIdentifier("fix app id", "COM.example.mail".into())
+        );
+        let mut same_id = with_fixes();
+        let mut copy = same_id.fixes.apps[0].clone();
+        copy.apps = vec![crate::fix::AppKey { platform: Platform::Macos, id: "com.other".into() }];
+        same_id.fixes.apps.push(copy);
+        assert_eq!(
+            pack_of(same_id).unwrap_err(),
+            PackError::Duplicate("fix", "example-mail".into())
+        );
+    }
+
+    #[test]
+    fn rejects_sdk_fixes_that_name_no_rule_or_no_host() {
+        let sdk = |change: fn(&mut SdkFix)| {
+            let mut layer = with_fixes();
+            change(&mut layer.fixes.sdks[0]);
+            pack_of(layer).unwrap_err()
+        };
+        assert_eq!(
+            sdk(|f| f.rule = "sdk/nothing".into()),
+            PackError::Dangling("sdk/nothing".into(), "rule", "sdk/nothing".into())
+        );
+        assert_eq!(sdk(|f| f.rule = "nothing".into()), PackError::BadId("rule", "nothing".into()));
+        assert!(matches!(sdk(|f| f.block.clear()), PackError::BadFix(_, "it lists no host")));
+        for host in ["Reports.example.com", "https://example.com", "com", "a..b"] {
+            let mut layer = with_fixes();
+            layer.fixes.sdks[0].block = vec![host.into()];
+            assert_eq!(
+                pack_of(layer).unwrap_err(),
+                PackError::BadIdentifier("host", host.into()),
+                "{host}"
+            );
+        }
+        assert!(matches!(sdk(|f| f.sources.clear()), PackError::BadText(_, "source")));
+        let mut twice = with_fixes();
+        let copy = twice.fixes.sdks[0].clone();
+        twice.fixes.sdks.push(copy);
+        assert_eq!(
+            pack_of(twice).unwrap_err(),
+            PackError::Duplicate("sdk fix", "sdk/firebase-crashlytics".into())
         );
     }
 

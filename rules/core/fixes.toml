@@ -1,0 +1,278 @@
+# What a person can do about a finding, where that depends on one app or one
+# SDK. Data in this directory is licensed CC BY 4.0 (see ../README.md).
+#
+# [[app]]  What an app's publisher documents about turning off what the app
+#          sends: a setting and the categories of pack.toml it covers, or a
+#          statement that the publisher documents none. Write the steps in
+#          the words of the app's own menus, from the publisher's own pages,
+#          and nothing those pages do not show. An app with no entry is shown
+#          with "no setting on record", which is the honest answer for an app
+#          nobody has sourced.
+# [[sdk]]  Hosts an SDK sends to beyond those its rule names, for the block
+#          list the report gives. Only for a rule in a counted category, and
+#          only hosts the vendor's own documentation names.
+#
+# Checked against the publishers' pages on 2026-11-18.
+
+[[app]]
+id = "vscode"
+name = "Visual Studio Code"
+apps = [
+    { platform = "macos", id = "com.microsoft.VSCode" },
+    { platform = "macos", id = "com.microsoft.VSCodeInsiders" },
+]
+sources = [
+    "https://code.visualstudio.com/docs/configure/telemetry",
+    "https://code.visualstudio.com/docs/configure/settings",
+    "https://vscodium.com/",
+]
+
+[[app.setting]]
+covers = ["analytics", "crash_reporting", "telemetry"]
+steps = "open Settings (⌘,), search for telemetry.telemetryLevel and set it to off"
+note = "Extensions you installed may collect usage data of their own, which this setting does not cover."
+
+[[app.alternative]]
+name = "VSCodium"
+website = "https://vscodium.com/"
+about = "the same editor, built from the same open source code without Microsoft's telemetry"
+
+[[app]]
+id = "cursor"
+name = "Cursor"
+apps = [{ platform = "macos", id = "com.todesktop.230313mzl4w4u92" }]
+sources = [
+    "https://cursor.com/help/security-and-privacy/privacy",
+    "https://cursor.com/security",
+]
+
+[[app.no_setting]]
+covers = ["analytics", "crash_reporting"]
+says = "Cursor documents no setting for its usage analytics or crash reports. Its Privacy Mode (Cursor Settings > General > Privacy Mode) is about training AI models on your code, not about these."
+
+[[app]]
+id = "discord"
+name = "Discord"
+apps = [{ platform = "macos", id = "com.hnc.Discord" }]
+sources = [
+    "https://support.discord.com/hc/en-us/articles/21864805694999-Data-Used-to-Improve-Discord",
+]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "User Settings > Data & Privacy, then turn off Use Data to Improve Discord"
+note = "Discord says the app keeps sending the data and Discord stops using it for this purpose. The setting is for your account, on every device."
+
+[[app]]
+id = "discord-android"
+name = "Discord"
+apps = [{ platform = "android", id = "com.discord" }]
+sources = [
+    "https://support.discord.com/hc/en-us/articles/21864805694999-Data-Used-to-Improve-Discord",
+]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "Settings > Data & Privacy, then turn off Use Data to Improve Discord"
+note = "Discord says the app keeps sending the data and Discord stops using it for this purpose. The setting is for your account, on every device."
+
+[[app]]
+id = "zoom"
+name = "Zoom"
+apps = [
+    { platform = "macos", id = "us.zoom.xos" },
+    { platform = "android", id = "us.zoom.videomeetings" },
+]
+sources = [
+    "https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0057736",
+    "https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0057779",
+]
+
+[[app.setting]]
+covers = ["analytics", "telemetry"]
+steps = "sign in to the Zoom web portal, not the app: Profile > Data and Privacy > Data settings, then turn off Optional Diagnostic Data"
+note = "It is a setting of your Zoom account, and an account admin can lock it."
+
+[[app]]
+id = "cmux"
+name = "cmux"
+apps = [{ platform = "macos", id = "com.cmuxterm.app" }]
+sources = [
+    "https://github.com/manaflow-ai/cmux/blob/4c944767c3a8632b7cbb9b0516ee369e0819479c/Packages/macOS/CmuxSettings/Sources/CmuxSettings/Keys/AppCatalogSection.swift",
+    "https://github.com/manaflow-ai/cmux/blob/4c944767c3a8632b7cbb9b0516ee369e0819479c/Resources/Localizable.xcstrings",
+    "https://github.com/manaflow-ai/cmux/blob/4c944767c3a8632b7cbb9b0516ee369e0819479c/Sources/App/MacSentryStartupPolicy.swift",
+    "https://github.com/manaflow-ai/cmux/blob/4c944767c3a8632b7cbb9b0516ee369e0819479c/Sources/TelemetrySettings.swift",
+]
+
+[[app.setting]]
+covers = ["analytics", "crash_reporting"]
+steps = "Settings > App, then turn off Send anonymous telemetry"
+note = "The app describes it as sharing anonymized crash and usage data. It is on by default and the change takes effect the next time cmux starts."
+
+[[app]]
+id = "screen-studio"
+name = "Screen Studio"
+apps = [{ platform = "macos", id = "com.timpler.screenstudio" }]
+sources = ["https://screen.studio/privacy"]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "Settings > Usage data: off"
+
+[[app.no_setting]]
+covers = ["crash_reporting"]
+says = "Screen Studio sends crash reports automatically. Only a team admin can turn them off, for the whole team."
+
+[[app]]
+id = "trezor-suite"
+name = "Trezor Suite"
+apps = [{ platform = "macos", id = "io.trezor.TrezorSuite" }]
+sources = ["https://trezor.io/guides/trezor-suite/trezor-suite-desktop/trezor-suite-settings"]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "Settings > Application, then turn off Anonymous data collection"
+
+[[app]]
+id = "proton-vpn"
+name = "Proton VPN"
+apps = [{ platform = "macos", id = "ch.protonvpn.mac" }]
+sources = ["https://protonvpn.com/support/share-usage-statistics"]
+
+[[app.setting]]
+covers = ["analytics", "crash_reporting"]
+steps = "Preferences > Advanced, then turn off Share anonymous usage statistics"
+note = "Proton describes this one switch as covering usage statistics and crash reports. It is on by default."
+
+[[app]]
+id = "dia"
+name = "Dia"
+apps = [{ platform = "macos", id = "company.thebrowser.dia" }]
+sources = [
+    "https://diabrowser.com/privacy",
+    "https://diabrowser.com/security",
+]
+
+[[app.no_setting]]
+covers = ["analytics"]
+says = "Dia's privacy policy says it collects data on which features you use automatically, and documents no setting to turn that off. Its setting Settings > Privacy > Share content data to help improve Dia is about the content you browse, not about this."
+
+[[app]]
+id = "arc"
+name = "Arc"
+apps = [{ platform = "macos", id = "company.thebrowser.Browser" }]
+sources = [
+    "https://arc.net/privacy",
+    "https://arc.net/security",
+]
+
+[[app.no_setting]]
+covers = ["analytics", "crash_reporting"]
+says = "Arc's security page describes its telemetry and crash reports and documents no setting to turn them off."
+
+[[app]]
+id = "slack"
+name = "Slack"
+apps = [
+    { platform = "macos", id = "com.tinyspeck.slackmacgap" },
+    { platform = "android", id = "com.Slack" },
+]
+sources = [
+    "https://slack.com/cookie-policy",
+    "https://slack.com/trust/privacy/privacy-policy",
+]
+
+[[app.no_setting]]
+covers = ["analytics", "crash_reporting"]
+says = "Slack's privacy policy lists device and crash data among what it collects and documents no setting in the app to turn that off. Its cookie settings are for its website."
+
+[[app]]
+id = "figma"
+name = "Figma"
+apps = [
+    { platform = "macos", id = "com.figma.Desktop" },
+    { platform = "android", id = "com.figma.mirror" },
+]
+sources = ["https://www.figma.com/legal/privacy/"]
+
+[[app.no_setting]]
+covers = ["analytics", "crash_reporting"]
+says = "Figma documents no setting in its apps for usage analytics or crash reports. Its cookie choices are for its website, and it says they do not work in its mobile apps."
+
+[[app]]
+id = "notion"
+name = "Notion"
+apps = [{ platform = "macos", id = "notion.id" }]
+sources = [
+    "https://www.notion.com/help/account-settings",
+    "https://www.notion.com/trust/cookie-notice",
+]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "Settings, then Cookie settings, and turn off analytics cookies"
+note = "Notion's cookie notice puts Cookie settings under My notifications & settings, which the app now calls Settings > Preferences. Notion says the cookie settings cover its desktop apps."
+
+[[app]]
+id = "claude"
+name = "Claude"
+apps = [{ platform = "macos", id = "com.anthropic.claudefordesktop" }]
+sources = [
+    "https://claude.com/docs/third-party/claude-desktop/telemetry",
+    "https://privacy.claude.com/en/articles/12109829-how-do-i-change-my-model-improvement-privacy-settings",
+]
+
+[[app.no_setting]]
+covers = ["analytics", "crash_reporting"]
+says = "Anthropic documents switches for the app's crash reports and product analytics only as managed settings for administrators, not as a setting in the app. Its setting Settings > Privacy > Help improve our AI models is about training on your chats, not about this."
+
+# Datadog's browser SDK sends to one intake host per Datadog site.
+[[sdk]]
+rule = "sdk/datadog-rum"
+block = [
+    "browser-intake-datadoghq.com",
+    "browser-intake-us3-datadoghq.com",
+    "browser-intake-us5-datadoghq.com",
+    "browser-intake-datadoghq.eu",
+    "browser-intake-ap1-datadoghq.com",
+    "browser-intake-ap2-datadoghq.com",
+    "browser-intake-uk1-datadoghq.com",
+    "browser-intake-ddog-gov.com",
+    "browser-intake-us2-ddog-gov.com",
+]
+sources = ["https://docs.datadoghq.com/integrations/content_security_policy_logs/"]
+
+# Statsig's list also names cloudflare-dns.com, a public DNS resolver that is
+# not Statsig's: blocking it is left out. Statsig says it changes these
+# domains from time to time.
+[[sdk]]
+rule = "sdk/statsig"
+block = [
+    "api.statsig.com",
+    "featuregates.org",
+    "statsigapi.net",
+    "events.statsigapi.net",
+    "api.statsigcdn.com",
+    "featureassets.org",
+    "assetsconfigcdn.org",
+    "prodregistryv2.org",
+    "beyondwickedmapping.org",
+]
+sources = ["https://docs.statsig.com/infrastructure/statsig_domains"]
+
+# Google Analytics for Firebase sends app events to app-measurement.com, and
+# the web SDK to the google-analytics.com and analytics.google.com hosts.
+[[sdk]]
+rule = "sdk/google-analytics"
+block = [
+    "app-measurement.com",
+    "region1.app-measurement.com",
+    "google-analytics.com",
+    "region1.google-analytics.com",
+    "analytics.google.com",
+    "region1.analytics.google.com",
+]
+sources = [
+    "https://storage.googleapis.com/support-kms-prod/LnQ8X4K0alkkQM5zyK7Wm0gkk1ETJIoSeNNk",
+    "https://support.google.com/analytics/answer/12017362",
+]
