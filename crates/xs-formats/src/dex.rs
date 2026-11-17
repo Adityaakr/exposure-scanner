@@ -38,19 +38,12 @@ const STRING_ID_BYTES: usize = 4;
 const TYPE_ID_BYTES: usize = 4;
 const CLASS_DEF_BYTES: usize = 32;
 
-/// How many leading bytes [`sniff`] looks at.
-pub const SNIFF_BYTES: usize = 8;
-
-/// Whether `header` starts like a DEX file of any version: `dex\n`, three
-/// digits and a NUL.
-#[must_use]
-pub fn sniff(header: &[u8]) -> bool {
-    version(header).is_some()
-}
+/// Length of the magic number: `dex\n`, three digits and a NUL.
+const MAGIC_BYTES: usize = 8;
 
 /// The version in the magic number, if `header` starts with one.
 fn version(header: &[u8]) -> Option<u32> {
-    let (magic, _) = header.split_first_chunk::<SNIFF_BYTES>()?;
+    let (magic, _) = header.split_first_chunk::<MAGIC_BYTES>()?;
     let [b'd', b'e', b'x', b'\n', digits @ .., 0] = magic else { return None };
     digits.iter().try_fold(0u32, |number, digit| {
         let value = u32::from(digit.checked_sub(b'0').filter(|value| *value <= 9)?);
@@ -131,18 +124,6 @@ impl<'a> Dex<'a> {
             type_ids: Table::read(data, 0x40, TYPE_ID_BYTES)?,
             class_defs: Table::read(data, 0x60, CLASS_DEF_BYTES)?,
         })
-    }
-
-    /// Number of strings in the file.
-    #[must_use]
-    pub fn string_count(&self) -> usize {
-        self.string_ids.len()
-    }
-
-    /// Number of classes the file defines.
-    #[must_use]
-    pub fn class_count(&self) -> usize {
-        self.class_defs.len()
     }
 
     /// The bytes of string `index`, without the length before them or the
@@ -337,7 +318,6 @@ mod tests {
     fn lists_the_classes_a_file_defines_and_not_the_ones_it_refers_to() {
         let bytes = sample();
         let dex = Dex::parse(&bytes).unwrap();
-        assert_eq!(dex.class_count(), 3);
         assert_eq!(
             classes(&dex).unwrap(),
             ["com.example.Main", "com.google.firebase.crashlytics.CrashlyticsRegistrar", "a.b$c"]
@@ -350,7 +330,7 @@ mod tests {
         let bytes = sample();
         let dex = Dex::parse(&bytes).unwrap();
         let found = strings(&dex).unwrap();
-        assert_eq!(found.len(), dex.string_count());
+        assert_eq!(found.len(), 8, "three strings and five descriptors, each stored once");
         let mut sorted = found.clone();
         sorted.sort();
         assert_eq!(found, sorted, "the builder writes a sorted table, as the format requires");
@@ -371,19 +351,16 @@ mod tests {
         let bytes = DexBuilder::new().finish();
         assert_eq!(bytes.len(), HEADER_BYTES);
         let dex = Dex::parse(&bytes).unwrap();
-        assert_eq!((dex.string_count(), dex.class_count()), (0, 0));
         assert_eq!(strings(&dex), Ok(Vec::new()));
         assert_eq!(classes(&dex), Ok(Vec::new()));
     }
 
     #[test]
-    fn recognises_the_magic_number_of_every_version() {
-        assert!(sniff(b"dex\n035\0"));
-        assert!(sniff(b"dex\n041\0 and more"));
+    fn what_does_not_start_with_the_magic_number_is_malformed() {
         for not in
             [&b"dex\n035"[..], b"dex\n03x\0", b"dey\n035\0", b"DEX\n035\0", b"dex\n035\n", b""]
         {
-            assert!(!sniff(not), "{not:?}");
+            assert_eq!(Dex::parse(not).err(), Some(MALFORMED), "{not:?}");
         }
     }
 
@@ -528,7 +505,6 @@ mod tests {
     proptest! {
         #[test]
         fn random_bytes_never_panic(bytes in prop::collection::vec(any::<u8>(), 0..300)) {
-            let _ = sniff(&bytes);
             if let Ok(dex) = Dex::parse(&bytes) {
                 let _ = dex.strings().count();
                 let _ = dex.class_descriptors().count();

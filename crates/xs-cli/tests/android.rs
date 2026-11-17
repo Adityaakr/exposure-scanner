@@ -258,10 +258,10 @@ fn one_report_whatever_the_input_order_and_thread_count() {
             assert!(scan(order, threads) == reference, "{name} order, {threads} threads");
         }
     }
-    // Naming the folder is the same as naming every package in it.
-    let in_folder = scan(&[dir.path()], 4);
-    let named = scan(&sorted[..4], 4);
-    assert!(in_folder == named, "folder scan");
+    // A folder is searched for bundles only: the packages in it are scanned
+    // when they are named.
+    let in_folder: Report = serde_json::from_str(&scan(&[dir.path()], 4)).unwrap();
+    assert!(in_folder.claims.is_empty() && in_folder.evidence.is_empty(), "folder scan");
 }
 
 /// Evidence depends on the bytes of the artifact and nothing else: not on
@@ -338,7 +338,7 @@ fn a_package_that_cannot_be_read_fails_the_scan_with_its_path() {
     let locked = variant(dir.path(), "locked.apk", "org.example.locked", "io.sentry.Sentry");
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
     let readable = fs::read(&locked).is_ok();
-    let output = exposure(&["scan", text(dir.path())]);
+    let output = exposure(&["scan", text(&locked)]);
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
     // Running as root, permissions do not bind and there is nothing to test.
     if !readable {

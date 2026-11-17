@@ -90,8 +90,8 @@ impl fmt::Display for ScanError {
             Self::Path { path, error } => write!(f, "cannot read {}: {error}", path.display()),
             Self::Unsupported(path) => write!(
                 f,
-                "{} is not a macOS application bundle, an Android package (.apk) or a folder of \
-                 them; other artifact kinds are not supported yet",
+                "{} is not a macOS application bundle, a folder of them or an Android package \
+                 (.apk); other artifact kinds are not supported yet",
                 path.display()
             ),
             Self::Threads(message) => write!(f, "cannot start worker threads: {message}"),
@@ -112,9 +112,10 @@ impl From<EvidenceError> for ScanError {
 
 /// Scans the artifacts found at `paths` and returns the evidence.
 ///
-/// Each path is a macOS application bundle, an Android package (a file
-/// named `.apk`), or a folder that holds either. Giving the same artifact
-/// twice, directly or through a symbolic link, scans it once.
+/// Each path is a macOS application bundle, a folder that holds bundles, or
+/// an Android package (a file named `.apk`). A folder is not searched for
+/// packages. Giving the same artifact twice, directly or through a symbolic
+/// link, scans it once.
 ///
 /// # Errors
 ///

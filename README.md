@@ -24,6 +24,7 @@ the foundation and the macOS, Electron and Android collectors:
 | Electron apps: npm packages listed in an asar archive or in the `Contents/Resources/app` folder, literals in the app's scripts, scope labels, breadth guard | Done |
 | `exposure scan` on an Android package (`.apk`) | Done, with four witnesses: manifest components, classes defined in the DEX files, DEX string constants, and entry names |
 | Company and party resolution, HTML report, cache | Not yet (build plan tasks 9 to 14) |
+| Finding `.apk` files inside a folder that is scanned | Not yet: it comes with the scan scheduler (build plan task 9), which decides what one found package that cannot be read does to the rest of the scan |
 
 What a scan of a macOS bundle reads, and what each part is a witness of:
 
@@ -75,7 +76,7 @@ $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exp
 ```
 
 ```
-exposure scan PATH... [--json FILE] [--threads N]   scan .app bundles, .apk files, or folders of them
+exposure scan PATH... [--json FILE] [--threads N]   scan .app bundles, folders of them, or .apk files
 exposure report FILE [--json FILE]                  derive the report again from saved evidence
 exposure rules show                                 list the built-in rule pack
 exposure rules verify PACK --sig SIGNATURE          check a signed pack file offline
@@ -135,7 +136,9 @@ Android loads from a package are read (`classes.dex`, `classes2.dex`, ...);
 an entry over 256 MiB, or past 1 GiB in total, is set aside with its size;
 archives with the 64-bit zip extension and DEX container files (version 041)
 are reported as unsupported. The seed pack has no `apk_file` tokens yet, and
-split packages are scanned one file at a time. A package that cannot be read
+split packages are scanned one file at a time. A package is scanned when
+its path is given: a folder is searched for app bundles only, not for `.apk`
+files. A package that cannot be read
 to its end, or that changes while it is read, fails the scan: without the
 hash of one version of the file there is no subject to report on.
 

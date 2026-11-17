@@ -29,9 +29,11 @@
 //!   package.
 //!
 //! Budgets: at most [`MAX_BYTES`] of input, [`MAX_DEPTH`] nested elements,
-//! and [`MAX_BYTES`] of text taken out of the string pool in total, so a
-//! file whose every attribute points at one huge string costs no more than
-//! an honest one.
+//! and [`MAX_BYTES`] of text in the result in total, so a file whose every
+//! attribute points at one huge string costs no more than an honest one.
+//! Text is charged before it is made, at the most it can come to: three
+//! bytes for each byte or code unit in the pool, and the package once more
+//! for each class name that is relative to it.
 
 use crate::le::{u16_at, u32_at, usize_at};
 use crate::{Budget, FormatError};
@@ -60,14 +62,11 @@ const NO_INDEX: u32 = u32::MAX;
 
 /// Typed value kinds (`Res_value`).
 const TYPE_STRING: u8 = 0x03;
-const TYPE_INT_DEC: u8 = 0x10;
-const TYPE_INT_HEX: u8 = 0x11;
 
 /// Resource ids of the `android:` attributes the reader wants
 /// (`android.R.attr`).
 const ATTR_LABEL: u32 = 0x0101_0001;
 const ATTR_NAME: u32 = 0x0101_0003;
-const ATTR_VERSION_CODE: u32 = 0x0101_021b;
 const ATTR_VERSION_NAME: u32 = 0x0101_021c;
 
 /// What a package says about itself.
@@ -80,8 +79,6 @@ pub struct Manifest {
     pub package: Option<String>,
     /// `android:versionName`, the version shown to users.
     pub version_name: Option<String>,
-    /// `android:versionCode`, the build number.
-    pub version_code: Option<u32>,
     /// `android:label` of the application, when the manifest holds it as
     /// text. Most apps point at a string resource instead, which this
     /// reader does not resolve.
@@ -93,28 +90,18 @@ pub struct Manifest {
 /// One component or `meta-data` entry of a manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Component {
-    /// Which element declared it.
-    pub kind: ComponentKind,
     /// Its `android:name`. For a component this is the fully qualified
     /// class name; for `meta-data` it is the key as written.
     pub name: String,
 }
 
-/// The elements whose names the reader collects.
+/// What the `android:name` of a collected element is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ComponentKind {
-    /// `<activity>`
-    Activity,
-    /// `<activity-alias>`
-    ActivityAlias,
-    /// `<service>`
-    Service,
-    /// `<receiver>`
-    Receiver,
-    /// `<provider>`
-    Provider,
-    /// `<meta-data>`
-    MetaData,
+enum Named {
+    /// A class name, which may be relative to the package.
+    Class,
+    /// The key of a `meta-data` entry, taken as written.
+    Key,
 }
 
 /// What an open element is, as far as the reader cares.
@@ -245,7 +232,8 @@ impl<'a> Pool<'a> {
         let Some(encoded) = self.encoded(index) else { return Ok(None) };
         let text = match encoded {
             Encoded::Utf8(bytes) => {
-                charge(budget, bytes.len())?;
+                // A byte that is not valid becomes the three of U+FFFD.
+                charge(budget, bytes.len().saturating_mul(3))?;
                 String::from_utf8_lossy(bytes).into_owned()
             }
             Encoded::Utf16(units) => {
@@ -311,13 +299,23 @@ fn attributes<'a>(chunk: &Chunk<'a>) -> Result<impl Iterator<Item = Attribute> +
 }
 
 /// Makes a component's class name absolute, as the platform does: a name
-/// that starts with a dot or holds none is relative to the package.
-fn class_name(package: Option<&str>, name: String) -> String {
-    match package {
-        Some(package) if name.starts_with('.') => format!("{package}{name}"),
-        Some(package) if !name.contains('.') => format!("{package}.{name}"),
-        _ => name,
-    }
+/// that starts with a dot or holds none is relative to the package. The
+/// package put in front of a name is charged against `budget`.
+fn class_name(
+    package: Option<&str>,
+    name: String,
+    budget: &mut usize,
+) -> Result<String, FormatError> {
+    let Some(package) = package else { return Ok(name) };
+    let separator = if name.starts_with('.') {
+        ""
+    } else if name.contains('.') {
+        return Ok(name);
+    } else {
+        "."
+    };
+    charge(budget, package.len().saturating_add(separator.len()))?;
+    Ok(format!("{package}{separator}{name}"))
 }
 
 /// Extracts the identity and the component names from the bytes of a
@@ -396,11 +394,6 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                                 manifest.version_name = pool.text(index, &mut text_budget)?;
                             }
                         }
-                        (None, Some(ATTR_VERSION_CODE))
-                            if matches!(attribute.kind, TYPE_INT_DEC | TYPE_INT_HEX) =>
-                        {
-                            manifest.version_code = Some(attribute.data);
-                        }
                         (Some(Tag::Manifest), Some(ATTR_LABEL))
                             if manifest.label.is_none() && pool.is(name, "application") =>
                         {
@@ -415,42 +408,35 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                     }
                 }
 
-                let component = |kind| (Tag::Component, Some(kind));
-                let (tag, kind) = match parent {
+                let (tag, named) = match parent {
                     None if pool.is(name, "manifest") => (Tag::Manifest, None),
                     // The root element must be the manifest.
                     None => return Err(FormatError::Malformed),
                     Some(Tag::Manifest) if pool.is(name, "application") => (Tag::Application, None),
-                    Some(Tag::Application) if pool.is(name, "activity") => {
-                        component(ComponentKind::Activity)
-                    }
-                    Some(Tag::Application) if pool.is(name, "activity-alias") => {
-                        component(ComponentKind::ActivityAlias)
-                    }
-                    Some(Tag::Application) if pool.is(name, "service") => {
-                        component(ComponentKind::Service)
-                    }
-                    Some(Tag::Application) if pool.is(name, "receiver") => {
-                        component(ComponentKind::Receiver)
-                    }
-                    Some(Tag::Application) if pool.is(name, "provider") => {
-                        component(ComponentKind::Provider)
+                    Some(Tag::Application)
+                        if ["activity", "activity-alias", "service", "receiver", "provider"]
+                            .iter()
+                            .any(|element| pool.is(name, element)) =>
+                    {
+                        (Tag::Component, Some(Named::Class))
                     }
                     Some(Tag::Application | Tag::Component) if pool.is(name, "meta-data") => {
-                        (Tag::Other, Some(ComponentKind::MetaData))
+                        (Tag::Other, Some(Named::Key))
                     }
                     Some(_) => (Tag::Other, None),
                 };
                 open.push(tag);
-                if let (Some(kind), Some(index)) = (kind, android_name)
+                if let (Some(named), Some(index)) = (named, android_name)
                     && let Some(name) = pool.text(index, &mut text_budget)?
                     && !name.is_empty()
                 {
-                    let name = match kind {
-                        ComponentKind::MetaData => name,
-                        _ => class_name(manifest.package.as_deref(), name),
+                    let name = match named {
+                        Named::Key => name,
+                        Named::Class => {
+                            class_name(manifest.package.as_deref(), name, &mut text_budget)?
+                        }
                     };
-                    manifest.components.push(Component { kind, name });
+                    manifest.components.push(Component { name });
                 }
             }
             END_ELEMENT => {
@@ -479,8 +465,18 @@ mod tests {
     use super::*;
     use crate::testkit::{Attr, AxmlBuilder};
 
-    fn names(manifest: &Manifest) -> Vec<(ComponentKind, &str)> {
-        manifest.components.iter().map(|c| (c.kind, c.name.as_str())).collect()
+    fn names(manifest: &Manifest) -> Vec<&str> {
+        manifest.components.iter().map(|c| c.name.as_str()).collect()
+    }
+
+    /// The bytes of all the text in a manifest.
+    fn text_bytes(manifest: &Manifest) -> usize {
+        [&manifest.package, &manifest.version_name, &manifest.label]
+            .into_iter()
+            .flatten()
+            .chain(manifest.components.iter().map(|component| &component.name))
+            .map(String::len)
+            .sum()
     }
 
     /// A manifest shaped like the merged manifest of a real app.
@@ -489,7 +485,6 @@ mod tests {
             .start(
                 "manifest",
                 &[
-                    Attr::int(ATTR_VERSION_CODE, "versionCode", 21929),
                     Attr::android(ATTR_VERSION_NAME, "versionName", "2026.9.1"),
                     Attr::plain("package", "com.example.app"),
                 ],
@@ -545,28 +540,22 @@ mod tests {
     }
 
     fn expected() -> Manifest {
-        let component = |kind, name: &str| Component { kind, name: name.into() };
         Manifest {
             package: Some("com.example.app".into()),
             version_name: Some("2026.9.1".into()),
-            version_code: Some(21929),
             label: None,
-            components: vec![
-                component(ComponentKind::Activity, "com.example.app.MainActivity"),
-                component(ComponentKind::MetaData, "android.app.shortcuts"),
-                component(ComponentKind::ActivityAlias, "com.example.app.Launcher"),
-                component(
-                    ComponentKind::Service,
-                    "com.google.firebase.components.ComponentDiscoveryService",
-                ),
-                component(
-                    ComponentKind::MetaData,
-                    "com.google.firebase.components:com.google.firebase.crashlytics.CrashlyticsRegistrar",
-                ),
-                component(ComponentKind::Receiver, "com.example.lib.Receiver"),
-                component(ComponentKind::Provider, "io.sentry.android.core.SentryInitProvider"),
-                component(ComponentKind::MetaData, "com.google.android.play.billingclient.version"),
-            ],
+            components: [
+                "com.example.app.MainActivity",
+                "android.app.shortcuts",
+                "com.example.app.Launcher",
+                "com.google.firebase.components.ComponentDiscoveryService",
+                "com.google.firebase.components:com.google.firebase.crashlytics.CrashlyticsRegistrar",
+                "com.example.lib.Receiver",
+                "io.sentry.android.core.SentryInitProvider",
+                "com.google.android.play.billingclient.version",
+            ]
+            .map(|name| Component { name: name.into() })
+            .into(),
         }
     }
 
@@ -586,9 +575,9 @@ mod tests {
     fn only_components_and_meta_data_are_collected() {
         let manifest = parse(&document(AxmlBuilder::new())).unwrap();
         for name in names(&manifest) {
-            assert!(!name.1.starts_with("android.permission"), "{name:?}");
-            assert!(!name.1.starts_with("android.intent"), "{name:?}");
-            assert!(!name.1.starts_with("org.apache"), "{name:?}");
+            assert!(!name.starts_with("android.permission"), "{name:?}");
+            assert!(!name.starts_with("android.intent"), "{name:?}");
+            assert!(!name.starts_with("org.apache"), "{name:?}");
         }
     }
 
@@ -616,7 +605,7 @@ mod tests {
             .end()
             .finish();
         let manifest = parse(&bytes).unwrap();
-        assert_eq!(names(&manifest), [(ComponentKind::Activity, "com.example.Real")]);
+        assert_eq!(names(&manifest), ["com.example.Real"]);
     }
 
     /// The platform resolves `android:` attributes by resource id. A name
@@ -637,7 +626,7 @@ mod tests {
             .end()
             .finish();
         let manifest = parse(&bytes).unwrap();
-        assert_eq!(names(&manifest), [(ComponentKind::Service, "com.example.Stripped")]);
+        assert_eq!(names(&manifest), ["com.example.Stripped"]);
     }
 
     #[test]
@@ -648,7 +637,6 @@ mod tests {
                 &[
                     Attr::plain("package", "com.example.app"),
                     Attr::reference(ATTR_VERSION_NAME, "versionName", 0x7f0f_0002),
-                    Attr::android(ATTR_VERSION_CODE, "versionCode", "seven"),
                 ],
             )
             .start("application", &[Attr::android(ATTR_LABEL, "label", "Example")])
@@ -663,19 +651,22 @@ mod tests {
             .finish();
         let manifest = parse(&bytes).unwrap();
         assert_eq!(manifest.version_name, None);
-        assert_eq!(manifest.version_code, None);
         assert_eq!(manifest.label.as_deref(), Some("Example"));
         assert!(manifest.components.is_empty());
     }
 
     #[test]
     fn class_names_are_made_absolute_the_way_the_platform_does() {
+        let absolute = |package, name: &str| {
+            let mut budget = usize::MAX;
+            class_name(package, name.into(), &mut budget).unwrap()
+        };
         let package = Some("com.example");
-        assert_eq!(class_name(package, ".Main".into()), "com.example.Main");
-        assert_eq!(class_name(package, ".ui.Main".into()), "com.example.ui.Main");
-        assert_eq!(class_name(package, "Main".into()), "com.example.Main");
-        assert_eq!(class_name(package, "org.other.Main".into()), "org.other.Main");
-        assert_eq!(class_name(None, ".Main".into()), ".Main");
+        assert_eq!(absolute(package, ".Main"), "com.example.Main");
+        assert_eq!(absolute(package, ".ui.Main"), "com.example.ui.Main");
+        assert_eq!(absolute(package, "Main"), "com.example.Main");
+        assert_eq!(absolute(package, "org.other.Main"), "org.other.Main");
+        assert_eq!(absolute(None, ".Main"), ".Main");
     }
 
     #[test]
@@ -692,7 +683,7 @@ mod tests {
             .start("service", &[Attr::android(ATTR_NAME, "name", ".Sync")])
             .finish();
         let manifest = parse(&bytes).unwrap();
-        assert_eq!(names(&manifest), [(ComponentKind::Service, "com.example.app.Sync")]);
+        assert_eq!(names(&manifest), ["com.example.app.Sync"]);
     }
 
     #[test]
@@ -772,6 +763,55 @@ mod tests {
         assert!(within.len() < 3 << 20, "the string is stored once");
         assert_eq!(parse(&within).unwrap().components.len(), 5);
         assert_eq!(parse(&build(6)), Err(FormatError::OverBudget(Budget::Bytes)));
+    }
+
+    /// A UTF-8 pool is charged the same way. Its longest string is 32 767
+    /// bytes, and when none of them is valid UTF-8 each becomes the three
+    /// bytes of U+FFFD, 98 301 in all: 170 copies fit in sixteen mebibytes
+    /// and the next does not.
+    #[test]
+    fn invalid_utf8_is_charged_as_the_text_it_becomes() {
+        const LENGTH: usize = 0x7fff;
+        let long = "x".repeat(LENGTH);
+        let service = [Attr::android(ATTR_NAME, "name", long.as_str())];
+        let build = |count: usize| {
+            let mut builder =
+                AxmlBuilder::new().utf8().start("manifest", &[]).start("application", &[]);
+            for _ in 0..count {
+                builder = builder.start("service", &service).end();
+            }
+            let mut bytes = builder.end().end().finish();
+            let at = bytes.windows(LENGTH).position(|run| run == long.as_bytes()).unwrap();
+            bytes[at..at + LENGTH].fill(0xff);
+            bytes
+        };
+        let manifest = parse(&build(170)).unwrap();
+        assert_eq!(manifest.components.len(), 170);
+        assert_eq!(manifest.components[0].name, "\u{fffd}".repeat(LENGTH));
+        assert!(text_bytes(&manifest) <= MAX_BYTES);
+        assert_eq!(parse(&build(171)), Err(FormatError::OverBudget(Budget::Bytes)));
+    }
+
+    /// A relative class name is given the package, so the package is
+    /// charged again for each one: a megabyte of UTF-16 package costs three
+    /// to read, and twelve names relative to it fit in the thirteen left.
+    #[test]
+    fn the_package_put_before_a_class_name_is_budgeted() {
+        let package = "p".repeat(1 << 20);
+        let build = |count: usize| {
+            let mut builder = AxmlBuilder::new()
+                .start("manifest", &[Attr::plain("package", package.as_str())])
+                .start("application", &[]);
+            for _ in 0..count {
+                builder = builder.start("service", &[Attr::android(ATTR_NAME, "name", "S")]).end();
+            }
+            builder.end().end().finish()
+        };
+        let manifest = parse(&build(12)).unwrap();
+        assert_eq!(manifest.components.len(), 12);
+        assert_eq!(manifest.components[0].name.len(), package.len() + 2);
+        assert!(text_bytes(&manifest) <= MAX_BYTES);
+        assert_eq!(parse(&build(13)), Err(FormatError::OverBudget(Budget::Bytes)));
     }
 
     #[test]

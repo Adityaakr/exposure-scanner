@@ -86,12 +86,12 @@ pub struct Artifacts {
 
 /// Resolves `paths` to the artifacts they name or contain.
 ///
-/// A path to a file named `.apk` yields that package. A path to a bundle
-/// yields that bundle. A path to any other folder yields the bundles and the
-/// packages inside it, down to two levels, without looking inside bundles.
-/// Symbolic links to artifacts are followed once, and each list is
-/// de-duplicated by canonical path and sorted; the order affects scheduling
-/// only, never output.
+/// A path to a file named `.apk` yields that package. Every other path is
+/// resolved as [`bundles`] resolves it: a bundle yields itself and any
+/// other folder the bundles inside it. A folder is not searched for
+/// packages. A symbolic link to a package is followed once, and each list
+/// is de-duplicated by canonical path and sorted; the order affects
+/// scheduling only, never output.
 ///
 /// # Errors
 ///
@@ -103,48 +103,17 @@ pub fn artifacts(paths: &[PathBuf]) -> Result<Artifacts, ScanError> {
     for path in paths {
         let fail = |error| ScanError::Path { path: path.clone(), error };
         let resolved = fs::canonicalize(path).map_err(fail)?;
-        let metadata = fs::metadata(&resolved).map_err(fail)?;
         // As for bundles, the name the user gave decides.
-        if metadata.is_file() && (is_package_name(path) || is_package_name(&resolved)) {
+        if fs::metadata(&resolved).map_err(fail)?.is_file()
+            && (is_package_name(path) || is_package_name(&resolved))
+        {
             packages.insert(resolved);
-            continue;
+        } else {
+            // Bundles, folders of bundles, and what is neither and is refused.
+            rest.push(path.clone());
         }
-        if metadata.is_dir() && !is_bundle_name(path) && !is_bundle_name(&resolved) {
-            search_packages(&resolved, MAX_FOLDER_DEPTH, &mut packages).map_err(fail)?;
-        }
-        // Bundles, folders of bundles, and what is neither and is refused.
-        rest.push(path.clone());
     }
     Ok(Artifacts { bundles: bundles(&rest)?, packages: packages.into_iter().collect() })
-}
-
-/// Adds the packages inside `folder` to `found`, by the rules of
-/// [`search_folder`]: bundles are not looked into, links to folders are not
-/// descended into, and a sub-folder that cannot be listed is passed over.
-fn search_packages(
-    folder: &Path,
-    depth: u32,
-    found: &mut BTreeSet<PathBuf>,
-) -> std::io::Result<()> {
-    for entry in fs::read_dir(folder)? {
-        let path = entry?.path();
-        // `metadata` follows a symbolic link, which is the "followed once".
-        let Ok(metadata) = fs::metadata(&path) else { continue };
-        if metadata.is_file() {
-            if is_package_name(&path)
-                && let Ok(resolved) = fs::canonicalize(&path)
-            {
-                found.insert(resolved);
-            }
-        } else if metadata.is_dir()
-            && depth > 1
-            && !is_bundle_name(&path)
-            && !fs::symlink_metadata(&path).is_ok_and(|m| m.is_symlink())
-        {
-            let _ = search_packages(&path, depth - 1, found);
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -244,24 +213,24 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_yields_its_packages_two_levels_down_and_none_from_inside_bundles() {
+    fn a_folder_yields_its_bundles_and_none_of_the_packages_in_it() {
         let dir = package_tree();
-        let found = artifacts(&[dir.path().join("Apps")]).unwrap();
-        assert_eq!(
-            names(dir.path(), &found.packages),
-            ["Apps/Two.APK", "Apps/Utilities/three.apk", "Apps/one.apk"]
-        );
-        // The bundles are found as before.
-        assert_eq!(found.bundles, bundles(&[dir.path().join("Apps")]).unwrap());
-        assert_eq!(found.bundles.len(), 3);
+        for folder in ["Apps", "Apps/Utilities", "Elsewhere"] {
+            let found = artifacts(&[dir.path().join(folder)]).unwrap();
+            assert!(found.packages.is_empty(), "{folder}");
+            assert_eq!(found.bundles, bundles(&[dir.path().join(folder)]).unwrap(), "{folder}");
+        }
+        assert_eq!(artifacts(&[dir.path().join("Apps")]).unwrap().bundles.len(), 3);
     }
 
     #[test]
     fn a_package_path_yields_that_package_and_a_bundle_path_no_packages() {
         let dir = package_tree();
-        let found = artifacts(&[dir.path().join("Apps/Utilities/Deep/four.apk")]).unwrap();
-        assert_eq!(names(dir.path(), &found.packages), ["Apps/Utilities/Deep/four.apk"]);
-        assert!(found.bundles.is_empty());
+        for package in ["Apps/Utilities/Deep/four.apk", "Apps/Two.APK"] {
+            let found = artifacts(&[dir.path().join(package)]).unwrap();
+            assert_eq!(names(dir.path(), &found.packages), [package]);
+            assert!(found.bundles.is_empty());
+        }
 
         let found = artifacts(&[dir.path().join("Apps/One.app")]).unwrap();
         assert!(found.packages.is_empty());
@@ -274,33 +243,30 @@ mod tests {
         symlink(dir.path().join("Elsewhere/five.apk"), dir.path().join("Apps/link.apk")).unwrap();
         // A link whose own name says package decides, whatever it points at.
         symlink(dir.path().join("Apps/notes.txt"), dir.path().join("Apps/renamed.apk")).unwrap();
-        symlink(dir.path().join("Elsewhere"), dir.path().join("Apps/Shortcut")).unwrap();
         let found = artifacts(&[
-            dir.path().join("Apps"),
             dir.path().join("Apps/one.apk"),
             dir.path().join("Apps/./one.apk"),
-            dir.path().join("Elsewhere"),
+            dir.path().join("Apps/link.apk"),
+            dir.path().join("Elsewhere/five.apk"),
             dir.path().join("Apps/renamed.apk"),
         ])
         .unwrap();
         assert_eq!(
             names(dir.path(), &found.packages),
-            [
-                "Apps/Two.APK",
-                "Apps/Utilities/three.apk",
-                "Apps/notes.txt",
-                "Apps/one.apk",
-                "Elsewhere/five.apk"
-            ]
+            ["Apps/notes.txt", "Apps/one.apk", "Elsewhere/five.apk"]
         );
     }
 
     #[test]
     fn the_order_of_the_paths_given_does_not_matter_for_packages_either() {
         let dir = package_tree();
-        let forward = [dir.path().join("Apps"), dir.path().join("Elsewhere/five.apk")];
-        let backward = [dir.path().join("Elsewhere/five.apk"), dir.path().join("Apps")];
-        assert_eq!(artifacts(&forward).unwrap(), artifacts(&backward).unwrap());
+        let paths =
+            ["Apps", "Elsewhere/five.apk", "Apps/one.apk"].map(|path| dir.path().join(path));
+        let mut backward = paths.clone();
+        backward.reverse();
+        let found = artifacts(&paths).unwrap();
+        assert_eq!(found, artifacts(&backward).unwrap());
+        assert_eq!(names(dir.path(), &found.packages), ["Apps/one.apk", "Elsewhere/five.apk"]);
     }
 
     #[test]

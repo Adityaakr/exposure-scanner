@@ -9,17 +9,13 @@ use libfuzzer_sys::fuzz_target;
 use xs_formats::dex::{self, Dex};
 
 fuzz_target!(|data: &[u8]| {
-    let _ = dex::sniff(data);
     let Ok(dex) = Dex::parse(data) else { return };
 
     let mut handed_out = 0usize;
-    let mut strings = 0usize;
     for string in dex.strings() {
-        strings += 1;
         let Ok(string) = string else { break };
         handed_out += string.len() + 1;
     }
-    assert!(strings <= dex.string_count());
     assert!(handed_out <= data.len());
 
     let mut handed_out = 0usize;

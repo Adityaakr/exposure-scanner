@@ -10,8 +10,11 @@ use xs_formats::android_manifest::{self, MAX_BYTES};
 
 fuzz_target!(|data: &[u8]| {
     let Ok(manifest) = android_manifest::parse(data) else { return };
-    let text: usize = manifest.components.iter().map(|component| component.name.len()).sum();
-    // A relative class name is prefixed with the package, once per name.
-    let package = manifest.package.as_ref().map_or(0, String::len);
-    assert!(text <= MAX_BYTES + manifest.components.len() * (package + 1));
+    let text: usize = [&manifest.package, &manifest.version_name, &manifest.label]
+        .into_iter()
+        .flatten()
+        .chain(manifest.components.iter().map(|component| &component.name))
+        .map(String::len)
+        .sum();
+    assert!(text <= MAX_BYTES);
 });

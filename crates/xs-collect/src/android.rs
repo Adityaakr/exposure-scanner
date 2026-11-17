@@ -665,8 +665,7 @@ fn records(
         // be read already left its own coverage record.
         gaps.at(location, (CoverageStatus::Unrecognized, CoverageReason::ParseError));
     }
-    let version = declared(parsed.and_then(|m| m.version_name.as_ref()), text::MAX_VERSION_BYTES)
-        .or_else(|| parsed.and_then(|m| m.version_code).map(|code| code.to_string()));
+    let version = declared(parsed.and_then(|m| m.version_name.as_ref()), text::MAX_VERSION_BYTES);
     let subject = Subject {
         kind: SubjectKind::App,
         platform: Platform::Android,
@@ -1242,8 +1241,8 @@ mod tests {
         let records = scan(&ZipBuilder::new().stored(MANIFEST, &nameless).finish(), &pack);
         let artifact = artifact(&records);
         assert_eq!(artifact.subject.id, UNIDENTIFIED);
-        // Without a version name the build number stands in.
-        assert_eq!(artifact.subject.version.as_deref(), Some("42"));
+        // The build number is not a version name and does not stand in.
+        assert_eq!(artifact.subject.version, None);
         assert_eq!(coverage(&records), ["Unrecognized ParseError AndroidManifest.xml None 1"]);
     }
 
