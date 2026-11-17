@@ -244,7 +244,7 @@ fn a_linked_library_is_found_in_the_load_commands_wherever_it_is_installed() {
 
     let edge = edge(&evidence, "sdk/sentry", MatcherKind::MachoDylib);
     assert_eq!(edge.proof.token, "Sentry.framework");
-    // The example is the whole install name, as `otool -L` prints it.
+    // An install name relative to the bundle is the example, whole.
     assert_eq!(
         edge.proof.example.as_deref(),
         Some("@executable_path/../Libraries/Sentry.framework/Versions/A/Sentry")
@@ -252,6 +252,50 @@ fn a_linked_library_is_found_in_the_load_commands_wherever_it_is_installed() {
     assert_eq!(edge.proof.region, Region::LoadCommands);
     assert_eq!(edge.proof.location.as_str(), "Contents/MacOS/Example");
     assert_eq!(found(&evidence).len(), 1);
+}
+
+/// Evidence format rule 5: no path outside the artifact. An absolute install
+/// name is a path on the machine that built the binary, so only the part
+/// from the matched component on is kept.
+#[test]
+fn the_build_machine_s_path_of_a_linked_library_does_not_reach_the_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    for (install_name, kept) in [
+        (
+            "/Users/alice/Library/Developer/Xcode/DerivedData/App/Build/Products/Debug/Sentry.framework/Sentry",
+            "Sentry.framework/Sentry",
+        ),
+        (
+            "/opt/homebrew/opt/x/lib/Sentry.framework/Versions/A/Sentry",
+            "Sentry.framework/Versions/A/Sentry",
+        ),
+        ("/Users/alice/build/Sentry.framework", "Sentry.framework"),
+        ("../alice/Sentry.framework/Sentry", "Sentry.framework/Sentry"),
+        (
+            "/Users/alice/Sentry.framework/x/Sentry.framework/Sentry",
+            "Sentry.framework/x/Sentry.framework/Sentry",
+        ),
+        ("@rpath/Sentry.framework/Sentry", "@rpath/Sentry.framework/Sentry"),
+        (
+            "@loader_path/../Frameworks/Sentry.framework/Sentry",
+            "@loader_path/../Frameworks/Sentry.framework/Sentry",
+        ),
+    ] {
+        let main = Binary::new().library(install_name).build();
+        let root = bundle(dir.path(), &main, "");
+        let evidence = evidence(&root);
+
+        let edge = edge(&evidence, "sdk/sentry", MatcherKind::MachoDylib);
+        assert_eq!(edge.proof.token, "Sentry.framework");
+        assert_eq!(edge.proof.count, 1, "{install_name}");
+        assert_eq!(edge.proof.example.as_deref(), Some(kept), "{install_name}");
+        for (_, record) in &evidence {
+            let json = canon::to_string(record).unwrap();
+            for part in ["alice", "Users", "homebrew", "DerivedData"] {
+                assert!(!json.contains(part), "{part} in {json}");
+            }
+        }
+    }
 }
 
 #[test]

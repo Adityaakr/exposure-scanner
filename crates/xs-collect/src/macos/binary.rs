@@ -274,23 +274,38 @@ impl Sink for Binary<'_, '_> {
     }
 }
 
+/// The prefixes of an install name that is relative to the bundle.
+const BUNDLE_RELATIVE: [&[u8]; 3] = [b"@rpath/", b"@executable_path/", b"@loader_path/"];
+
 /// Matches the install name of a linked library against the `macho_dylib`
 /// tokens.
 ///
 /// A token names one path component: the framework folder or the library
 /// file, such as `Sentry.framework` in
 /// `@rpath/Sentry.framework/Versions/A/Sentry`. Where the library is
-/// installed varies from app to app and its name does not. The whole
-/// install name is what is recorded as the example, because that is what
-/// `otool -L` prints.
+/// installed varies from app to app and its name does not.
+///
+/// An install name that is relative to the bundle is recorded whole as the
+/// example. Any other one is a path on some machine, often the one that
+/// built the binary, and a record holds no path outside the artifact
+/// (evidence format rule 5): of it, only the part from the first component
+/// the token matched to the end is recorded, such as `Sentry.framework/Sentry`.
 fn match_library(matchers: &Matchers<'_>, scope: Scope, install_name: &[u8], out: &mut HitAcc) {
+    let relative = BUNDLE_RELATIVE.iter().any(|prefix| install_name.starts_with(prefix));
     let mut matched = HitAcc::new();
+    let mut start = 0;
     for component in install_name.split(|&byte| byte == b'/') {
-        matchers.match_value(MatcherKind::MachoDylib, scope, component, &mut matched);
-    }
-    // A token hits a library once, however many components match it.
-    for (pattern, _) in matched.iter() {
-        out.hit_value(pattern, install_name);
+        let mut here = HitAcc::new();
+        matchers.match_value(MatcherKind::MachoDylib, scope, component, &mut here);
+        // A token hits a library once, however many components match it.
+        for (pattern, _) in here.iter() {
+            if matched.count(pattern) == 0 {
+                matched.hit(pattern);
+                let from = if relative { 0 } else { start };
+                out.hit_value(pattern, install_name.get(from..).unwrap_or_default());
+            }
+        }
+        start += component.len() + 1;
     }
 }
 

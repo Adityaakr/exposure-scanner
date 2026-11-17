@@ -68,7 +68,7 @@ the token as that value is stored:
 | Matcher | The value | Example token |
 |---|---|---|
 | `apple_framework` | The name of a folder directly under `Contents/Frameworks` | `Sentry.framework` |
-| `macho_dylib` | One path component of the install name of a library a Mach-O file links. A token therefore names the framework folder or the library file, not where it is installed: `Sentry.framework` hits `@rpath/Sentry.framework/Versions/A/Sentry` | `Sentry.framework` |
+| `macho_dylib` | One path component of the install name of a library a Mach-O file links. A token therefore names the framework folder or the library file, not where it is installed: `Sentry.framework` hits `@rpath/Sentry.framework/Versions/A/Sentry`. The proof shows the whole install name when it is relative to the bundle (`@rpath/`, `@executable_path/`, `@loader_path/`), and otherwise only the part from the matched component on, so no path of the machine that built the binary is stored | `Sentry.framework` |
 | `macho_objc_class` | One name of the `__objc_classname` section: an Objective-C class, category or protocol the file defines. Swift classes are not listed there under their plain names | `MSACAppCenter` |
 | `macho_token` | Searched for in the bytes of a Mach-O file outside its sections of instructions and outside an encrypted part. Not searched for in a runtime, such as a browser engine | `{ lit = "…", at = "host" }` |
 | `content_literal` | Besides script files: searched for in a section that holds script text, such as `__BUN,__bun` | `{ lit = "sentry.javascript.", at = "word" }` |
