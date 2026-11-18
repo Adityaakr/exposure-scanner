@@ -8,11 +8,14 @@
     reason = "tests run the binary and may read the environment"
 )]
 
+mod common;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use common::report_options;
 use xs_formats::testkit::{self as formats, Attr, AxmlBuilder, DexBuilder, ZipBuilder};
 use xs_model::record::Record;
 use xs_model::{Report, canon, permission};
@@ -29,18 +32,6 @@ const GOLDEN: &str =
 fn fixtures() -> [PathBuf; 3] {
     ["macos/Skeleton.app", "macos/ElectronSkeleton.app", "android/Skeleton.apk"]
         .map(|fixture| Path::new(FIXTURES).join(fixture))
-}
-
-/// The JSON report on standard output, unless the arguments name a file
-/// for a report: a scan given neither writes its report for reading to the
-/// user's own folder instead.
-fn report_options(rest: &[&str]) -> &'static [&'static str] {
-    let named = rest.iter().take_while(|arg| **arg != "--").any(|arg| {
-        ["--json", "--html"].iter().any(|option| {
-            arg.strip_prefix(option).is_some_and(|tail| tail.is_empty() || tail.starts_with('='))
-        })
-    });
-    if named { &[] } else { &["--json", "-"] }
 }
 
 fn exposure(args: &[&str]) -> Output {

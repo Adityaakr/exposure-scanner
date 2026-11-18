@@ -376,7 +376,7 @@ Milestone 1 in detail:
 | Scan scheduler: app discovery, one largest-first queue, per-app failure handling | Done |
 | HTML report grouped by company, with every record, coverage and limits | Done |
 | Local results cache and warm scan | Done; removing entries of deleted apps automatically is a follow-up |
-| Gates: canary recall, negative-control corpus, speed gates | Done |
+| Gates: canary recall, negative-control corpus, speed gates on the reference laptop (CI runs the benchmark on fixtures for memory and determinism) | Done |
 | One-command scan: report to a private folder, opened in the browser, checklist in the terminal | Done |
 | Release preparation: threat model, dispute process, reproducible-build check, v0.1.0 | Done |
 | Exodus layer and the differential test against Exodus reports | Follow-up |
@@ -446,7 +446,10 @@ in [`rules/README.md`](rules/README.md).
 ## Testing and the six properties
 
 "It works" is defined by six properties from the project's specification.
-Each has an automated test that runs in CI.
+Each has an automated test. All run in CI except the absolute speed gates
+(cold scan under 60 s, warm scan under 5 s, scaling), which are verified on
+the reference laptop with `cargo xtask bench --strict`; CI runs the
+benchmark on the fixtures for its memory and determinism gates.
 
 | Property | Pass condition | Test | Runs |
 |---|---|---|---|

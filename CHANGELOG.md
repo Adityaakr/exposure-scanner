@@ -49,15 +49,17 @@ prebuilt binaries. Install with
 
 ### What is checked
 
-- The six properties of the specification, in CI: canary recall (every
-  token of every rule planted and found: 231 of 231), a negative-control
-  corpus of 30 real apps pinned by hash with no channel to another
-  company (a subset on every change, all nightly), byte-identical reports
-  across input order, threads and cache state, no socket opened (dependency
-  bans, symbol audit, network namespace, `strace`, macOS sandbox), the speed
-  gates (`cargo xtask bench`: cold scan under 60 s, warm under 5 s, memory
-  under 200 MB), and honesty (a report that cites a missing record is
-  refused).
+- The properties of the specification, in CI: canary recall (every token
+  of every rule planted and found: 231 of 231), a negative-control corpus
+  of 30 real apps pinned by hash with no channel to another company (a
+  subset on every change, all nightly), byte-identical reports across input
+  order, threads and cache state, no socket opened (dependency bans, symbol
+  audit, network namespace, `strace`, macOS sandbox), and honesty (a report
+  that cites a missing record is refused).
+- Speed: the absolute speed gates (cold scan under 60 s, warm scan under
+  5 s, scaling at 8 threads) are verified on the reference laptop with
+  `cargo xtask bench --strict`, not in CI. CI runs the benchmark on the
+  fixtures for its memory (under 200 MB) and determinism gates.
 - Fuzzing of every parser of hostile files, 60 s per target in CI.
 - Reproducible builds: two clean builds of one commit give the same binary
   (`cargo xtask repro`, nightly on macOS and Linux).
@@ -78,6 +80,8 @@ prebuilt binaries. Install with
 - A scan of files sees what an app ships and declares, not what it sends:
   only grades `declares` and `contains` are reported.
 - The Exodus Privacy layer and the differential test against Exodus reports
-  are not in this release.
+  are not in this release; they are follow-ups.
+- CI does not enforce the absolute speed gates; they are checked on the
+  reference laptop before a release.
 - The cache does not yet remove the entries of apps that were deleted; the
   folder can be deleted at any time.

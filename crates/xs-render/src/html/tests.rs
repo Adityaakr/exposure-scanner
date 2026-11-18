@@ -1556,6 +1556,12 @@ fn what_is_shown_of_an_app_does_not_depend_on_record_order() {
 /// steps need escaping, the statement that Droid has none, and a host Acme's
 /// SDK sends to beyond what its rule names.
 fn advised_pack() -> Pack {
+    Pack::new(vec![LoadedLayer { layer: advised_layer(), sha256: Sha256Digest::of(b"pack") }])
+        .unwrap()
+}
+
+/// The layer of [`advised_pack`].
+fn advised_layer() -> Layer {
     use xs_model::fix::{AppFix, AppKey, Fixes, NoSetting, SdkFix, Setting};
     let mut layer = layer();
     layer.fixes = Fixes {
@@ -1597,7 +1603,7 @@ fn advised_pack() -> Pack {
         name: "Declared tracking domain".into(),
         headline: false,
     });
-    Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap()
+    layer
 }
 
 /// An edge that says `subject` asks for a permission by the usage
@@ -1788,6 +1794,25 @@ fn an_app_s_own_setting_is_shown_as_its_publisher_documents_it() {
         "{entry}"
     );
     assert!(entry.contains("The rule pack names no host for AcmeAnalytics"), "{entry}");
+}
+
+/// Where the publisher documents that no setting turns a service off, the
+/// terminal checklist gives that statement as the first step, as the HTML
+/// checklist does, rather than a block list or "nothing on record".
+#[test]
+fn the_terminal_checklist_gives_the_publisher_s_statement_that_there_is_no_setting() {
+    let mut layer = advised_layer();
+    layer.fixes.apps.retain(|fix| fix.id == "droid");
+    let pack = Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap();
+    let evidence = evidence_with_access();
+    let claims = claims(&evidence, &pack);
+    let says = "In Droid: Droid documents no setting that turns off its analytics.";
+
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    assert!(section(&root, "actions").text().contains(says));
+    let todos = super::checklist(&claims, &evidence, &meta(&pack), &pack).unwrap();
+    let analytics = todos.iter().find(|todo| todo.title == "AcmeAnalytics").unwrap();
+    assert_eq!(analytics.step, says);
 }
 
 /// A block list is given for a third-party service in a counted category,

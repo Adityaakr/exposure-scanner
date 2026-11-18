@@ -8,10 +8,13 @@
     reason = "tests run the binary and may read the environment"
 )]
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+use common::report_options;
 use xs_formats::testkit::ZipBuilder;
 use xs_model::record::{EdgeType, Grade, ObjectKind, Platform, Record, SubjectKind};
 use xs_model::{Headline, Party, Report, permission};
@@ -24,18 +27,6 @@ const ADDON: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/browser/addon@example.org.xpi");
 const GOLDEN: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/browser/Extensions.report.json");
-
-/// The JSON report on standard output, unless the arguments name a file
-/// for a report: a scan given neither writes its report for reading to the
-/// user's own folder instead.
-fn report_options(rest: &[&str]) -> &'static [&'static str] {
-    let named = rest.iter().take_while(|arg| **arg != "--").any(|arg| {
-        ["--json", "--html"].iter().any(|option| {
-            arg.strip_prefix(option).is_some_and(|tail| tail.is_empty() || tail.starts_with('='))
-        })
-    });
-    if named { &[] } else { &["--json", "-"] }
-}
 
 fn exposure(args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));

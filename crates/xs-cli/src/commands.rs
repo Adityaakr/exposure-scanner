@@ -311,14 +311,22 @@ fn xdg_data_home() -> Option<PathBuf> {
 /// Opens the report in the default browser, and says whether that worked.
 ///
 /// This is the one process the scanner starts, and only after the scan is
-/// over: the system's own opener, given the report the scan just wrote.
-/// Nothing that was scanned is ever run.
+/// over: the system's own opener, called by its absolute path and never
+/// looked up through `PATH`, given the report the scan just wrote. Nothing
+/// that was scanned is ever run.
 #[expect(
     clippy::disallowed_types,
     reason = "the report is handed to the system's opener once the scan is over; nothing scanned is run"
 )]
 fn open_in_browser(page: &Path) -> bool {
-    let opener = if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" };
+    let openers: &[&str] = if cfg!(target_os = "macos") {
+        &["/usr/bin/open"]
+    } else {
+        &["/usr/bin/xdg-open", "/usr/local/bin/xdg-open"]
+    };
+    let Some(opener) = openers.iter().find(|opener| Path::new(opener).is_file()) else {
+        return false;
+    };
     std::process::Command::new(opener)
         .arg(page)
         .stdin(std::process::Stdio::null())

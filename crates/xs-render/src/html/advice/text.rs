@@ -85,18 +85,21 @@ fn channel(
     about.push_str(": ");
     about.push_str(&app_names(apps.iter().map(|(app, _)| app.title())));
 
-    // The first step the report gives: the app's own setting, then a block
-    // list, then removing the app.
+    // The first step the report gives: what the app's publisher documents
+    // about its own settings, then a block list, then removing the app.
     for &(app, claim) in &apps {
-        if let InApp::Settings(_, settings) = in_app(pack, app, &claim.category)
-            && let Some(setting) = settings.first()
-        {
-            let mut step = format!("In {}, turn it off: {}", app.title(), setting.steps);
-            if !step.ends_with('.') {
-                step.push('.');
-            }
-            return (String::from(found.name), about, step);
+        let mut step = match in_app(pack, app, &claim.category) {
+            InApp::Settings(_, settings) => match settings.first() {
+                Some(setting) => format!("In {}, turn it off: {}", app.title(), setting.steps),
+                None => continue,
+            },
+            InApp::None(none) => format!("In {}: {}", app.title(), none.says),
+            InApp::Unknown => continue,
+        };
+        if !step.ends_with('.') {
+            step.push('.');
         }
+        return (String::from(found.name), about, step);
     }
     for &(app, claim) in &apps {
         if let Some(hosts) = block_hosts(pack, claim, found.category.headline)

@@ -130,7 +130,10 @@ own report, cache and files, and nothing here tries to stop them.
 
 After a scan that wrote its report to the default place, and only when it
 runs in a terminal, `exposure` hands the report to the system's opener
-(`/usr/bin/open` on macOS, `xdg-open` elsewhere) so it shows in the browser.
+(`/usr/bin/open` on macOS; elsewhere the first of `/usr/bin/xdg-open` and
+`/usr/local/bin/xdg-open` that exists) so it shows in the browser. The opener
+is called by its absolute path only, never looked up through `PATH`; when
+there is none, no process is started and the path of the report is printed.
 That is the only process it ever starts: the path is the report it just
 wrote, nothing that was scanned is ever run, and `--no-open` turns it off.
 The ban on starting processes still holds everywhere else, and the
