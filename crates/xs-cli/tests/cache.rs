@@ -63,7 +63,7 @@ impl Scanned {
 /// A scan as the user whose home folder is `home`.
 fn at_home(home: &Path) -> Command {
     let mut command = exposure();
-    command.env("HOME", home).env_remove("XDG_CACHE_HOME").arg("scan");
+    command.env("HOME", home).env_remove("XDG_CACHE_HOME").args(["scan", "--json", "-"]);
     command
 }
 
@@ -75,7 +75,13 @@ fn cache_in(home: &Path) -> PathBuf {
 
 /// Scans `paths` with these options, with no cache folder to go by.
 fn scan(paths: &[&Path], options: &[&str]) -> Scanned {
-    let output = exposure().arg("scan").args(options).arg("--").args(paths).output().unwrap();
+    let output = exposure()
+        .args(["scan", "--json", "-"])
+        .args(options)
+        .arg("--")
+        .args(paths)
+        .output()
+        .unwrap();
     Scanned::of(&output)
 }
 

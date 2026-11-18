@@ -82,7 +82,7 @@ impl Bundle<'_> {
 /// Scans `paths` and returns the report with the terminal summary.
 fn scan(paths: &[&Path]) -> (Report, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
-        .args(["scan", "--no-cache", "--threads", "2"])
+        .args(["scan", "--no-cache", "--json", "-", "--threads", "2"])
         .args(paths)
         .output()
         .unwrap();

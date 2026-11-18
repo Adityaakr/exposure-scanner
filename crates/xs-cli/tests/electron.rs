@@ -28,13 +28,25 @@ const GOLDEN: &str =
 const SKELETON: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/macos/Skeleton.app");
 
+/// The JSON report on standard output, unless the arguments name a file
+/// for a report: a scan given neither writes its report for reading to the
+/// user's own folder instead.
+fn report_options(rest: &[&str]) -> &'static [&'static str] {
+    let named = rest.iter().take_while(|arg| **arg != "--").any(|arg| {
+        ["--json", "--html"].iter().any(|option| {
+            arg.strip_prefix(option).is_some_and(|tail| tail.is_empty() || tail.starts_with('='))
+        })
+    });
+    if named { &[] } else { &["--json", "-"] }
+}
+
 /// Runs the binary. A scan runs without the results cache, which has tests
 /// of its own: these tests neither go by what an earlier run left in the
 /// cache of whoever runs them, nor leave anything there.
 fn exposure(args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
     if let Some((&"scan", rest)) = args.split_first() {
-        command.args(["scan", "--no-cache"]).args(rest);
+        command.args(["scan", "--no-cache"]).args(report_options(rest)).args(rest);
     } else {
         command.args(args);
     }

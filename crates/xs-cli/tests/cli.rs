@@ -24,13 +24,25 @@ const PACK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../rules/dist/core.p
 const PACK_SIGNATURE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../rules/dist/core.pack.json.minisig");
 
+/// The JSON report on standard output, unless the arguments name a file
+/// for a report: a scan given neither writes its report for reading to the
+/// user's own folder instead.
+fn report_options(rest: &[&str]) -> &'static [&'static str] {
+    let named = rest.iter().take_while(|arg| **arg != "--").any(|arg| {
+        ["--json", "--html"].iter().any(|option| {
+            arg.strip_prefix(option).is_some_and(|tail| tail.is_empty() || tail.starts_with('='))
+        })
+    });
+    if named { &[] } else { &["--json", "-"] }
+}
+
 /// Runs the binary. A scan runs without the results cache, which has tests
 /// of its own: these tests neither go by what an earlier run left in the
 /// cache of whoever runs them, nor leave anything there.
 fn exposure(args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
     if let Some((&"scan", rest)) = args.split_first() {
-        command.args(["scan", "--no-cache"]).args(rest);
+        command.args(["scan", "--no-cache"]).args(report_options(rest)).args(rest);
     } else {
         command.args(args);
     }
@@ -280,6 +292,80 @@ fn the_terminal_summary_names_no_app_and_no_path() {
     assert!(summary.contains("headline: 0 companies at contacts or above"), "{summary}");
     assert!(!summary.contains("Diary") && !summary.contains("diary"), "{summary}");
     assert!(!summary.contains(text(dir.path())), "{summary}");
+}
+
+/// With no file named, a scan writes the report for reading to a private
+/// folder of the user's, says where, and prints the first entries of the
+/// checklist. It never starts a browser when it is not run in a terminal.
+#[test]
+fn a_scan_with_no_file_named_writes_the_page_to_a_private_folder_and_prints_the_checklist() {
+    let home = tempfile::tempdir().unwrap();
+    let data = home.path().join("data");
+    let android = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/android/Skeleton.apk");
+    let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
+        .env("HOME", home.path())
+        .env("XDG_DATA_HOME", &data)
+        .args(["scan", "--no-cache", FIXTURE, android])
+        .output()
+        .unwrap();
+    let said = stdout(&output);
+    let folder = if cfg!(target_os = "macos") {
+        home.path().join("Library/Application Support/exposure")
+    } else {
+        data.join("exposure")
+    };
+    let page = folder.join("report.html");
+    assert!(said.contains(&format!("Your report: {}", page.display())), "{said}");
+    assert!(said.contains("Scanned 2 apps."), "{said}");
+    assert!(said.contains("What you can do first (2 of 2):"), "{said}");
+    assert!(said.contains("1. [High] PostHog"), "{said}");
+    assert!(said.contains("2. [Low] Sentry"), "{said}");
+    assert!(!said.contains("open in your browser"), "no browser outside a terminal: {said}");
+    assert!(stderr(&output).contains("scanned 2 apps"), "{}", stderr(&output));
+    assert_eq!(fs::metadata(&folder).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(fs::metadata(&page).unwrap().permissions().mode() & 0o777, 0o600);
+    let written = fs::read_to_string(&page).unwrap();
+    assert!(written.starts_with("<!doctype html>\n") && written.contains("PostHog"));
+
+    // The next scan replaces it, and tightens a folder that was opened up.
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
+        .env("HOME", home.path())
+        .env("XDG_DATA_HOME", &data)
+        .args(["scan", "--no-cache", "--no-open", FIXTURE])
+        .output()
+        .unwrap();
+    let said = stdout(&output);
+    assert!(said.contains("What you can do first (1 of 1):"), "{said}");
+    assert_eq!(fs::metadata(&folder).unwrap().permissions().mode() & 0o777, 0o700);
+    assert!(!fs::read_to_string(&page).unwrap().contains("PostHog"));
+}
+
+/// An app names itself, and the checklist prints that name on the
+/// terminal. A name made of escape sequences must not reach it as such.
+#[test]
+fn an_app_name_cannot_put_escape_sequences_on_the_terminal() {
+    let home = tempfile::tempdir().unwrap();
+    let app = variant(home.path(), "Odd.app", "org.example.odd", b"x");
+    let plist = fs::read_to_string(app.join("Contents/Info.plist")).unwrap();
+    let name = "<key>CFBundleName</key>\n\t<string>Skeleton</string>";
+    let hostile = "<key>CFBundleName</key><string>Odd&#27;[2J&#27;]0;owned&#7;&#8238;App</string>";
+    let renamed = plist.replacen(name, hostile, 1);
+    assert_ne!(renamed, plist, "the fixture names itself Skeleton");
+    fs::write(app.join("Contents/Info.plist"), renamed).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
+        .env("HOME", home.path())
+        .env("XDG_DATA_HOME", home.path().join("data"))
+        .args(["scan", "--no-cache", "--no-open"])
+        .arg(&app)
+        .output()
+        .unwrap();
+    let said = stdout(&output);
+    assert!(said.contains("[Low] Sentry"), "{said}");
+    assert!(said.contains("Odd\u{FFFD}[2J\u{FFFD}]0;owned\u{FFFD}\u{FFFD}App"), "{said}");
+    for byte in output.stdout.iter().chain(&output.stderr) {
+        assert!(*byte == b'\n' || !byte.is_ascii_control(), "control byte {byte:#x}: {said}");
+    }
 }
 
 /// A scan says what it covered on a line of its own. Given a path, that is

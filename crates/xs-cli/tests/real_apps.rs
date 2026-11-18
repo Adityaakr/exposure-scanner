@@ -119,7 +119,7 @@ fn scan(app: &Pinned) -> Option<Report> {
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
-        .args(["scan", "--no-cache", "--threads", "3"])
+        .args(["scan", "--no-cache", "--json", "-", "--threads", "3"])
         .arg(&bundle)
         .output()
         .unwrap();

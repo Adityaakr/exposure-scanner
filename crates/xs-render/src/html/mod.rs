@@ -210,6 +210,30 @@ pub fn html(
     document(&SECTIONS, &Input { view: &view, evidence, meta, pack })
 }
 
+/// The checklist of the report, "What you can do", in plain words: one
+/// entry per thing to do, with what exposes the most first.
+///
+/// It is the checklist [`html`] writes for the same input, in the same
+/// order, and each entry gives the first of the steps the report gives for
+/// it. Every value from a scanned app is made safe to print on a terminal.
+///
+/// # Errors
+///
+/// Fails where [`html`] fails.
+pub fn checklist(
+    claims: &[Claim],
+    evidence: &EvidenceSet,
+    meta: &ReportMeta,
+    pack: &Pack,
+) -> Result<Vec<crate::Todo>, RenderError> {
+    check_honest(claims, evidence)?;
+    if meta.packs != pack.refs() {
+        return Err(RenderError::PackMismatch);
+    }
+    let view = View::new(claims, evidence, pack)?;
+    Ok(advice::text::todos(pack, &view))
+}
+
 /// Writes the page: the head, a link to each section that is on the page,
 /// and those sections.
 fn document(sections: &[Section], input: &Input<'_>) -> Result<String, RenderError> {
