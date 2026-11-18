@@ -1,0 +1,44 @@
+# The negative-control corpus (design report, section 7, property 2):
+# real apps that ship no code of another company than their publisher. A
+# scan of them must find no channel to any other company, at any grade
+# and any confidence. They are never stored in this repository: each line
+# pins one by the SHA-256 of its file, the name it has in the cache, where
+# its publisher offers it, the set it is in, and for a zip the app inside.
+#
+#   cargo xtask fixtures negatives --dir DIR [--all]
+#   EXPOSURE_NEGATIVE_CACHE=DIR [EXPOSURE_NEGATIVE_SET=all] cargo test -p exposure --test negative_corpus
+#
+# Set `every-change` is scanned by CI on every change; `nightly` only in the
+# nightly run, which scans every app. A zip is unpacked into <file>.d.
+#
+# sha256  file  url  set  app
+d09124150e0d3714745ffa4b5b08908e9639ca97e53acd7c47aafe4df0e352fb  bitwarden-android-2026.9.1-fdroid.apk  https://github.com/bitwarden/android/releases/download/v2026.9.1-bwpm/com.x8bit.bitwarden-fdroid.apk  every-change  -
+0ab2b9b5103bd3173cb4540f9a2fe660d93a44ac17254e7d13b26d1d8f012192  newpipe-0.29.3.apk  https://github.com/TeamNewPipe/NewPipe/releases/download/v0.29.3/NewPipe_v0.29.3.apk  every-change  -
+9459896e516ac6c34685b38111dc456a3d1a4e49c964e40bc8f8af8fdc3b17db  netnewswire-7.2.1.zip  https://github.com/Ranchero-Software/NetNewsWire/releases/download/mac-7.2.1/NetNewsWire7.2.1.zip  every-change  NetNewsWire.app
+e684e1ce0c60d7cffd3a2b182dc37bd7e88c29967a64a431a2c71be65b1d27e0  maccy-2.8.0.zip  https://github.com/p0deje/Maccy/releases/download/2.8.0/Maccy.app.zip  every-change  Maccy.app
+61ebef7a7cb75ed4e8facbe185ea23f94cc17f8d850177099a693b1578112d0a  bitwarden-desktop-2026.10.4-universal.zip  https://github.com/bitwarden/clients/releases/download/desktop-v2026.10.4/Bitwarden-2026.10.4-universal-mac.zip  nightly  Bitwarden.app
+01ce15aefe352ed04362f63def26e50964dc756e16971c9d9544ae6a513db231  cromite-153.0.8010.37-arm.apk  https://github.com/uazo/cromite/releases/download/v153.0.8010.37-11507ac1061b5ea227806f5e84db5a57df6ccf6a/arm_ChromePublic.apk  nightly  -
+fa1de4d7ed520036eb389e5dbd4ade4f752f8dc741f60288a8fd11c686faa7e2  rethinkdns-0.5.8-izzy-arm64-v8a.apk  https://github.com/celzero/rethink-app/releases/download/v0.5.8/rethink-v0.5.8-izzy-arm64-v8a.apk  nightly  -
+9e77a65e8ef72b189cffeb7983dea15ece654ef5afbf8ae8790c56cbbce9392d  personaldnsfilter-1.50.61.5.apk  https://github.com/IngoZenz/personaldnsfilter/releases/download/1.50.61.5/DNSFilter_1.50.61.5.apk  every-change  -
+e12262fb1a60c5658ea8c39ca71fa8969a94768e44e981a76b65312fe636a239  trackercontrol-2026110101.apk  https://github.com/TrackerControl/tracker-control-android/releases/download/2026110101/TrackerControl-githubRelease-latest.apk  every-change  -
+bf9effe07b53cd2c02446543106b503601e5835f6d038d94655f331dfc93f55a  exodus-privacy-3.4.0.apk  https://github.com/Exodus-Privacy/exodus-android-app/releases/download/release-v3.4.0/app-release.apk  nightly  -
+fa091c91912c0d56ec3553394fac4158f9a9d178e93bcbb35419601d788cb528  aegis-3.4.3.apk  https://github.com/beemdevelopment/Aegis/releases/download/v3.4.3/aegis-v3.4.3.apk  every-change  -
+8aaac6a0c55a9de760147990856726e197efbbcdc5ce2f6bfb4d4ab2a3d65f74  keepassdx-4.5.8-libre.apk  https://github.com/Kunzisoft/KeePassDX/releases/download/4.5.8/KeePassDX-4.5.8-libre.apk  nightly  -
+72fdb596045116bf5ba1b5bdf5b26fddb9acc0bd074ad9f2da9eb0ae85e83a4e  termux-0.118.3-arm64-v8a.apk  https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3%2Bgithub-debug_arm64-v8a.apk  nightly  -
+9dacaec3125d65ab03d803a7285a6ce14211c3a50921defbf78a98f643cbe7d5  organicmaps-2026.11.11-39.apk  https://github.com/organicmaps/organicmaps/releases/download/2026.11.11-39-android/OrganicMaps-26111139-web-release.apk  nightly  -
+0ad70b89b2b48bb0b1ae29115eee57d75277ffeccf95a0d3db98945d740a6d9e  mullvadvpn-2026.12.apk  https://github.com/mullvad/mullvadvpn-app/releases/download/android/2026.12/MullvadVPN-2026.12.apk  nightly  -
+b585b59b6b1f53f23cef5eab33ef80d1d5bd3581fa8e78acc064c33a23ec8df9  k9mail-25.0.apk  https://github.com/thunderbird/thunderbird-android/releases/download/K9MAIL_25_0/k9mail-25.0.apk  nightly  -
+dd1d87612745c17c469559e56043c7838a701035d33783999ee9bd2441fe92ee  fossify-gallery-1.14.2-arm64-v8a.apk  https://github.com/FossifyOrg/Gallery/releases/download/1.14.2/gallery-42-foss-arm64-v8a-release.apk  nightly  -
+ade8f5e0ebf47e5ea9e2478844f150c68e43def192b6f8be05d0329d25ec0917  vscodium-1.143.17232-darwin-arm64.zip  https://github.com/VSCodium/vscodium/releases/download/1.143.17232/VSCodium-darwin-arm64-1.143.17232.zip  nightly  VSCodium.app
+e77388cad55f2e9da95a220a89206a6c58f865874a629b7c3ea3c162f5692224  wezterm-20240203-110809.zip  https://github.com/wezterm/wezterm/releases/download/20240203-110809-5046fc22/WezTerm-macos-20240203-110809-5046fc22.zip  nightly  WezTerm-macos-20240203-110809-5046fc22/WezTerm.app
+d770e81597566dd2d2363feb350f808c7a92e363df95c51e48140eb30e452cc9  ice-0.11.12.zip  https://github.com/jordanbaird/Ice/releases/download/0.11.12/Ice.zip  nightly  Ice.app
+71fb7dd90a9bb96de2990499da280ce03e13cbd559a77477515191864977a65c  keycastr-0.11.1.zip  https://github.com/keycastr/keycastr/releases/download/v0.11.1/KeyCastr.app.zip  every-change  KeyCastr.app
+0b9b8b11edeb3237e3224c619a6f6bfb5e5996a477048be6ff4b98b0346aedc9  rectangle-2.0.4.zip  https://github.com/rxhanson/Rectangle/releases/download/v2.0.4/Rectangle2.0.4.zip  nightly  Rectangle.app
+f4554e69e1179cfcd908873018423f2d7e2b588d3556cbecdd78788866d97aab  pearcleaner-5.4.3-arm.zip  https://github.com/alienator88/Pearcleaner/releases/download/5.4.3/Pearcleaner-arm.zip  nightly  Pearcleaner.app
+514e97faab3843cdfb8b1859b91333704639a1a2ce580e4f684d75efe007d386  loop-1.4.2.zip  https://github.com/mrkai77/Loop/releases/download/1.4.2/Loop.zip  nightly  Loop.app
+cbdcab38c14e5b1cb359537faf0f274b7d77aeb2d3cfef1982866e2084880437  amethyst-0.25.0.zip  https://github.com/ianyh/Amethyst/releases/download/v0.25.0/Amethyst.zip  nightly  Amethyst.app
+1e130f5322329ee75ed39c921ed4ea366101cd4bfb5c495d15735db90b961a73  macpass-0.8.2.zip  https://github.com/MacPass/MacPass/releases/download/0.8.2/MacPass-0.8.2.zip  nightly  MacPass.app
+96cc95553ee63557f7ec58f41a568ff1fe5bca95b6bcd3883709fa8337c685d4  qlmarkdown-1.5.7.zip  https://github.com/sbarex/QLMarkdown/releases/download/1.5.7/QLMarkdown.zip  nightly  QLMarkdown.app
+fcdec490782d6587046304044951c63de49ac422fc63892a6fab2dd7bc70c0cd  swiftbar-2.1.1.zip  https://github.com/swiftbar/SwiftBar/releases/download/v2.1.1/SwiftBar.v2.1.1.b597.zip  nightly  SwiftBar.app
+e4f6ccf7606673ee611870bfb1d4cc8be86a508058db8f9bb5cf41e997ed61ca  hot-1.9.4.zip  https://github.com/macmade/Hot/releases/download/1.9.4/Hot.zip  nightly  Hot.app
+46b034d3052dc10ff6e1b4024ab5b9b2795dcb1bb3acf4ecad33cbce3f22219c  catima-2.45.2.apk  https://github.com/CatimaLoyalty/Android/releases/download/v2.45.2/app-foss-release.apk  nightly  -

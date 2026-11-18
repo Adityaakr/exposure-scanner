@@ -1,10 +1,11 @@
 //! The scan benchmark: how the scan scales with threads, how much memory it
 //! takes, and how long it takes when nothing has changed.
 //!
-//! Design report, section 6.5, four of its gates:
+//! Design report, section 6.5, five of its gates:
 //!
 //! | Benchmark | Method | Gate |
 //! |---|---|---|
+//! | Cold scan | Empty results cache, page cache dropped where that needs no password | Under 60 s |
 //! | Scaling | 1, 2, 4, 8 threads on a size-sorted list | At least 3x at 8 threads |
 //! | Memory | Peak resident size during the scan | Under 200 MB |
 //! | Warm scan | Populated cache, no changes | Under 5 s |
@@ -21,13 +22,21 @@
 //! so that every measured run reads from the page cache: this benchmark is
 //! about the schedule, not about the disk.
 //!
+//! The cold scan is the first scan a person runs: the results cache is
+//! empty, so every app is read. Before it, the operating system is asked to
+//! drop its page cache (`sudo -n purge` on macOS, `drop_caches` on Linux),
+//! so the files come from the disk; where `sudo` would ask for a password
+//! that is skipped and said, and the scan reads from the page cache.
+//!
 //! The scaling runs keep no results cache, or all but the first would read
 //! nothing. The warm scan is measured after them: one run fills a cache in
 //! a folder of the benchmark's own, never the user's, and the runs after it
 //! find every app unchanged. The scan keeps its cache in the user's cache
 //! folder and takes no option for another, so those runs are given a home
 //! folder of the benchmark's own. Its `Applications` leads to the user's,
-//! so that a scan of the installed apps covers the same apps.
+//! and so does its `Library/Application Support`, where the browsers keep
+//! their profiles, so that a scan of the installed apps covers the same apps
+//! and the same extensions. Its `Library/Caches` is its own.
 //!
 //! The scanner has no clock and takes no measurements of itself; all of that
 //! is here, in tooling that never ships.
@@ -54,6 +63,8 @@ const MIN_SPEEDUP_HUNDREDTHS: u128 = 300;
 const MAX_PEAK_BYTES: u64 = 200_000_000;
 /// The warm-scan gate: a scan that finds nothing changed takes less.
 const MAX_WARM: Duration = Duration::from_secs(5);
+/// The cold-scan gate: a scan with an empty results cache takes less.
+const MAX_COLD: Duration = Duration::from_secs(60);
 /// The least a scan has to read for its scaling to mean anything. Below
 /// this, starting the process and the threads is most of the time.
 const MIN_SCALING_BYTES: u64 = 1 << 30;
@@ -253,6 +264,18 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
         std::os::unix::fs::symlink(&apps, home.join("Applications"))
             .map_err(|error| format!("cannot link {}: {error}", apps.display()))?;
     }
+    #[cfg(unix)]
+    if let Some(support) = std::env::home_dir().map(|home| home.join("Library/Application Support"))
+        && support.is_dir()
+    {
+        let library = home.join("Library");
+        fs::create_dir(&library)
+            .and_then(|()| {
+                std::os::unix::fs::symlink(&support, library.join("Application Support"))
+            })
+            .map_err(|error| format!("cannot link {}: {error}", support.display()))?;
+    }
+    let disk_cold = drop_page_cache();
     let filled = run(exposure, paths, most, Some(&home), dir)?;
     same_report &= filled.report == first.report;
     peak = peak.max(filled.peak_bytes);
@@ -308,6 +331,20 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
         ),
     );
     let seconds = |elapsed: Duration| hundredths(elapsed.as_millis() / 10);
+    check(
+        "cold scan",
+        Some(filled.elapsed < MAX_COLD),
+        format!(
+            "{} s with an empty results cache, {} (gate: under {} s)",
+            seconds(filled.elapsed),
+            if disk_cold {
+                "the page cache dropped first"
+            } else {
+                "from the page cache: dropping it needs sudo without a password"
+            },
+            MAX_COLD.as_secs()
+        ),
+    );
     match warm.as_ref().map(|warm| (warm.elapsed, cache_use(&warm.summary))) {
         // A scan that read every app again is not a warm scan, however long
         // it took: there is nothing here to hold against the gate.
@@ -349,6 +386,23 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
         return Err(format!("--strict: these gates could not be checked: {}", skipped.join(", ")));
     }
     Ok(())
+}
+
+/// Asks the operating system to drop its page cache, so the next scan
+/// reads from the disk, and says whether it did. Never asks for a password.
+fn drop_page_cache() -> bool {
+    let mut command = Command::new("sudo");
+    command.arg("-n");
+    if cfg!(target_os = "macos") {
+        command.arg("purge");
+    } else {
+        command.args(["sh", "-c", "sync && echo 3 > /proc/sys/vm/drop_caches"]);
+    }
+    command
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 #[cfg(test)]
