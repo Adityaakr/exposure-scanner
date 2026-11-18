@@ -260,9 +260,11 @@ pub(crate) fn in_app<'a>(pack: &'a Pack, app: &App<'_>, category: &str) -> InApp
 /// when blocking is advice the report gives: for a third-party SDK in a
 /// category the headline counts, the hosts its rule names and those the
 /// rule pack adds; for a domain an app's privacy manifest declares for
-/// tracking, that domain. `None` when blocking is not advice for it at all:
-/// a crash reporter or an update feed is not blocked on the report's word,
-/// and nor is anything of the app's own publisher (project spec, "Fixes").
+/// tracking, that domain, even when no company is named for it, since the
+/// app itself says it tracks through it. `None` when blocking is not advice
+/// for it at all: a crash reporter or an update feed is not blocked on the
+/// report's word, and nor is anything of the app's own publisher (project
+/// spec, "Fixes").
 ///
 /// `counted` is whether the claim's category is one the headline counts.
 pub(crate) fn block_hosts<'a>(
@@ -270,11 +272,11 @@ pub(crate) fn block_hosts<'a>(
     claim: &'a Claim,
     counted: bool,
 ) -> Option<Vec<&'a str>> {
-    if claim.edge != EdgeType::Channel || claim.party != Party::Third {
+    if claim.edge != EdgeType::Channel || claim.party == Party::First {
         return None;
     }
     match claim.object.kind {
-        ObjectKind::Sdk if counted => {
+        ObjectKind::Sdk if counted && claim.party == Party::Third => {
             let mut hosts: Vec<&str> = Vec::new();
             if let Some(rule) = pack.rule(&claim.object.id) {
                 hosts.extend(
@@ -302,6 +304,11 @@ pub(crate) fn block_hosts<'a>(
 fn is_tracking_domain(category: &str) -> bool {
     declared::category(declared::TRACKING_DOMAIN) == Some(category)
 }
+
+/// What blocking a declared tracking domain may cost when who runs it is
+/// not established.
+const UNKNOWN_HOST: &str = " This domain may be a server of the app's own publisher: blocking it \
+                            can break features of the app.";
 
 fn is_update_feed(category: &str) -> bool {
     declared::category(declared::UPDATE_FEED) == Some(category)
@@ -447,6 +454,9 @@ fn block_step(page: &mut Markup, pack: &Pack, app: &App<'_>, finding: &Finding<'
                 ". Blocking can stop features that rely on the service, and does not reach \
                  what the app sends through its own servers.",
             );
+            if claim.party == Party::Unknown {
+                page.raw(UNKNOWN_HOST);
+            }
         }),
         Some(_) => step(page, |page| {
             page.raw("The rule pack names no host for ");
@@ -643,7 +653,9 @@ impl Entry<'_, '_> {
 fn checklist<'v, 'a>(view: &'v View<'a>) -> Vec<(Priority, String, Entry<'v, 'a>)> {
     let mut entries: Vec<(Priority, String, Entry<'v, 'a>)> = Vec::new();
     for found in &view.found {
-        if found.edge != EdgeType::Channel || found.company.is_none() {
+        if found.edge != EdgeType::Channel
+            || (found.company.is_none() && !is_tracking_domain(category_id(found)))
+        {
             continue;
         }
         let outside = found.apps.values().any(|app| app.claim.party != Party::First);
@@ -903,6 +915,9 @@ fn channel_entry(
                 page.element("code", &[], host);
             }
             page.raw(". Blocking can stop features that rely on it.");
+            if group.iter().any(|(_, claim)| claim.party == Party::Unknown) {
+                page.raw(UNKNOWN_HOST);
+            }
         });
     }
     let third = found.apps.values().any(|app| app.claim.party == Party::Third);

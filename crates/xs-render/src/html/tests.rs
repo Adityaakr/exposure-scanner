@@ -1592,6 +1592,11 @@ fn advised_pack() -> Pack {
             sources: vec!["https://acme.example/hosts".into()],
         }],
     };
+    layer.categories.push(Category {
+        id: "tracking_domain".into(),
+        name: "Declared tracking domain".into(),
+        headline: false,
+    });
     Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap()
 }
 
@@ -1825,6 +1830,60 @@ fn a_block_list_names_the_hosts_and_a_firewall_of_the_platform() {
             "Nothing to do: a component is a library with no service of its own behind it."
         )
     );
+}
+
+/// A domain an app's own privacy manifest declares for tracking is given a
+/// block list even when no company is named for it, since the app itself
+/// says it tracks through it, with the warning that it may be the
+/// publisher's own server. It is on the checklist at Medium. A tracking
+/// domain under the app's own publisher is not blocked.
+#[test]
+fn a_declared_tracking_domain_without_a_company_can_be_blocked_with_a_warning() {
+    let notes = subject(Platform::Macos, "org.example.notes", 1);
+    let mail = subject(Platform::Macos, "com.google.mail", 2);
+    let tracking = |subject: &Subject, host: &str| {
+        let Record::Edge(mut edge) = feed(subject, host) else { unreachable!() };
+        edge.rule = declared::TRACKING_DOMAIN.into();
+        edge.grade = MatcherKind::PrivacyManifest.grade();
+        edge.proof.matcher = MatcherKind::PrivacyManifest;
+        edge.proof.token = "NSPrivacyTrackingDomains".into();
+        edge.proof.location = RelPath::new("Contents/Resources/PrivacyInfo.xcprivacy").unwrap();
+        Record::Edge(edge)
+    };
+    let mut evidence = evidence_with_access();
+    evidence.insert(tracking(&notes, "track.example.net")).unwrap();
+    evidence.insert(tracking(&mail, "ads.google.com")).unwrap();
+    let pack = advised_pack();
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+
+    let warning = "This domain may be a server of the app's own publisher: blocking it can \
+                   break features of the app.";
+    let step = finding(&root, &claims, "org.example.notes", "track.example.net").text();
+    assert!(
+        step.contains(
+            "Block this host for Notes with an outbound firewall such as LuLu (free) or Little \
+             Snitch: track.example.net."
+        ),
+        "{step}"
+    );
+    assert!(step.contains(warning), "{step}");
+
+    let own = finding(&root, &claims, "com.google.mail", "ads.google.com").text();
+    assert!(!own.contains("Block"), "{own}");
+
+    let heads = checklist(&root);
+    assert!(heads.iter().any(|head| head == "Medium track.example.net Declared tracking domain"));
+    assert!(!heads.iter().any(|head| head.contains("ads.google.com")), "{heads:?}");
+    let actions = section(&root, "actions").text();
+    assert!(
+        actions.contains(
+            "Block this host for Notes with an outbound firewall such as LuLu (free) or Little \
+             Snitch: track.example.net. Blocking can stop features that rely on it."
+        ),
+        "{actions}"
+    );
+    assert!(actions.contains(warning), "{actions}");
 }
 
 /// A permission is turned off where the platform keeps the switch: a pane
