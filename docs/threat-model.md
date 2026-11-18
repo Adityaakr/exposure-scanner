@@ -129,11 +129,12 @@ own report, cache and files, and nothing here tries to stop them.
 ### The one process the scanner starts
 
 After a scan that wrote its report to the default place, and only when it
-runs in a terminal, `exposure` hands the report to the system's opener
-(`/usr/bin/open` on macOS; elsewhere the first of `/usr/bin/xdg-open` and
-`/usr/local/bin/xdg-open` that exists) so it shows in the browser. The opener
-is called by its absolute path only, never looked up through `PATH`; when
-there is none, no process is started and the path of the report is printed.
+runs in a terminal on macOS, `exposure` hands the report to the system's
+opener, `/usr/bin/open`, so it shows in the browser. The opener is called by
+its absolute path only, never looked up through `PATH`. On other systems no
+process is started and the path of the report is printed: on Linux, the
+standard library's process spawning would import `socketpair`, `sendmsg` and
+`recvmsg`, and the binary imports no socket function at all.
 That is the only process it ever starts: the path is the report it just
 wrote, nothing that was scanned is ever run, and `--no-open` turns it off.
 The ban on starting processes still holds everywhere else, and the

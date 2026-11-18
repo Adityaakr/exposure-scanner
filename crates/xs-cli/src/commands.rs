@@ -311,29 +311,30 @@ fn xdg_data_home() -> Option<PathBuf> {
 /// Opens the report in the default browser, and says whether that worked.
 ///
 /// This is the one process the scanner starts, and only after the scan is
-/// over: the system's own opener, called by its absolute path and never
-/// looked up through `PATH`, given the report the scan just wrote. Nothing
-/// that was scanned is ever run.
+/// over: macOS's own opener, called by its absolute path and never looked
+/// up through `PATH`, given the report the scan just wrote. Nothing that was
+/// scanned is ever run.
+#[cfg(target_os = "macos")]
 #[expect(
     clippy::disallowed_types,
     reason = "the report is handed to the system's opener once the scan is over; nothing scanned is run"
 )]
 fn open_in_browser(page: &Path) -> bool {
-    let openers: &[&str] = if cfg!(target_os = "macos") {
-        &["/usr/bin/open"]
-    } else {
-        &["/usr/bin/xdg-open", "/usr/local/bin/xdg-open"]
-    };
-    let Some(opener) = openers.iter().find(|opener| Path::new(opener).is_file()) else {
-        return false;
-    };
-    std::process::Command::new(opener)
+    std::process::Command::new("/usr/bin/open")
         .arg(page)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|status| status.success())
+}
+
+/// Elsewhere no process is started, and the summary prints the path. On
+/// Linux the standard library's process spawning imports `socketpair`,
+/// `sendmsg` and `recvmsg`, which the binary must not import at all.
+#[cfg(not(target_os = "macos"))]
+fn open_in_browser(_page: &Path) -> bool {
+    false
 }
 
 /// What a scan that wrote its report to the default place tells the person
