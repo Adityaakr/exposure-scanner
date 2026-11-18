@@ -120,7 +120,9 @@ not need to sign anything.
 
 ## Reporting a wrong finding
 
-Open an issue with:
+Use the [dispute form](https://github.com/Adityaakr/exposure-scanner/issues/new?template=dispute.yml);
+[docs/disputes.md](docs/disputes.md) says how a dispute is settled and what
+changes when it is upheld. The form asks for:
 
 - the app's name, version and platform, and where it can be downloaded;
 - the SHA-256 of the `.apk` file, or of the bundle's main executable;

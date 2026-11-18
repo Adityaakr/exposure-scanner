@@ -163,7 +163,11 @@ $ exposure report report.json --html again.html   # the same page, from the save
 ```
 
 `--html FILE` writes the report for reading and `--json FILE` the one a
-program reads; both can be asked for at once. The HTML report is one file
+program reads; both can be asked for at once. With neither, `exposure scan`
+writes the page to `report.html` in a folder only you can read
+(`~/Library/Application Support/exposure` on macOS), opens it in your
+browser when it runs in a terminal, and prints the first entries of
+[What you can do](#what-you-can-do). The HTML report is one file
 that opens in any browser, also on a phone, and has a layout for print. A
 sample, the page for the fixtures of this repository, is
 [`tests/fixtures/report/Fixtures.report.html`](../tests/fixtures/report/Fixtures.report.html).

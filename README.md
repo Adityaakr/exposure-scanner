@@ -7,17 +7,19 @@ through which apps, with the evidence for every finding.**
 [![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
 
 > [!IMPORTANT]
-> **This project is under active development.** Milestone 1 is not finished,
-> there is no release yet, and commands, the report format and its output may
-> change between commits. Suggestions, bug reports and contributions are
-> welcome: open an [issue](https://github.com/Adityaakr/exposure-scanner/issues)
-> or read [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+> **This project is under active development.** Milestone 1 is complete and
+> released as v0.1.0, from source only (see the [changelog](CHANGELOG.md)).
+> Commands, the report format and its output may still change between
+> versions. Suggestions, bug reports and contributions are welcome: open an
+> [issue](https://github.com/Adityaakr/exposure-scanner/issues) or read
+> [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 ## Contents
 
 - [What it is](#what-it-is)
 - [What it finds](#what-it-finds)
 - [How it works](#how-it-works)
+- [Install](#install)
 - [Quick start](#quick-start)
 - [Usage](#usage)
 - [Reading the report](#reading-the-report)
@@ -27,6 +29,7 @@ through which apps, with the evidence for every finding.**
 - [Architecture](#architecture)
 - [Rule packs](#rule-packs)
 - [Testing and the six properties](#testing-and-the-six-properties)
+- [Releases and verifying a build](#releases-and-verifying-a-build)
 - [Licences and data sources](#licences-and-data-sources)
 - [Contributing](#contributing)
 - [Acknowledgements](#acknowledgements)
@@ -45,9 +48,10 @@ statement links to a record you can check by hand.
 - **Evidence, not guesses.** Each finding carries a grade that says how
   strong its evidence is, and cites the raw records it rests on: the marker,
   the file, the table, how often.
-- **Local and inert.** A scan reads files. It executes nothing, changes no
-  app, and contains no network code at all. All it writes is the report and a
-  private cache, so that the next scan reads only the apps that changed.
+- **Local and inert.** A scan reads files. It executes nothing it scans,
+  changes no app, and contains no network code at all. All it writes is the
+  report and a private cache, so that the next scan reads only the apps that
+  changed.
 - **Reproducible.** The same apps and the same rule pack give the same
   report, byte for byte, on any machine and with any number of threads.
 
@@ -136,35 +140,81 @@ Everything before the evidence set touches the file system; everything after
 it is a pure function. That split is enforced by the crate layout (see
 [Architecture](#architecture)).
 
+## Install
+
+`exposure` is built from source; there are no prebuilt binaries. On a Mac
+with Apple silicon (macOS is the first supported platform):
+
+1. Install Apple's command-line tools, which hold the linker and `git`:
+
+   ```console
+   $ xcode-select --install
+   ```
+
+2. Install Rust 1.97 or later with [rustup](https://rustup.rs):
+
+   ```console
+   $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   $ source "$HOME/.cargo/env"
+   ```
+
+   If Rust is already installed, `rustup update stable` brings it up to date.
+
+3. Install `exposure`:
+
+   ```console
+   $ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exposure
+   ```
+
+   `--locked` builds with the exact dependency versions the project tests.
+   The build takes a minute or two, and puts `exposure` in `~/.cargo/bin`.
+   While the repository is private, `git` asks for your GitHub credentials;
+   `gh auth setup-git` lets it use those of the GitHub CLI. To install the
+   release tag rather than the latest commit, add `--tag v0.1.0`.
+
+To build from a clone instead, `cargo build --release --package exposure`
+gives `target/release/exposure`; the clone's
+[`rust-toolchain.toml`](rust-toolchain.toml) pins the exact toolchain.
+
 ## Quick start
 
-Build from source. You need the Rust toolchain pinned in
-[`rust-toolchain.toml`](rust-toolchain.toml); `rustup` installs it on first
-use.
-
 ```console
-$ git clone https://github.com/Adityaakr/exposure-scanner.git
-$ cd exposure-scanner
-$ cargo build --release --package exposure
-$ target/release/exposure scan --html report.html --json report.json
-$ open report.html
+$ exposure scan
 ```
 
-On macOS, `exposure scan` without a path scans the apps in `/Applications`
-and `~/Applications`, and the extensions in your browser profiles. A
+That is all. On macOS it reads the apps in `/Applications` and
+`~/Applications` and the extensions in your browser profiles, writes the
+report to `~/Library/Application Support/exposure/report.html`, opens it in
+your browser, and prints what to do first. The output looks like this (the
+apps and counts here are made up):
+
+```text
+Your report: /Users/you/Library/Application Support/exposure/report.html
+It is open in your browser.
+
+Scanned 16 apps and 4 browser extensions.
+  3 companies whose code the scanned apps ship, in advertising, analytics and the like
+  7 apps with code or an endpoint of a company other than their publisher
+
+What you can do first (5 of 14):
+
+  1. [High] PostHog
+       Analytics, by PostHog Inc., in 2 apps: Logseq and Example
+       Block app.posthog.com, eu.i.posthog.com, i.posthog.com and
+       us.i.posthog.com with an outbound firewall such as LuLu (free) or Little
+       Snitch.
+  ...
+```
+
+Nothing is sent anywhere, and nothing on your Mac is changed: the report says
+what you can do, and you decide. A
 [sample HTML report](tests/fixtures/report/Fixtures.report.html) built from
-the repository's test fixtures is committed. To install the binary instead:
-
-```console
-$ cargo install --git https://github.com/Adityaakr/exposure-scanner --locked exposure
-```
-
-There are no prebuilt binaries: the first release is source only.
+the repository's test fixtures is committed.
 
 ## Usage
 
 ```
-exposure scan [PATH...] [--html FILE] [--json FILE] [--threads N] [--no-cache]
+exposure scan [PATH...] [--html FILE] [--json FILE] [--no-open] [--threads N] [--no-cache]
                                                     scan apps, extensions, or folders of them
 exposure report FILE [--html FILE] [--json FILE]    derive the report again from saved evidence
 exposure rules show                                 list the built-in rule pack
@@ -176,13 +226,23 @@ exposure --help | --version
 |---|---|
 | `PATH` | A macOS `.app` bundle, an Android `.apk` file, a browser extension (a Firefox `.xpi` file, or a Chromium `<id>/<version>` folder), or a folder, searched for all of them (never inside a bundle). When any `PATH` is given, only the `PATH`s are scanned. |
 | `--html FILE` | Write the report for reading: one self-contained page, grouped by company. |
-| `--json FILE` | Write the report a program reads. With neither `--html` nor `--json`, the JSON report goes to standard output. Report files are created readable by their owner only, because the list of apps a person uses is sensitive in itself. |
+| `--json FILE` | Write the report a program reads, which `exposure report` can render again. A `FILE` of `-` is standard output. Report files are created readable by their owner only, because the list of apps a person uses is sensitive in itself. |
+| `--no-open` | Do not open the report in the browser. |
 | `--threads N` | Worker threads. Default: one per core. The report does not depend on it. |
 | `--no-cache` | Read every app again, and neither use nor keep the results cache. |
 
+**With neither `--html` nor `--json`,** a scan writes the HTML report to
+`report.html` in a folder only you can read (`~/Library/Application
+Support/exposure` on macOS; `$XDG_DATA_HOME/exposure`, else
+`~/.local/share/exposure`, elsewhere), replacing the one before. It prints the
+report's path, the headline counts and the first five entries of the "What
+you can do" checklist, and when it runs in a terminal it opens the report in
+your default browser. For scripts, `--json -` puts the JSON report on
+standard output instead, as `exposure report` does by default.
+
 The summary on standard error ends with a scope line that says where the scan
-looked. Apple's own apps in `/System/Applications` are not scanned unless you
-name that folder.
+looked; it names no app and no path. Apple's own apps in
+`/System/Applications` are not scanned unless you name that folder.
 
 **Browser extensions.** Only each extension's `manifest.json` (and, when its
 name refers to one, its message catalogue) is read: never your history,
@@ -261,9 +321,9 @@ discipline.
 | Guarantee | How it is enforced |
 |---|---|
 | **Local only.** Nothing leaves the machine. | There is no network code. `cargo deny` bans every crate that can open a socket; CI checks that the binary imports no socket function and runs a scan in a network namespace with no interfaces, under `strace`, and under a macOS sandbox that denies the network. |
-| **Read only.** A scan changes no app and executes nothing. | Collectors only open files for reading. Symbolic links inside an app are never followed. Nothing is extracted to disk. Of a browser profile, only the extensions are opened: their manifests, and Firefox add-on archives. |
+| **Read only.** A scan changes no app and executes nothing. | Collectors only open files for reading. Symbolic links inside an app are never followed. Nothing is extracted to disk. Of a browser profile, only the extensions are opened: their manifests, and Firefox add-on archives. The one process `exposure` starts is the system's opener for the report it has just written, after the scan, in a terminal, unless `--no-open`. |
 | **Deterministic.** Same evidence, rule pack and scope, same bytes. | Derivation and rendering live in `no_std` crates that cannot read a clock, a file or the environment. Records hold paths inside an app, never paths of your machine. The HTML report holds no date, no device name and no path you gave. |
-| **Minimal storage.** | Only two things are written: the report you ask for, and the results cache. Both are readable by their owner only. The cache holds the same records the report shows, no paths and no file lists; it can be deleted at any time and is off with `--no-cache`. |
+| **Minimal storage.** | Only two things are written: the report (the file you name, or `report.html` in a private folder), and the results cache. Both are readable by their owner only, in folders only the owner can open. The cache holds the same records the report shows, no paths and no file lists; it can be deleted at any time and is off with `--no-cache`. |
 | **Rules are data.** | A rule is a literal and a boundary from a fixed list: no regular expressions, no scripts. The scanner only loads a pack whose signature verifies against a key built into the binary. |
 
 ## What a device-side scan cannot see
@@ -295,7 +355,7 @@ A report is only as complete as what a device can show. It cannot see:
 
 | Milestone | Ships | Status |
 |---|---|---|
-| **1. Static truth** | Rust core, evidence format, rule pack, collectors for macOS bundles, Electron apps and Android packages, resolver, HTML report | **In progress** |
+| **1. Static truth** | Rust core, evidence format, rule pack, collectors for macOS bundles, Electron apps and Android packages, resolver, HTML report | **Done: v0.1.0** |
 | 2. Phone and browser | iOS report import, Android phones over adb, browser join, browser extension audit, OS permission stores | Started: the browser extension audit is done |
 | 3. Fix and diff | Fix recipes with an undo log, snapshots, a diff between scans | Planned |
 | 4. Confirmed | Platform data-archive adapters, lab capture | Planned |
@@ -316,8 +376,10 @@ Milestone 1 in detail:
 | Scan scheduler: app discovery, one largest-first queue, per-app failure handling | Done |
 | HTML report grouped by company, with every record, coverage and limits | Done |
 | Local results cache and warm scan | Done; removing entries of deleted apps automatically is a follow-up |
-| Gates: negative corpus, canary recall, speed gates, Exodus layer and differential test | Planned |
-| Release preparation: threat model, reproducible-build check | Planned |
+| Gates: canary recall, negative-control corpus, speed gates | Done |
+| One-command scan: report to a private folder, opened in the browser, checklist in the terminal | Done |
+| Release preparation: threat model, dispute process, reproducible-build check, v0.1.0 | Done |
+| Exodus layer and the differential test against Exodus reports | Follow-up |
 
 ## Architecture
 
@@ -355,9 +417,9 @@ flowchart TD
 | `exposure` | The command-line binary | std |
 | `xtask` | Developer tooling; never shipped | anything |
 
-A scan of 16 installed apps (11,658 files, 6.8 GB) takes 0.91 s on 8 threads
-of an Apple M5, with a peak of 39 MB of memory, and 0.10 s when the cache
-finds that no app has changed.
+A scan of 16 installed apps and 8 browser extensions (11,669 files, 6.8 GB)
+takes 1.4 s on 8 threads of an Apple M5, with a peak of 40 MB of memory, and
+0.11 s when the cache finds that no app has changed.
 
 Details: [Architecture](docs/architecture.md): the pipeline, file reading,
 scheduling, benchmarks, and how each property is enforced.
@@ -383,17 +445,17 @@ in [`rules/README.md`](rules/README.md).
 
 ## Testing and the six properties
 
-"It works" is defined by six properties from the project's specification. Each
-has, or will have, an automated test.
+"It works" is defined by six properties from the project's specification.
+Each has an automated test that runs in CI.
 
-| Property | Pass condition | Status |
-|---|---|---|
-| **Finds what is there** | 95% recall on a canary app's planted markers | Real apps pinned by hash give their expected findings in CI; the canary arrives with the milestone-1 gates |
-| **Does not cry wolf** | No third-party finding on a negative control set | Real negatives (NewPipe, Bitwarden's F-Droid build, Obsidian) report no company; the 30-app negative corpus arrives with the gates |
-| **Deterministic** | Same evidence and rule pack give a byte-identical report | Tested on every change: input order, thread count, install location and cache state; committed fixture reports reproduce on Linux and macOS |
-| **Private** | No socket opened during a scan | Tested on every change: dependency bans, symbol audit, network namespace, `strace`, macOS sandbox |
-| **Fast** | Cold scan of a laptop under 60 s, warm scan under 5 s | `cargo xtask bench` gates scaling, memory and the warm scan (0.10 s measured against the 5 s target); the 60 s cold-scan gate on a reference laptop arrives with the milestone-1 gates |
-| **Honest** | Every finding shows its grade and the raw record behind it | Tested: a report that cites a missing record fails to render, and the HTML page is read back to find every claim's grade, confidence and records |
+| Property | Pass condition | Test | Runs |
+|---|---|---|---|
+| **Finds what is there** | At least 95% recall of planted SDK markers | `canary`: every token of every rule of the built-in pack is planted the way the SDK leaves it (framework folders, Objective-C classes and strings in Mach-O files, privacy manifests, DEX classes and strings, manifest components and files in APKs, npm packages and script literals in asar archives), one synthetic app per rule and kind of witness, and scanned through the real collectors: 231 of 231 plants found for the 48 rules. Real apps pinned by hash give their expected findings | Every change |
+| **Does not cry wolf** | No channel to another company than the app's publisher, at any grade, in a negative control | `negative_corpus`: 30 real apps pinned by hash, 15 for Android and 15 for macOS, including hard negatives: a browser that embeds Chromium (Cromite), two ad blockers (RethinkDNS, personalDNSfilter), Electron apps (VSCodium, Bitwarden desktop), an app whose bundled data names dozens of SDKs (TrackerControl), and one whose bundled documentation holds an analytics snippet (Bitwarden desktop). An app's own update feed is allowed even when another company, such as GitHub, hosts it | A subset of 8 on every change; all 30 nightly |
+| **Deterministic** | Same evidence and rule pack give a byte-identical report | Input order (sorted, reversed, shuffled), thread count, install location and cache state (off, empty, full, damaged); committed fixture reports reproduce on Linux and macOS | Every change |
+| **Private** | No socket opened during a scan | Dependency bans, symbol audit, network namespace, `strace`, macOS sandbox, each with a control that must be caught | Every change |
+| **Fast** | Cold scan under 60 s, warm scan under 5 s, memory under 200 MB, 3x at 8 threads | `cargo xtask bench --strict` on the apps installed on the reference laptop (an Apple M5): 16 apps and 8 extensions, 6.8 GB, read in 1.44 s with an empty results cache and in 0.11 s with nothing changed, 40 MB at most, 4.25x at 8 threads, one report across 17 runs (measured 2026-11-18 with the page cache warm: dropping it needs `sudo`). CI runs the benchmark on the fixtures for its memory and determinism gates | Memory and determinism every change; timing gates on the reference laptop before a release |
+| **Honest** | Every finding shows its grade and the raw record behind it | A report that cites a missing record fails to render; the HTML page is read back to find every claim's grade, confidence and records | Every change |
 
 Parsers also run under property tests with arbitrary and damaged input. The
 zip, DEX, Android manifest and extension manifest parsers and the Android
@@ -406,11 +468,34 @@ $ cargo deny check               # dependency bans, licences, advisories
 $ cargo xtask pack check         # rule sources, compiled pack and signature agree
 $ cargo xtask guardrails         # deliberate violations must fail the build
 $ cargo xtask no-network         # a scan opens no socket
+$ cargo xtask bench --strict     # speed, memory and determinism gates on the installed apps
+$ cargo xtask repro              # two clean builds of HEAD give the same binary
 $ fuzz/run.sh 60                 # every fuzz target for 60 s (nightly, cargo-fuzz)
 ```
 
 Tests that scan real apps need them in a local cache folder and pass with a
 notice without it; see [`tests/fixtures/README.md`](tests/fixtures/README.md).
+`cargo xtask fixtures negatives --dir DIR --all` fetches the negative corpus.
+
+## Releases and verifying a build
+
+Releases are tagged commits of source; [CHANGELOG.md](CHANGELOG.md) lists
+what each one changed. There are no prebuilt binaries: a scanner that reads
+the list of your apps is more credible built from source you can read.
+
+Two clean builds of one commit give the same binary, byte for byte.
+`cargo xtask repro [REV]` checks it: it exports the commit twice, to two
+folders at different paths, builds each in release mode with its own target
+folder, and compares the two `exposure` binaries. CI runs it nightly on macOS
+and Linux. A build on another machine gives the same bytes with the same
+toolchain (the one [`rust-toolchain.toml`](rust-toolchain.toml) pins), target
+and cargo home folder.
+
+The [threat model](docs/threat-model.md) says what the scanner protects,
+against whom, and where the protection ends. If a report names your app or
+your company and you believe a finding is wrong, use the
+[dispute form](https://github.com/Adityaakr/exposure-scanner/issues/new?template=dispute.yml);
+[docs/disputes.md](docs/disputes.md) says how a dispute is settled.
 
 ## Licences and data sources
 

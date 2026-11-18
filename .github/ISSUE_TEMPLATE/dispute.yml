@@ -1,0 +1,107 @@
+name: Dispute a finding about an app
+description: >-
+  An app, SDK or company is named in a report and you believe the finding is
+  wrong: you publish the app or the SDK, or you checked the app yourself.
+title: "dispute: <app> <version>: <finding>"
+labels: ["dispute"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for checking. Every finding rests on records anyone can
+        reproduce from the same build of the app, so a dispute is settled by
+        those records and by the build, not by who asks. How a dispute is
+        handled, and what changes when it is upheld, is in
+        [docs/disputes.md](https://github.com/Adityaakr/exposure-scanner/blob/main/docs/disputes.md).
+
+        **Do not attach a whole report.** It lists every app on the machine
+        it was made on. Copy only the claim and the records it cites.
+  - type: dropdown
+    id: role
+    attributes:
+      label: Who you are
+      options:
+        - I publish the app
+        - I publish the SDK or run the service named
+        - I use the app and checked it myself
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App, version and platform
+      placeholder: "Example Notes 4.2.1, macOS (or Android, or a browser extension)"
+    validations:
+      required: true
+  - type: input
+    id: download
+    attributes:
+      label: Where this exact build can be downloaded
+      description: A public, versioned address. Findings are tied to a build.
+      placeholder: "https://example.org/releases/4.2.1/ExampleNotes.zip"
+    validations:
+      required: true
+  - type: input
+    id: digest
+    attributes:
+      label: SHA-256 of the build
+      description: >-
+        The `digest` of the claim's `subject` in the JSON report, or the
+        SHA-256 of the `.apk` file or the downloaded archive.
+      placeholder: "sha256:..."
+    validations:
+      required: true
+  - type: textarea
+    id: claim
+    attributes:
+      label: The claim you dispute
+      description: >-
+        Copy the claim from the JSON report (`exposure scan PATH --json -`
+        on just this app gives a report of it alone), with its `id`,
+        `object`, `company`, `party`, `grade` and `witnesses`.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: records
+    attributes:
+      label: The evidence records it cites
+      description: >-
+        Copy each record the claim cites from `evidence` in the same report.
+        They say which file in the app matched which token of which rule.
+      render: json
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is wrong
+      options:
+        - The code is not in this build (the token matched something else)
+        - The code is in the build but belongs to another SDK or company
+        - The company named is not the one that operates the service
+        - The app's publisher, and so first or third party, is wrong
+        - The category is wrong (for example analytics against crash reporting)
+        - The steps under "What you can do" are wrong or out of date
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is wrong, and how it can be checked
+      description: >-
+        Point to what anyone can check: the file in the app that the record
+        names, the app's source code, the SDK's documentation, a build
+        setting. Claims of intent or of what the code does at run time
+        cannot be checked from the files and do not change a finding.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before you submit
+      options:
+        - label: I copied only this claim and its records, not a whole report.
+          required: true
