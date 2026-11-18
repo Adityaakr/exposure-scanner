@@ -592,3 +592,128 @@ fn every_problem_is_reported_at_once_in_a_fixed_order() {
     assert_eq!(found, problems(&backward));
     assert!(found.is_sorted());
 }
+
+const POSTHOG: &str = r#"
+id = "sdk/posthog"
+name = "PostHog"
+entity = "posthog"
+category = "analytics"
+sources = ["https://example.com/posthog"]
+
+[match]
+npm_package = ["posthog-js"]
+"#;
+
+/// Advice about one app, and hosts added to the PostHog rule.
+const FIXES: &str = r#"
+[[app]]
+id = "example-notes"
+name = "Example Notes"
+apps = [
+    { platform = "macos", id = "com.example.Notes" },
+    { platform = "android", id = "com.example.notes" },
+]
+sources = ["https://example.com/help/privacy", "https://example.com/help/privacy"]
+
+[[app.setting]]
+covers = ["crash_reporting", "analytics"]
+steps = "Settings > Privacy > Share usage data: off"
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "Settings > Account > Product emails: off"
+note = "The account setting applies to every device you sign in on."
+
+[[app.no_setting]]
+covers = ["component"]
+says = "Example documents no setting for its updater."
+
+[[app.alternative]]
+name = "Other Notes"
+website = "https://other.example/"
+about = "a notes app built without telemetry"
+
+[[sdk]]
+rule = "sdk/posthog"
+block = ["us.i.posthog.com", "eu.i.posthog.com"]
+sources = ["https://posthog.com/docs/advanced/proxy"]
+"#;
+
+fn with_fixes(fixes: &str) -> Vec<SourceFile<'_>> {
+    let mut files = files(&[
+        ("sdk/sentry.toml", SENTRY),
+        ("sdk/sparkle.toml", SPARKLE),
+        ("sdk/posthog.toml", POSTHOG),
+    ]);
+    files.push(SourceFile { path: "fixes.toml", text: fixes });
+    files
+}
+
+#[test]
+fn fixes_compile_into_the_layer_in_a_fixed_order() {
+    let layer = compiled(&with_fixes(FIXES)).layer;
+    let [app] = layer.fixes.apps.as_slice() else { panic!("{:#?}", layer.fixes) };
+    assert_eq!(app.id, "example-notes");
+    // The apps and what a setting covers are sets; the steps keep the
+    // order a reader is told them in.
+    assert_eq!(app.apps[0].id, "com.example.notes");
+    assert_eq!(app.settings[0].covers, ["analytics", "crash_reporting"]);
+    assert!(app.settings[1].steps.contains("Product emails"));
+    assert_eq!(app.sources, ["https://example.com/help/privacy"]);
+    assert_eq!(layer.fixes.sdks[0].block, ["eu.i.posthog.com", "us.i.posthog.com"]);
+
+    // The same advice in another order of tables gives the same bytes.
+    let reordered = FIXES.replace(
+        "    { platform = \"macos\", id = \"com.example.Notes\" },\n    { platform = \"android\", id = \"com.example.notes\" },",
+        "    { platform = \"android\", id = \"com.example.notes\" },\n    { platform = \"macos\", id = \"com.example.Notes\" },",
+    );
+    assert_ne!(reordered, FIXES);
+    assert_eq!(compiled(&with_fixes(&reordered)).bytes, compiled(&with_fixes(FIXES)).bytes);
+
+    // A layer without the file gives the layer it gave before the file
+    // existed: no `fixes` key at all.
+    let plain = String::from_utf8(compiled(&good()).bytes).unwrap();
+    assert!(!plain.contains("\"fixes\""));
+}
+
+#[test]
+fn fixes_must_cite_https_sources() {
+    let fixes = FIXES.replace(
+        "sources = [\"https://example.com/help/privacy\", \"https://example.com/help/privacy\"]",
+        "sources = [\"http://example.com/help\"]",
+    );
+    assert_one(&problems(&with_fixes(&fixes)), "must be an https:// URL");
+    let fixes =
+        FIXES.replace("website = \"https://other.example/\"", "website = \"other.example\"");
+    assert_one(&problems(&with_fixes(&fixes)), "website `other.example` must be an https:// URL");
+    let fixes =
+        FIXES.replace("sources = [\"https://posthog.com/docs/advanced/proxy\"]", "sources = []");
+    assert_one(&problems(&with_fixes(&fixes)), "must cite at least one source");
+}
+
+/// Block lists are conservative: hosts of counted categories only, and
+/// never another company's.
+#[test]
+fn block_lists_hold_only_hosts_of_counted_services_of_the_sdk_s_own_company() {
+    let crash = FIXES
+        .replace("rule = \"sdk/posthog\"", "rule = \"sdk/sentry\"")
+        .replace("[\"us.i.posthog.com\", \"eu.i.posthog.com\"]", "[\"o1.ingest.sentry.io\"]");
+    assert_one(
+        &problems(&with_fixes(&crash)),
+        "a block list is only for a rule in a category the headline counts",
+    );
+    let other = FIXES.replace("\"eu.i.posthog.com\"", "\"o1.ingest.sentry.io\"");
+    assert_one(&problems(&with_fixes(&other)), "is under a domain of `sentry`");
+    let suffix = FIXES.replace("\"eu.i.posthog.com\"", "\"posthog.invalidtld\"");
+    assert_one(&problems(&with_fixes(&suffix)), "is under no public suffix");
+}
+
+#[test]
+fn fixes_are_checked_like_the_rest_of_the_layer() {
+    let dangling = FIXES.replace("covers = [\"component\"]", "covers = [\"astrology\"]");
+    assert_one(&problems(&with_fixes(&dangling)), "unknown category `astrology`");
+    let unknown_key = FIXES.replace("[[sdk]]", "[[sdk]]\nhosts = []");
+    assert_one(&problems(&with_fixes(&unknown_key)), "unknown field");
+    let both = FIXES.replace("covers = [\"component\"]", "covers = [\"analytics\"]");
+    assert_one(&problems(&with_fixes(&both)), "both covered by a setting and said to have none");
+}

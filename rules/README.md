@@ -14,6 +14,7 @@ rules/core/*.toml ──compile──▶ rules/dist/core.pack.json ──sign─
 | `core/pack.toml` | Layer name, version, the fixed list of categories | CC BY 4.0 |
 | `core/entities.toml` | Companies, each with its sources and the identifiers of its own apps and hosts | CC BY 4.0 |
 | `core/sdk/*.toml` | One rule per SDK | CC BY 4.0 |
+| `core/fixes.toml` | What a person can do: apps' own opt-out settings, and hosts of SDKs to block | CC BY 4.0 |
 | `dist/core.pack.json` | The compiled `core` layer | CC BY 4.0 |
 | `dist/core.pack.json.minisig` | Its detached minisign signature | — |
 | `keys/exposure-pack-1.pub` | The public key the scanner trusts | — |
@@ -67,6 +68,68 @@ first party to one, so only those companies need identifiers.
 - A host under no listed domain is reported as unmapped. That is the right
   answer for a host nobody has sourced: do not add a domain to make a report
   look complete.
+
+## Fixes
+
+`core/fixes.toml` says what a person can do about a finding, where that
+depends on one app or one SDK. The report shows it under each finding and in
+its checklist; the scanner applies none of it. What holds for every app of a
+platform, such as the System Settings pane of the camera, is in the
+renderer, next to the fixed list of permissions.
+
+An `[[app]]` entry is about one app, by platform and app id, and says what
+its publisher documents:
+
+```toml
+[[app]]
+id = "vscode"
+name = "Visual Studio Code"
+apps = [{ platform = "macos", id = "com.microsoft.VSCode" }]
+sources = ["https://code.visualstudio.com/docs/configure/telemetry"]
+
+[[app.setting]]
+covers = ["analytics", "crash_reporting"]   # categories of pack.toml
+steps = "Code > Settings > Settings, search for telemetry.telemetryLevel, set it to off"
+
+[[app.no_setting]]              # what the publisher documents to have no setting
+covers = ["update_feed"]
+says = "…"
+
+[[app.alternative]]             # only where its standing is well established
+name = "VSCodium"
+website = "https://vscodium.com/"
+about = "the same editor built from the same source without Microsoft's telemetry"
+```
+
+| Field | What |
+|---|---|
+| `apps` | The builds the entry is about: `platform` is `macos` or `android`, `id` the app id. Letter case is ignored. An app has one entry |
+| `setting` | A setting and the categories it is documented to cover. A finding in one of them, in this app, is shown with the steps |
+| `no_setting` | What the publisher documents to be out of reach of any setting. A category is in a setting or here, never both |
+| `alternative` | Another app for the same job, listed only where its standing is well established |
+| `sources` | The publisher's own pages that show each setting and statement |
+
+Write `steps` in the words of the app's own menus, as its publisher writes
+them, and nothing the sources do not show. An app with no entry is shown with
+"no setting on record", which is the honest answer for an app nobody has
+sourced.
+
+An `[[sdk]]` entry adds hosts an SDK sends to, beyond the hosts its rule
+names, for the block list the report gives:
+
+```toml
+[[sdk]]
+rule = "sdk/datadog-rum"
+block = ["browser-intake-datadoghq.com"]
+sources = ["https://docs.datadoghq.com/…"]
+```
+
+Block lists are conservative: the compiler refuses one for a rule outside the
+counted categories, such as a crash reporter, and a host under a domain
+`entities.toml` lists for another company than the one behind the SDK. The
+report gives a block list only for a service of another company than the
+app's publisher, and for a domain an app's privacy manifest declares for
+tracking unless it is under the app's own publisher.
 
 ## Boundaries
 

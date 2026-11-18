@@ -25,6 +25,11 @@ const GOOGLE_TEAM: &str = "EQHXZ8M8AV";
 /// A pack with a company in a counted category whose name needs escaping,
 /// a company that owns another, and a component.
 fn pack() -> Pack {
+    Pack::new(vec![LoadedLayer { layer: layer(), sha256: Sha256Digest::of(b"pack") }]).unwrap()
+}
+
+/// The layer of [`pack`].
+fn layer() -> Layer {
     let rule = |id: &str, name: &str, entity: Option<&str>, category: &str, notes: &[&str]| Rule {
         id: id.into(),
         name: name.into(),
@@ -54,8 +59,9 @@ fn pack() -> Pack {
             domains: domains.iter().map(|&domain| domain.into()).collect(),
             sources: vec![format!("https://{id}.example/terms")],
         };
-    let layer = Layer {
+    Layer {
         format: V1,
+        fixes: xs_model::fix::Fixes::default(),
         layer: "core".into(),
         version: 7,
         license: "CC-BY-4.0".into(),
@@ -82,8 +88,7 @@ fn pack() -> Pack {
             ),
             rule("sdk/sparkle", "Sparkle", None, "component", &[]),
         ],
-    };
-    Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap()
+    }
 }
 
 fn meta(pack: &Pack) -> ReportMeta {
@@ -1047,7 +1052,16 @@ fn the_navigation_names_the_sections_of_the_page_in_order() {
     let labels: Vec<&str> = links.iter().map(|(label, _)| label.as_str()).collect();
     assert_eq!(
         labels,
-        ["Summary", "How to read it", "Findings", "Coverage", "Limits", "Records", "About"]
+        [
+            "Summary",
+            "What you can do",
+            "How to read it",
+            "Findings",
+            "Coverage",
+            "Limits",
+            "Records",
+            "About"
+        ]
     );
     let sections: Vec<String> = root
         .named("section")
@@ -1079,8 +1093,8 @@ fn a_section_with_nothing_under_it_is_left_out_of_the_page_and_the_navigation() 
         section!("absent", "Absent", "Nothing to say", silent),
         section!("last", "Last", "The last", said),
     ];
-    let page =
-        document(&sections, &Input { view: &view, evidence: &evidence, meta: &meta }).unwrap();
+    let input = Input { view: &view, evidence: &evidence, meta: &meta, pack: &pack };
+    let page = document(&sections, &input).unwrap();
     let root = testkit::parse(&page).unwrap();
     testkit::check_inert(&root, CONTENT_SECURITY_POLICY).unwrap();
 
@@ -1536,4 +1550,387 @@ fn what_is_shown_of_an_app_does_not_depend_on_record_order() {
         .collect();
     assert_eq!(row[0], "Alpha");
     assert_eq!(row[5], "50 files, 68.2 MB");
+}
+
+/// The pack of [`pack`] with advice: a setting of Notes for analytics whose
+/// steps need escaping, the statement that Droid has none, and a host Acme's
+/// SDK sends to beyond what its rule names.
+fn advised_pack() -> Pack {
+    use xs_model::fix::{AppFix, AppKey, Fixes, NoSetting, SdkFix, Setting};
+    let mut layer = layer();
+    layer.fixes = Fixes {
+        apps: vec![
+            AppFix {
+                id: "droid".into(),
+                name: "Droid".into(),
+                apps: vec![AppKey { platform: Platform::Android, id: "org.example.droid".into() }],
+                settings: vec![],
+                no_setting: vec![NoSetting {
+                    covers: vec!["analytics".into()],
+                    says: "Droid documents no setting that turns off its analytics.".into(),
+                }],
+                alternatives: vec![],
+                sources: vec!["https://droid.example/privacy".into()],
+            },
+            AppFix {
+                id: "notes".into(),
+                name: "Notes".into(),
+                apps: vec![AppKey { platform: Platform::Macos, id: "org.example.notes".into() }],
+                settings: vec![Setting {
+                    covers: vec!["analytics".into()],
+                    steps: "Notes > Settings > Privacy > <b>Share usage data</b>: off".into(),
+                    note: Some("It applies to this Mac only.".into()),
+                }],
+                no_setting: vec![],
+                alternatives: vec![],
+                sources: vec!["https://notes.example/privacy".into()],
+            },
+        ],
+        sdks: vec![SdkFix {
+            rule: "sdk/acme-analytics".into(),
+            block: vec!["collect.acme.com".into()],
+            sources: vec!["https://acme.example/hosts".into()],
+        }],
+    };
+    layer.categories.push(Category {
+        id: "tracking_domain".into(),
+        name: "Declared tracking domain".into(),
+        headline: false,
+    });
+    Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap()
+}
+
+/// An edge that says `subject` asks for a permission by the usage
+/// description `key`.
+fn asks(subject: &Subject, key: &str) -> Record {
+    Record::Edge(EdgeRecord {
+        v: V1,
+        collector: Collector::MacosBundle,
+        subject: subject.clone(),
+        edge: EdgeType::Access,
+        grade: Grade::Requested,
+        object: ObjectRef {
+            kind: ObjectKind::Permission,
+            id: xs_model::access::declared(MatcherKind::UsageDescription, key).unwrap().id.into(),
+        },
+        rule: xs_model::access::rule::USAGE_DESCRIPTION.into(),
+        proof: Proof {
+            matcher: MatcherKind::UsageDescription,
+            token: key.into(),
+            count: 1,
+            example: None,
+            location: RelPath::new("Contents/Info.plist").unwrap(),
+            region: Region::PropertyList,
+            scope: Scope::AppCode,
+            max_sdk: None,
+        },
+    })
+}
+
+/// A browser extension installed in `browser` that asks for `permissions`
+/// under the manifest key `key`.
+fn extension(
+    browser: xs_model::record::Browser,
+    seed: u8,
+    key: &str,
+    permissions: &[xs_model::Permission],
+) -> Vec<Record> {
+    let mut subject = subject(browser.platform(), "abcdefghijklmnopabcdefghijklmnop", seed);
+    subject.kind = SubjectKind::Extension;
+    let Record::Artifact(mut facts) = artifact(&subject, "Wallet", None) else { unreachable!() };
+    facts.collector = Collector::BrowserExtension;
+    facts.facts.browser = Some(browser);
+    let mut records = vec![Record::Artifact(facts)];
+    for permission in permissions {
+        records.push(Record::Edge(EdgeRecord {
+            v: V1,
+            collector: Collector::BrowserExtension,
+            subject: subject.clone(),
+            edge: EdgeType::Access,
+            grade: MatcherKind::ExtensionManifest.grade(),
+            object: ObjectRef { kind: ObjectKind::Permission, id: permission.id().into() },
+            rule: xs_model::permission::RULE.into(),
+            proof: Proof {
+                matcher: MatcherKind::ExtensionManifest,
+                token: key.into(),
+                count: 1,
+                example: None,
+                location: RelPath::new("manifest.json").unwrap(),
+                region: Region::ManifestKey,
+                scope: Scope::AppCode,
+                max_sdk: None,
+            },
+        }));
+    }
+    records
+}
+
+/// The evidence of [`evidence`], and Notes asking for the camera, the
+/// network and Bluetooth, Droid for the camera, and an extension in Chrome
+/// that may read every site.
+fn evidence_with_access() -> EvidenceSet {
+    use xs_model::Permission;
+    use xs_model::record::Browser;
+    let notes = subject(Platform::Macos, "org.example.notes", 1);
+    let droid = subject(Platform::Android, "org.example.droid", 3);
+    let mut set = evidence();
+    let mut add = |record| {
+        set.insert(record).unwrap();
+    };
+    add(asks(&notes, "NSCameraUsageDescription"));
+    add(asks(&notes, "NSBluetoothAlwaysUsageDescription"));
+    let Record::Edge(mut camera) = asks(&droid, "NSCameraUsageDescription") else { unreachable!() };
+    camera.proof.matcher = MatcherKind::AndroidPermission;
+    camera.proof.token = "android.permission.CAMERA".into();
+    camera.rule = xs_model::access::rule::ANDROID_PERMISSION.into();
+    camera.proof.location = RelPath::new("AndroidManifest.xml").unwrap();
+    camera.proof.region = Region::ManifestKey;
+    add(Record::Edge(camera));
+    for record in extension(Browser::Chrome, 9, "host_permissions", &[Permission::AllSites]) {
+        add(record);
+    }
+    for record in extension(Browser::Firefox, 10, "permissions", &[Permission::History]) {
+        add(record);
+    }
+    set
+}
+
+/// The checklist, as its entries' heads, in order.
+fn checklist(root: &Element) -> Vec<String> {
+    section(root, "actions")
+        .descendants()
+        .into_iter()
+        .filter(|e| e.has_class("todo"))
+        .map(|entry| {
+            entry.descendants().into_iter().find(|e| e.has_class("todo-head")).unwrap().text()
+        })
+        .collect()
+}
+
+/// The checklist is at the top of the page, under the summary, and lists
+/// what exposes the most first: another company's analytics and an
+/// extension that reads every site, then the camera, then Bluetooth. A
+/// service of the app's own publisher, a component and an update feed are
+/// not on it.
+#[test]
+fn the_checklist_comes_first_and_puts_what_exposes_the_most_first() {
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let sections: Vec<&str> =
+        root.named("section").into_iter().filter_map(|s| s.attr("id")).take(2).collect();
+    assert_eq!(sections, ["summary", "actions"]);
+    assert_eq!(
+        checklist(&root),
+        [
+            "High AcmeAnalytics Analytics",
+            "High Wallet Browser extension",
+            "High Wallet Browser extension",
+            "Medium Camera",
+            "Medium Droid Android app",
+            "Low Bluetooth",
+        ]
+    );
+    let text = section(&root, "actions").text();
+    assert!(!text.contains("Crashlytics"), "Google publishes Mail: {text}");
+    assert!(!text.contains("Sparkle") && !text.contains("updates.example.org"), "{text}");
+    // The Android camera is under the app, not under a pane of macOS.
+    assert!(text.contains("Open Settings > Apps > Droid > Permissions"), "{text}");
+
+    // Every link of the checklist leads to a finding on the page.
+    for link in section(&root, "actions").named("a") {
+        let target = link.attr("href").unwrap().trim_start_matches('#');
+        let finding = root.by_id(target).unwrap_or_else(|| panic!("no element `{target}`"));
+        assert!(finding.has_class("finding"), "{target}");
+    }
+}
+
+/// An app's own setting is shown where the pack documents one, as the
+/// publisher documents it and with what the scan cannot show; a statement
+/// that there is none, where the pack has one; and a plain "not on record"
+/// otherwise. The steps are text from the pack and render as text.
+#[test]
+fn an_app_s_own_setting_is_shown_as_its_publisher_documents_it() {
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+
+    let notes = finding(&root, &claims, "org.example.notes", "sdk/acme-analytics").text();
+    assert!(
+        notes.contains(
+            "Turn it off in Notes: Notes > Settings > Privacy > <b>Share usage data</b>: off. \
+             Its publisher documents this setting for analytics; a scan of the app's files \
+             cannot show that it stops this SDK. It applies to this Mac only."
+        ),
+        "{notes}"
+    );
+    assert!(root.named("b").is_empty(), "the steps are text, never markup");
+    let droid = finding(&root, &claims, "org.example.droid", "sdk/acme-analytics").text();
+    assert!(droid.contains("Droid documents no setting that turns off its analytics."), "{droid}");
+    let actions = section(&root, "actions").text();
+    assert!(
+        actions.contains(
+            "In Notes, turn it off: Notes > Settings > Privacy > <b>Share usage data</b>: off. \
+             Notes documents this setting for analytics. It applies to this Mac only."
+        ),
+        "{actions}"
+    );
+
+    // Without advice, the report says it has none rather than guessing.
+    let plain = super::tests::pack();
+    let root = render(&claims, &evidence, &meta(&plain), &plain);
+    let notes = finding(&root, &claims, "org.example.notes", "sdk/acme-analytics").text();
+    assert!(notes.contains("No setting of this app that turns it off is on record."), "{notes}");
+    assert!(notes.contains("The rule pack names no host for AcmeAnalytics"), "{notes}");
+    let entry = section(&root, "actions").text();
+    assert!(
+        entry.contains("No setting that turns it off is on record for Droid, Notes."),
+        "{entry}"
+    );
+    assert!(entry.contains("The rule pack names no host for AcmeAnalytics"), "{entry}");
+}
+
+/// A block list is given for a third-party service in a counted category,
+/// with a firewall that runs on the app's platform, and never for a
+/// service of the app's own publisher or for a crash reporter.
+#[test]
+fn a_block_list_names_the_hosts_and_a_firewall_of_the_platform() {
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let notes = finding(&root, &claims, "org.example.notes", "sdk/acme-analytics").text();
+    assert!(
+        notes.contains(
+            "Block this host for Notes with an outbound firewall such as LuLu (free) or Little \
+             Snitch: collect.acme.com."
+        ),
+        "{notes}"
+    );
+    assert!(notes.contains("Or remove Notes if you can do without it."), "{notes}");
+    let droid = finding(&root, &claims, "org.example.droid", "sdk/acme-analytics").text();
+    assert!(droid.contains("such as NetGuard: collect.acme.com"), "{droid}");
+
+    let actions = section(&root, "actions").text();
+    assert!(
+        actions.contains(
+            "Block this host for Notes with an outbound firewall such as LuLu (free) or Little \
+             Snitch: collect.acme.com."
+        ),
+        "{actions}"
+    );
+    assert!(
+        actions.contains(
+            "Block this host for Droid with a firewall app that works without root, such as \
+             NetGuard: collect.acme.com."
+        ),
+        "{actions}"
+    );
+    assert!(!actions.contains("for Droid, Notes with"), "{actions}");
+    assert!(
+        actions.contains(
+            "NetGuard: collect.acme.com. Blocking can stop features that rely on the service, and \
+             does not reach what the app sends through its own servers."
+        ),
+        "{actions}"
+    );
+
+    let mail = finding(&root, &claims, "com.google.mail", "sdk/crashlytics").text();
+    assert!(mail.contains("Google LLC publishes this app"), "{mail}");
+    assert!(!mail.contains("Block"), "{mail}");
+    let feed = finding(&root, &claims, "org.example.notes", "updates.example.org").text();
+    assert!(feed.contains("Nothing to do: this is where the app fetches its own updates."));
+    let sparkle = finding(&root, &claims, "org.example.notes", "sdk/sparkle").text();
+    assert!(
+        sparkle.contains(
+            "Nothing to do: a component is a library with no service of its own behind it."
+        )
+    );
+}
+
+/// A domain an app's own privacy manifest declares for tracking is given a
+/// block list even when no company is named for it, since the app itself
+/// says it tracks through it, with the warning that it may be the
+/// publisher's own server. It is on the checklist at Medium. A tracking
+/// domain under the app's own publisher is not blocked.
+#[test]
+fn a_declared_tracking_domain_without_a_company_can_be_blocked_with_a_warning() {
+    let notes = subject(Platform::Macos, "org.example.notes", 1);
+    let mail = subject(Platform::Macos, "com.google.mail", 2);
+    let tracking = |subject: &Subject, host: &str| {
+        let Record::Edge(mut edge) = feed(subject, host) else { unreachable!() };
+        edge.rule = declared::TRACKING_DOMAIN.into();
+        edge.grade = MatcherKind::PrivacyManifest.grade();
+        edge.proof.matcher = MatcherKind::PrivacyManifest;
+        edge.proof.token = "NSPrivacyTrackingDomains".into();
+        edge.proof.location = RelPath::new("Contents/Resources/PrivacyInfo.xcprivacy").unwrap();
+        Record::Edge(edge)
+    };
+    let mut evidence = evidence_with_access();
+    evidence.insert(tracking(&notes, "track.example.net")).unwrap();
+    evidence.insert(tracking(&mail, "ads.google.com")).unwrap();
+    let pack = advised_pack();
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+
+    let warning = "This domain may be a server of the app's own publisher: blocking it can \
+                   break features of the app.";
+    let step = finding(&root, &claims, "org.example.notes", "track.example.net").text();
+    assert!(
+        step.contains(
+            "Block this host for Notes with an outbound firewall such as LuLu (free) or Little \
+             Snitch: track.example.net."
+        ),
+        "{step}"
+    );
+    assert!(step.contains(warning), "{step}");
+
+    let own = finding(&root, &claims, "com.google.mail", "ads.google.com").text();
+    assert!(!own.contains("Block"), "{own}");
+
+    let heads = checklist(&root);
+    assert!(heads.iter().any(|head| head == "Medium track.example.net Declared tracking domain"));
+    assert!(!heads.iter().any(|head| head.contains("ads.google.com")), "{heads:?}");
+    let actions = section(&root, "actions").text();
+    assert!(
+        actions.contains(
+            "Block this host for Notes with an outbound firewall such as LuLu (free) or Little \
+             Snitch: track.example.net. Blocking can stop features that rely on the service, and \
+             does not reach what the app sends through its own servers."
+        ),
+        "{actions}"
+    );
+    assert!(actions.contains(warning), "{actions}");
+}
+
+/// A permission is turned off where the platform keeps the switch: a pane
+/// of System Settings on macOS, the app's page of permissions on Android,
+/// and the extension's page in its own browser.
+#[test]
+fn a_permission_names_where_the_platform_keeps_its_switch() {
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let mac = finding(&root, &claims, "org.example.notes", "camera").text();
+    assert!(
+        mac.contains("Open System Settings > Privacy & Security > Camera and turn off Notes"),
+        "{mac}"
+    );
+    let android = finding(&root, &claims, "org.example.droid", "camera").text();
+    assert!(android.contains("Open Settings > Apps > Droid > Permissions and set Camera"));
+    let actions = section(&root, "actions").text();
+    assert!(actions.contains("Open System Settings > Privacy & Security > Camera and turn off"));
+    assert!(actions.contains("chrome://extensions in Google Chrome"), "{actions}");
+    assert!(actions.contains("Site access choose On click or On specific sites"), "{actions}");
+    assert!(actions.contains("about:addons in Firefox"), "{actions}");
+    assert!(
+        actions.contains("The browser has no switch") || actions.contains("stay as long as"),
+        "{actions}"
+    );
+}
+
+#[test]
+fn a_scan_with_nothing_to_act_on_says_so() {
+    let pack = pack();
+    let root = render(&[], &EvidenceSet::new(), &meta(&pack), &pack);
+    assert!(section(&root, "actions").text().contains("Nothing here calls for action"));
 }

@@ -32,12 +32,12 @@ fn signature_file() -> PathBuf {
     repo_root().join("rules/dist").join(format!("{LAYER}.pack.json.minisig"))
 }
 
-/// Reads the layer's source files: `pack.toml`, `entities.toml` and
-/// `sdk/*.toml`, as (path relative to the layer, text).
+/// Reads the layer's source files: `pack.toml`, `entities.toml`,
+/// `fixes.toml` and `sdk/*.toml`, as (path relative to the layer, text).
 fn sources() -> Result<Vec<(String, String)>> {
     let dir = source_dir();
     let mut files = Vec::new();
-    for name in ["pack.toml", "entities.toml"] {
+    for name in ["pack.toml", "entities.toml", "fixes.toml"] {
         files.push((name.to_string(), read_text(&dir.join(name))?));
     }
     let sdk = dir.join("sdk");

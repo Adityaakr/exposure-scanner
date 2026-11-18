@@ -49,6 +49,7 @@ pub(crate) fn entity(id: &str, parent: Option<&str>) -> Entity {
 pub(crate) fn pack_of(entities: Vec<Entity>, rules: Vec<Rule>) -> Pack {
     let layer = Layer {
         format: V1,
+        fixes: xs_model::fix::Fixes::default(),
         layer: "core".into(),
         version: 1,
         license: "CC-BY-4.0".into(),

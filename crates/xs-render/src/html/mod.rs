@@ -1,10 +1,12 @@
 //! The HTML report: one file a person can open, read and print.
 //!
-//! It leads with what was found, each thing once with the apps it is in.
-//! Then it shows the findings grouped by company, each with its grade, its
-//! confidence and the records it rests on; what the scan covered and what it
-//! set aside; what no scan of a device can see; and every evidence record,
-//! exactly as stored.
+//! It leads with what was found, each thing once with the apps it is in, and
+//! then with what a person can do about it, as a checklist with what exposes
+//! the most first ([`advice`]). Then it shows the findings grouped by
+//! company, each with its grade, its confidence, what can be done about it
+//! and the records it rests on; what the scan covered and what it set aside;
+//! what no scan of a device can see; and every evidence record, exactly as
+//! stored.
 //!
 //! The page is made from one list, [`SECTIONS`]. The navigation at its top is
 //! written from the same list, so it names the sections that are on the page
@@ -25,6 +27,7 @@
 //! no path outside an app, and no order that depends on anything but the
 //! content.
 
+mod advice;
 mod view;
 mod words;
 
@@ -50,7 +53,7 @@ use crate::{RenderError, ReportMeta, check_honest};
 /// it from the stylesheet.
 macro_rules! style_source {
     () => {
-        "'sha256-FfPh1a5CrdCRxQbdjeFLYRUqW9y5h2BrjEWQB+KVgiU='"
+        "'sha256-5OjasZD0iUXLT0sEVi0QpfCWEPt0sJvAa3WV1FeQ8+U='"
     };
 }
 
@@ -106,6 +109,8 @@ struct Input<'a> {
     view: &'a View<'a>,
     evidence: &'a EvidenceSet,
     meta: &'a ReportMeta,
+    /// The rule pack, for the advice it carries.
+    pack: &'a Pack,
 }
 
 /// One section of the page.
@@ -129,8 +134,9 @@ macro_rules! section {
 }
 
 /// The sections of the report, in the order they are on the page.
-const SECTIONS: [Section; 7] = [
+const SECTIONS: [Section; 8] = [
     section!("summary", "Summary", "Summary", summary),
+    section!("actions", "What you can do", "What you can do", actions),
     section!("reading", "How to read it", "How to read this report", reading),
     section!("findings", "Findings", "Findings by company", findings),
     section!("coverage", "Coverage", "What was scanned, and what was not", coverage),
@@ -201,7 +207,7 @@ pub fn html(
         return Err(RenderError::PackMismatch);
     }
     let view = View::new(claims, evidence, pack)?;
-    document(&SECTIONS, &Input { view: &view, evidence, meta })
+    document(&SECTIONS, &Input { view: &view, evidence, meta, pack })
 }
 
 /// Writes the page: the head, a link to each section that is on the page,
@@ -450,6 +456,12 @@ fn count(page: &mut Markup, number: u32, label: (&str, &str), sub: &'static str)
     page.raw("\n");
 }
 
+/// The checklist of what a person can do, with what exposes the most first.
+fn actions(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
+    advice::actions(page, input.pack, input.view);
+    Ok(())
+}
+
 /// What a grade, a confidence and a party mean.
 fn reading(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
     page.raw(
@@ -496,7 +508,7 @@ fn grade_badge(page: &mut Markup, grade: Grade) {
 /// The findings: by company, then the channels that name no company, then
 /// what the apps may access.
 fn findings(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
-    let (view, evidence) = (input.view, input.evidence);
+    let view = input.view;
     if view.claims == 0 {
         page.raw(NOTHING_FOUND);
     } else {
@@ -506,7 +518,7 @@ fn findings(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
         );
     }
     for company in &view.companies {
-        company_block(page, view, company, evidence);
+        company_block(page, input, company);
     }
     if !view.unnamed.is_empty() {
         page.raw(
@@ -516,7 +528,7 @@ fn findings(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
              them.</p>\n",
         );
         for group in &view.unnamed {
-            app_block(page, view, group, evidence);
+            app_block(page, input, group);
         }
         page.raw("</section>\n");
     }
@@ -528,19 +540,14 @@ fn findings(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
              so they are under none, and the three headline counts hold none of them.</p>\n",
         );
         for group in &view.access {
-            app_block(page, view, group, evidence);
+            app_block(page, input, group);
         }
         page.raw("</section>\n");
     }
     Ok(())
 }
 
-fn company_block(
-    page: &mut Markup,
-    view: &View<'_>,
-    company: &Company<'_>,
-    evidence: &EvidenceSet,
-) {
+fn company_block(page: &mut Markup, input: &Input<'_>, company: &Company<'_>) {
     page.raw("<section class=\"company\">\n");
     page.open("h3", &[]);
     page.text(&company.entity.name);
@@ -561,14 +568,14 @@ fn company_block(
     page.close();
     page.raw("\n");
     for group in &company.apps {
-        app_block(page, view, group, evidence);
+        app_block(page, input, group);
     }
     page.raw("</section>\n");
 }
 
 /// One app under a company: who it is, who publishes it, and its findings.
-fn app_block(page: &mut Markup, view: &View<'_>, group: &AppFindings<'_>, evidence: &EvidenceSet) {
-    let Some(app) = view.apps.get(group.app) else { return };
+fn app_block(page: &mut Markup, input: &Input<'_>, group: &AppFindings<'_>) {
+    let Some(app) = input.view.apps.get(group.app) else { return };
     page.open_class("div", "app");
     page.raw("\n");
     page.element("h4", &[], app.title());
@@ -578,7 +585,7 @@ fn app_block(page: &mut Markup, view: &View<'_>, group: &AppFindings<'_>, eviden
         publisher(page, first);
     }
     for finding in &group.findings {
-        finding_block(page, finding, evidence);
+        finding_block(page, input, finding);
     }
     page.close();
     page.raw("\n");
@@ -656,8 +663,9 @@ fn record_link(page: &mut Markup, id: &RecordId) {
     page.element("a", &[("href", Value::Link("r-", id.digest()))], &text);
 }
 
-/// One finding: what it is about, its grade, and the evidence behind it.
-fn finding_block(page: &mut Markup, finding: &Finding<'_>, evidence: &EvidenceSet) {
+/// One finding: what it is about, its grade, what can be done about it, and
+/// the evidence behind it.
+fn finding_block(page: &mut Markup, input: &Input<'_>, finding: &Finding<'_>) {
     let claim = finding.claim;
     page.open(
         "div",
@@ -738,7 +746,9 @@ fn finding_block(page: &mut Markup, finding: &Finding<'_>, evidence: &EvidenceSe
             None => page.text(note),
         });
     }
-    page.raw("</dl>\n");
+    page.raw("</dl>\n<p class=\"todo-head\">What you can do</p>\n<ul class=\"steps\">\n");
+    advice::finding_steps(page, input.pack, input.view, finding);
+    page.raw("</ul>\n");
 
     page.open_class("p", "evidence-head");
     page.raw("Evidence: ");
@@ -746,7 +756,7 @@ fn finding_block(page: &mut Markup, finding: &Finding<'_>, evidence: &EvidenceSe
     page.close();
     page.raw("\n<ul class=\"evidence\">\n");
     for id in &claim.evidence {
-        if let Some(Record::Edge(edge)) = evidence.get(id) {
+        if let Some(Record::Edge(edge)) = input.evidence.get(id) {
             evidence_item(page, id, edge);
         }
     }

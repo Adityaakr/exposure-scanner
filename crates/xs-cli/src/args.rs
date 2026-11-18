@@ -43,7 +43,8 @@ commands:
 options:
   --html FILE   Write the report for reading to FILE: one HTML file that
                 runs no script and loads nothing, grouped by company, with
-                the evidence behind every finding.
+                the evidence behind every finding and a checklist of what
+                you can do about it, which the scanner does not do for you.
   --json FILE   Write the JSON report to FILE. With neither option the JSON
                 report goes to standard output.
                 A report lists the apps a person uses, so a report file is

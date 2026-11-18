@@ -239,6 +239,16 @@ be recounted from the claims. A host under no domain the rule pack lists is
 **unmapped**: it is shown as itself, nobody is named as its owner, and it is
 counted nowhere.
 
+The HTML report has a **What you can do** checklist near the top, and steps
+under every finding: an app's own opt-out where its publisher documents one;
+hosts to block with an outbound firewall such as LuLu or Little Snitch, given
+only for the counted categories and declared tracking domains; the
+**System Settings > Privacy & Security** pane, or the Android
+**Settings > Apps** page, of each permission; and how to narrow or remove a
+browser extension. The scanner applies none of it. What holds for one app or
+one SDK is data in `rules/core/fixes.toml` (see
+[`rules/README.md`](rules/README.md#fixes)).
+
 Details: [Reading the report](docs/report.md), including how the company, the
 app's vendor and first or third party are decided.
 

@@ -6,7 +6,9 @@
 //!   of categories;
 //! * `entities.toml` — the companies rules may name, each with its sources
 //!   and the identifiers its own apps and hosts are recognised by;
-//! * `sdk/<name>.toml` — one rule per SDK.
+//! * `sdk/<name>.toml` — one rule per SDK;
+//! * `fixes.toml` — optional: what a person can do about a finding, per app
+//!   and per SDK ([`xs_model::fix`]).
 //!
 //! [`compile`] turns them into one compiled layer: canonical JSON, sorted by
 //! id, so the same sources always give the same bytes whatever order the
@@ -32,11 +34,19 @@
 //!   that no entry covers the names of a whole registry.
 //! * A rule names an entity or declares `component = true`, never neither, so
 //!   a forgotten `entity` line cannot silently hide a company.
+//! * Every fix cites an `https://` source, and an alternative app names an
+//!   `https://` website.
+//! * Block lists are conservative (project spec, "Fixes"): a fix may add
+//!   hosts only to a rule in a category the headline counts, such as
+//!   advertising or analytics, and no host under a domain the pack lists for
+//!   another company than the one behind the SDK. Blocking a crash reporter
+//!   or another company's servers breaks more than it protects.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::Deserialize;
+use xs_model::fix::{Alternative, AppFix, AppKey, Fixes, NoSetting, SdkFix, Setting};
 use xs_model::matcher::{Boundary, MatcherKind};
 use xs_model::pack::{Category, Entity, Layer, LoadedLayer, Rule, Token};
 use xs_model::record::V1;
@@ -125,6 +135,30 @@ struct RuleSource {
     fixtures: Vec<FixtureSource>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FixesSource {
+    #[serde(default, rename = "app")]
+    apps: Vec<AppFixSource>,
+    #[serde(default, rename = "sdk")]
+    sdks: Vec<SdkFix>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppFixSource {
+    id: String,
+    name: String,
+    apps: Vec<AppKey>,
+    #[serde(default, rename = "setting")]
+    settings: Vec<Setting>,
+    #[serde(default)]
+    no_setting: Vec<NoSetting>,
+    #[serde(default, rename = "alternative")]
+    alternatives: Vec<Alternative>,
+    sources: Vec<String>,
+}
+
 /// A real artifact, pinned by hash, that the rule must match.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -145,6 +179,7 @@ pub fn compile(files: &[SourceFile<'_>]) -> Result<Compiled, Vec<Problem>> {
     let mut pack_source: Option<PackSource> = None;
     let mut entities: Vec<Entity> = Vec::new();
     let mut rules: Vec<Rule> = Vec::new();
+    let mut fixes = Fixes::default();
     let mut seen_paths: Vec<&str> = Vec::new();
 
     let mut sorted: Vec<&SourceFile<'_>> = files.iter().collect();
@@ -165,6 +200,11 @@ pub fn compile(files: &[SourceFile<'_>]) -> Result<Compiled, Vec<Problem>> {
                     }
                 }
             }
+            "fixes.toml" => {
+                if let Some(source) = parse::<FixesSource>(file, &mut problems) {
+                    fixes = lower_fixes(file.path, source, &mut problems);
+                }
+            }
             path => match rule_file_stem(path) {
                 Some(stem) => {
                     if let Some(source) = parse::<RuleSource>(file, &mut problems) {
@@ -173,7 +213,8 @@ pub fn compile(files: &[SourceFile<'_>]) -> Result<Compiled, Vec<Problem>> {
                 }
                 None => problems.add(
                     path,
-                    "unexpected file; a layer holds pack.toml, entities.toml and sdk/<name>.toml",
+                    "unexpected file; a layer holds pack.toml, entities.toml, fixes.toml and \
+                     sdk/<name>.toml",
                 ),
             },
         }
@@ -188,9 +229,11 @@ pub fn compile(files: &[SourceFile<'_>]) -> Result<Compiled, Vec<Problem>> {
         return Err(finish(problems));
     };
     check_shared_tokens(&rules, &mut problems);
+    check_block_lists(&fixes, &pack_source.categories, &entities, &rules, &mut problems);
 
     let mut layer = Layer {
         format: V1,
+        fixes,
         layer: pack_source.layer,
         version: pack_source.version,
         license: pack_source.license,
@@ -205,6 +248,8 @@ pub fn compile(files: &[SourceFile<'_>]) -> Result<Compiled, Vec<Problem>> {
     layer.categories.sort_by(|a, b| a.id.cmp(&b.id));
     layer.entities.sort_by(|a, b| a.id.cmp(&b.id));
     layer.rules.sort_by(|a, b| a.id.cmp(&b.id));
+    layer.fixes.apps.sort_by(|a, b| a.id.cmp(&b.id));
+    layer.fixes.sdks.sort_by(|a, b| a.rule.cmp(&b.rule));
 
     if !problems.0.is_empty() {
         return Err(finish(problems));
@@ -321,6 +366,126 @@ fn public_suffix(host: &str) -> Option<psl::Suffix<'_>> {
 /// such as `githubusercontent.com`, as opposed to a registry.
 fn is_private(suffix: &psl::Suffix<'_>) -> bool {
     matches!(suffix.typ(), Some(psl::Type::Private))
+}
+
+/// Turns `fixes.toml` into the layer's [`Fixes`], with every list in
+/// canonical order, reporting every lint it trips.
+fn lower_fixes(file: &str, source: FixesSource, problems: &mut Problems) -> Fixes {
+    let mut apps = Vec::with_capacity(source.apps.len());
+    for app in source.apps {
+        let id = &app.id;
+        if app.sources.is_empty() {
+            problems.add(file, format!("fix `{id}` must cite at least one source"));
+        }
+        for url in &app.sources {
+            check_https(file, "source", url, problems);
+        }
+        for alternative in &app.alternatives {
+            check_https(file, "website", &alternative.website, problems);
+        }
+        let mut fix = AppFix {
+            id: app.id,
+            name: app.name,
+            apps: app.apps,
+            settings: app.settings,
+            no_setting: app.no_setting,
+            alternatives: app.alternatives,
+            sources: app.sources,
+        };
+        // The order of steps is the order a reader is told them in, so the
+        // settings keep theirs. What they cover is a set.
+        fix.apps.sort();
+        for setting in &mut fix.settings {
+            setting.covers.sort();
+        }
+        for none in &mut fix.no_setting {
+            none.covers.sort();
+        }
+        fix.sources.sort();
+        fix.sources.dedup();
+        apps.push(fix);
+    }
+    let mut sdks = source.sdks;
+    for sdk in &mut sdks {
+        if sdk.sources.is_empty() {
+            problems.add(file, format!("fix for `{}` must cite at least one source", sdk.rule));
+        }
+        for url in &sdk.sources {
+            check_https(file, "source", url, problems);
+        }
+        sdk.block.sort();
+        sdk.sources.sort();
+        sdk.sources.dedup();
+    }
+    Fixes { apps, sdks }
+}
+
+/// A block list holds only hosts of advertising, analytics and the like, and
+/// no host of another company than the one behind the SDK (project spec,
+/// "Fixes").
+fn check_block_lists(
+    fixes: &Fixes,
+    categories: &[Category],
+    entities: &[Entity],
+    rules: &[Rule],
+    problems: &mut Problems,
+) {
+    for sdk in &fixes.sdks {
+        let Some(rule) = rules.iter().find(|rule| rule.id == sdk.rule) else { continue };
+        let counted =
+            categories.iter().any(|category| category.id == rule.category && category.headline);
+        if !counted {
+            problems.add(
+                "fixes.toml",
+                format!(
+                    "fix for `{}`: a block list is only for a rule in a category the headline \
+                     counts, and `{}` is not one",
+                    sdk.rule, rule.category
+                ),
+            );
+        }
+        let vendor = rule.entity.as_deref().map(|id| top_company(entities, id));
+        for host in &sdk.block {
+            let under = |domain: &str| {
+                host == domain || host.strip_suffix(domain).is_some_and(|rest| rest.ends_with('.'))
+            };
+            let other = entities
+                .iter()
+                .filter(|entity| entity.domains.iter().any(|domain| under(domain)))
+                .find(|entity| Some(top_company(entities, &entity.id)) != vendor);
+            if let Some(other) = other {
+                problems.add(
+                    "fixes.toml",
+                    format!(
+                        "fix for `{}`: host `{host}` is under a domain of `{}`, which is not \
+                         the company behind the SDK; blocking it can break that company's apps",
+                        sdk.rule, other.id
+                    ),
+                );
+            }
+            if public_suffix(host).is_none() {
+                problems.add(
+                    "fixes.toml",
+                    format!("fix for `{}`: host `{host}` is under no public suffix", sdk.rule),
+                );
+            }
+        }
+    }
+}
+
+/// The id of the company at the top of the ownership chain that starts at
+/// `id`. A chain that loops or dangles stops where it does: the structural
+/// checks name that problem.
+fn top_company<'a>(entities: &'a [Entity], id: &'a str) -> &'a str {
+    let mut current = id;
+    for _ in 0..entities.len() {
+        match entities.iter().find(|entity| entity.id == current).and_then(|e| e.parent.as_deref())
+        {
+            Some(parent) => current = parent,
+            None => break,
+        }
+    }
+    current
 }
 
 /// Turns one rule file into a [`Rule`], reporting every lint it trips.
