@@ -1797,6 +1797,23 @@ fn a_block_list_names_the_hosts_and_a_firewall_of_the_platform() {
     let droid = finding(&root, &claims, "org.example.droid", "sdk/acme-analytics").text();
     assert!(droid.contains("such as NetGuard: collect.acme.com"), "{droid}");
 
+    let actions = section(&root, "actions").text();
+    assert!(
+        actions.contains(
+            "Block this host for Notes with an outbound firewall such as LuLu (free) or Little \
+             Snitch: collect.acme.com."
+        ),
+        "{actions}"
+    );
+    assert!(
+        actions.contains(
+            "Block this host for Droid with a firewall app that works without root, such as \
+             NetGuard: collect.acme.com."
+        ),
+        "{actions}"
+    );
+    assert!(!actions.contains("for Droid, Notes with"), "{actions}");
+
     let mail = finding(&root, &claims, "com.google.mail", "sdk/crashlytics").text();
     assert!(mail.contains("Google LLC publishes this app"), "{mail}");
     assert!(!mail.contains("Block"), "{mail}");

@@ -871,20 +871,30 @@ fn channel_entry(
             page.raw(".");
         });
     }
-    if let Some(&(app, claim)) = blockable.first() {
+    let mut firewalls: Vec<&'static str> = Vec::new();
+    for (app, _) in &blockable {
+        let tool = firewall(app.subject.platform);
+        if !firewalls.contains(&tool) {
+            firewalls.push(tool);
+        }
+    }
+    for tool in firewalls {
+        let group: Vec<_> =
+            blockable.iter().filter(|(app, _)| firewall(app.subject.platform) == tool).collect();
+        let Some(&&(_, claim)) = group.first() else { continue };
         let hosts = block_hosts(pack, claim, found.category.headline).unwrap_or_default();
         step(page, |page| {
             page.raw("Block ");
             page.raw(if hosts.len() == 1 { "this host" } else { "these hosts" });
             page.raw(" for ");
-            for (at, (app, claim)) in blockable.iter().enumerate() {
+            for (at, (app, claim)) in group.iter().enumerate() {
                 if at > 0 {
                     page.raw(", ");
                 }
                 app_link(page, app, claim);
             }
             page.raw(" with ");
-            page.raw(firewall(app.subject.platform));
+            page.raw(tool);
             page.raw(": ");
             for (at, host) in hosts.iter().enumerate() {
                 if at > 0 {
