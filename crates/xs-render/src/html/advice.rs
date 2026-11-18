@@ -305,6 +305,10 @@ fn is_tracking_domain(category: &str) -> bool {
     declared::category(declared::TRACKING_DOMAIN) == Some(category)
 }
 
+/// What blocking hosts may cost and cannot reach, after the list of hosts.
+const BLOCK_COST: &str = ". Blocking can stop features that rely on the service, and does not \
+                          reach what the app sends through its own servers.";
+
 /// What blocking a declared tracking domain may cost when who runs it is
 /// not established.
 const UNKNOWN_HOST: &str = " This domain may be a server of the app's own publisher: blocking it \
@@ -450,10 +454,7 @@ fn block_step(page: &mut Markup, pack: &Pack, app: &App<'_>, finding: &Finding<'
                 }
                 page.element("code", &[], host);
             }
-            page.raw(
-                ". Blocking can stop features that rely on the service, and does not reach \
-                 what the app sends through its own servers.",
-            );
+            page.raw(BLOCK_COST);
             if claim.party == Party::Unknown {
                 page.raw(UNKNOWN_HOST);
             }
@@ -855,6 +856,10 @@ fn channel_entry(
                         page.raw(" documents this setting for ");
                         page.text(&found.category.name.to_lowercase());
                         page.raw(".");
+                        if let Some(note) = &setting.note {
+                            page.raw(" ");
+                            page.text(note);
+                        }
                     });
                 }
             }
@@ -914,7 +919,7 @@ fn channel_entry(
                 }
                 page.element("code", &[], host);
             }
-            page.raw(". Blocking can stop features that rely on it.");
+            page.raw(BLOCK_COST);
             if group.iter().any(|(_, claim)| claim.party == Party::Unknown) {
                 page.raw(UNKNOWN_HOST);
             }

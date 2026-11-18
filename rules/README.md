@@ -128,7 +128,8 @@ Block lists are conservative: the compiler refuses one for a rule outside the
 counted categories, such as a crash reporter, and a host under a domain
 `entities.toml` lists for another company than the one behind the SDK. The
 report gives a block list only for a service of another company than the
-app's publisher.
+app's publisher, and for a domain an app's privacy manifest declares for
+tracking unless it is under the app's own publisher.
 
 ## Boundaries
 

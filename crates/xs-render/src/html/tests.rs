@@ -1767,6 +1767,14 @@ fn an_app_s_own_setting_is_shown_as_its_publisher_documents_it() {
     assert!(root.named("b").is_empty(), "the steps are text, never markup");
     let droid = finding(&root, &claims, "org.example.droid", "sdk/acme-analytics").text();
     assert!(droid.contains("Droid documents no setting that turns off its analytics."), "{droid}");
+    let actions = section(&root, "actions").text();
+    assert!(
+        actions.contains(
+            "In Notes, turn it off: Notes > Settings > Privacy > <b>Share usage data</b>: off. \
+             Notes documents this setting for analytics. It applies to this Mac only."
+        ),
+        "{actions}"
+    );
 
     // Without advice, the report says it has none rather than guessing.
     let plain = super::tests::pack();
@@ -1818,6 +1826,13 @@ fn a_block_list_names_the_hosts_and_a_firewall_of_the_platform() {
         "{actions}"
     );
     assert!(!actions.contains("for Droid, Notes with"), "{actions}");
+    assert!(
+        actions.contains(
+            "NetGuard: collect.acme.com. Blocking can stop features that rely on the service, and \
+             does not reach what the app sends through its own servers."
+        ),
+        "{actions}"
+    );
 
     let mail = finding(&root, &claims, "com.google.mail", "sdk/crashlytics").text();
     assert!(mail.contains("Google LLC publishes this app"), "{mail}");
@@ -1879,7 +1894,8 @@ fn a_declared_tracking_domain_without_a_company_can_be_blocked_with_a_warning() 
     assert!(
         actions.contains(
             "Block this host for Notes with an outbound firewall such as LuLu (free) or Little \
-             Snitch: track.example.net. Blocking can stop features that rely on it."
+             Snitch: track.example.net. Blocking can stop features that rely on the service, and \
+             does not reach what the app sends through its own servers."
         ),
         "{actions}"
     );
