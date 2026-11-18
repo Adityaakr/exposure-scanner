@@ -8,11 +8,14 @@
     reason = "tests run the binary and may read the environment"
 )]
 
+mod common;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use common::report_options;
 use xs_formats::testkit::{self as formats, Attr, AxmlBuilder, DexBuilder, ZipBuilder};
 use xs_model::record::Record;
 use xs_model::{Report, canon, permission};
@@ -32,7 +35,12 @@ fn fixtures() -> [PathBuf; 3] {
 }
 
 fn exposure(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_exposure")).args(args).output().unwrap()
+    let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
+    match args.split_first() {
+        Some((&"scan", rest)) => command.arg("scan").args(report_options(rest)).args(rest),
+        _ => command.args(args),
+    };
+    command.output().unwrap()
 }
 
 fn stderr(output: &Output) -> String {

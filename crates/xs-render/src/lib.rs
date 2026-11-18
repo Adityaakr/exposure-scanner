@@ -42,7 +42,47 @@ use xs_model::record::{Record, RecordId};
 use xs_model::report::{ReportSchema, ScanScope, Scanner};
 use xs_model::{Claim, EvidenceSet, Headline};
 
-pub use crate::html::{CONTENT_SECURITY_POLICY, html};
+pub use crate::html::{CONTENT_SECURITY_POLICY, checklist, html};
+
+/// How much an entry of the checklist exposes. Entries are listed with
+/// the highest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TodoPriority {
+    /// Code of an advertising, analytics, attribution, profiling or session
+    /// replay company in an app it does not publish, and a browser extension
+    /// that may read the pages a person visits.
+    High,
+    /// What apps may reach of a person: camera, microphone, screen,
+    /// location, personal data; and a domain an app declares for tracking.
+    Medium,
+    /// The rest a person can act on.
+    Low,
+}
+
+impl TodoPriority {
+    /// The word the report uses for it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+}
+
+/// One entry of the checklist, in plain words ([`checklist`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Todo {
+    pub priority: TodoPriority,
+    /// What it is about: a service, an extension, a pane of the settings or
+    /// an app.
+    pub title: String,
+    /// One line on what was found and where.
+    pub about: String,
+    /// The first thing to do. The HTML report has every step.
+    pub step: String,
+}
 
 /// What a report says about how it was made.
 #[derive(Debug, Clone, PartialEq, Eq)]

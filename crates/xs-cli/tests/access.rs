@@ -8,17 +8,25 @@
     reason = "tests run the binary and may read the environment"
 )]
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use common::report_options;
 use xs_formats::macho_build::{Binary, entitlements_part, entitlements_plist, signature_with};
 use xs_formats::testkit::{ANDROID_NAME, Attr, AxmlBuilder, ZipBuilder};
 use xs_model::record::{EdgeType, Grade, ObjectKind, Platform, Record};
 use xs_model::{Claim, Confidence, Headline, MatcherKind, Party, Report, access};
 
 fn exposure(args: &[&str]) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_exposure")).args(args).output().unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
+    match args.split_first() {
+        Some((&"scan", rest)) => command.arg("scan").args(report_options(rest)).args(rest),
+        _ => command.args(args),
+    };
+    let output = command.output().unwrap();
     assert!(
         output.status.success(),
         "exit {:?}: {}",

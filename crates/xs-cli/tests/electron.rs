@@ -14,10 +14,13 @@
     reason = "tests run the binary, may read the environment and say when they are skipped"
 )]
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use common::report_options;
 use xs_model::record::{Collector, EdgeType, Grade, Record, Region, Scope};
 use xs_model::{Claim, Confidence, Headline, MatcherKind, Party, Report};
 
@@ -34,7 +37,7 @@ const SKELETON: &str =
 fn exposure(args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
     if let Some((&"scan", rest)) = args.split_first() {
-        command.args(["scan", "--no-cache"]).args(rest);
+        command.args(["scan", "--no-cache"]).args(report_options(rest)).args(rest);
     } else {
         command.args(args);
     }

@@ -63,6 +63,16 @@ jobs:
       - name: Fetch the pinned real apps
         run: cargo xtask fixtures fetch --dir "$RUNNER_TEMP/real-apps"
 
+      # The negative-control corpus: the subset scanned on every change.
+      # The nightly workflow scans all of it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/negative-apps
+          key: negative-apps-every-change-${{ hashFiles('tests/fixtures/negative-apps.txt') }}
+
+      - name: Fetch the negative-control apps scanned on every change
+        run: cargo xtask fixtures negatives --dir "$RUNNER_TEMP/negative-apps"
+
       - name: Format
         run: cargo fmt --all --check
 
@@ -79,6 +89,11 @@ jobs:
         run: cargo test --locked --all-features -p exposure --test android_real_apps
         env:
           EXPOSURE_FIXTURE_CACHE: ${{ runner.temp }}/real-apps
+
+      - name: No negative-control app has a channel to another company
+        run: cargo test --locked --all-features -p exposure --test negative_corpus -- --nocapture
+        env:
+          EXPOSURE_NEGATIVE_CACHE: ${{ runner.temp }}/negative-apps
 
       - name: Pure crates build without the standard library
         run: cargo build --locked --target wasm32v1-none -p xs-model -p xs-match -p xs-derive -p xs-render
@@ -97,10 +112,11 @@ jobs:
 
       # The committed fixtures are far too small for the scaling gate, which
       # is skipped here and is checked on the reference laptop with
-      # `cargo xtask bench --strict`. What this run does check: the benchmark
-      # itself works, memory stays under its gate, a scan that finds its
-      # cache full reads nothing, and 17 runs at 1 to 8 threads, with the
-      # cache off, empty and full, give one report.
+      # `cargo xtask bench --strict`, as are the absolute cold-scan (60 s)
+      # and warm-scan (5 s) gates on the apps installed there. What this run
+      # does check: the benchmark itself works, memory stays under its gate,
+      # a scan that finds its cache full reads nothing, and 17 runs at 1 to
+      # 8 threads, with the cache off, empty and full, give one report.
       - name: Benchmark runs, within its memory gate, with one report
         run: cargo xtask bench tests/fixtures/macos tests/fixtures/android/Skeleton.apk
 

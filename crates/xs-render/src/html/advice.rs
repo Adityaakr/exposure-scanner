@@ -21,6 +21,8 @@
 //! can show; it says an app "may" use a permission it asks for; and where
 //! nothing can be done, or nothing is known, it says so.
 
+pub(crate) mod text;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;

@@ -8,10 +8,13 @@
     reason = "tests run the binary and may read the environment"
 )]
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+use common::report_options;
 use xs_formats::testkit::ZipBuilder;
 use xs_model::record::{EdgeType, Grade, ObjectKind, Platform, Record, SubjectKind};
 use xs_model::{Headline, Party, Report, permission};
@@ -26,7 +29,12 @@ const GOLDEN: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/browser/Extensions.report.json");
 
 fn exposure(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_exposure")).args(args).output().unwrap()
+    let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
+    match args.split_first() {
+        Some((&"scan", rest)) => command.arg("scan").args(report_options(rest)).args(rest),
+        _ => command.args(args),
+    };
+    command.output().unwrap()
 }
 
 fn stdout(output: &Output) -> String {

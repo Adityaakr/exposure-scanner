@@ -90,8 +90,29 @@ report.
 
 Real apps are pinned here by URL and SHA-256 and read from a cache folder
 outside the repository, named by `EXPOSURE_FIXTURE_CACHE`. The apps are only
-read; nothing in the cache is ever executed. Fetching the whole fixture
-corpus in CI is build plan task 13.
+read; nothing in the cache is ever executed.
+
+### Negative controls
+
+`negative-apps.txt` pins the negative-control corpus (design report, section
+7, property 2): real apps that ship no code of another company than their
+publisher. `crates/xs-cli/tests/negative_corpus.rs` scans them and fails on
+any channel to another company, at any grade and any confidence; the one
+channel it allows is an app's own update feed, which may be hosted by
+another company such as GitHub. Each line gives the hash, the name in the
+cache, the address, the set (`every-change`, which CI scans on every change,
+or `nightly`), and for a zip the app inside it:
+
+```console
+$ cargo xtask fixtures negatives --dir DIR --all   # downloads, checks hashes, unpacks zips
+$ EXPOSURE_NEGATIVE_CACHE=DIR EXPOSURE_NEGATIVE_SET=all cargo test -p exposure --test negative_corpus
+```
+
+Without `EXPOSURE_NEGATIVE_SET=all` only the `every-change` set is scanned.
+Only zips are pinned for macOS apps, since CI runs on Linux and cannot open
+a disk image; an app published only as a `.dmg` stays out of the corpus.
+An app that a dispute shows was wrongly named joins the corpus
+([docs/disputes.md](../../docs/disputes.md)).
 
 ### Electron apps
 

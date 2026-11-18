@@ -8,11 +8,15 @@ use lexopt::prelude::*;
 /// Shown by `--help` and after a usage error.
 pub(crate) const USAGE: &str = "\
 usage:
-  exposure scan [PATH...] [--html FILE] [--json FILE] [--threads N] [--no-cache]
+  exposure scan [PATH...] [--html FILE] [--json FILE] [--no-open] [--threads N] [--no-cache]
   exposure report FILE [--html FILE] [--json FILE]
   exposure rules show
   exposure rules verify PACK --sig SIGNATURE
   exposure --help | --version
+
+Start with `exposure scan`. It reads the apps installed on this Mac and the
+browser extensions in your profiles, writes the report to a private folder,
+prints what to do first and opens the report in your browser.
 
 commands:
   scan     Read the apps at each PATH (a macOS .app bundle, an Android .apk
@@ -30,6 +34,13 @@ commands:
            browser that cannot be read is reported as such and does not stop
            the scan. Nothing scanned is changed or executed, and nothing is
            sent anywhere.
+           With neither --html nor --json, the report for reading is written
+           to report.html in a folder only you can read: ~/Library/
+           Application Support/exposure on macOS, and ~/.local/share/exposure
+           (or under XDG_DATA_HOME) elsewhere. Its path and the first entries
+           of its checklist, \"What you can do\", are printed, and when the
+           scan runs in a terminal the report is opened in your browser.
+           Each scan replaces the report of the one before.
            An app that has not changed since an earlier scan is not read
            again: what was found in it is kept in a private cache, in
            ~/Library/Caches/exposure on macOS and in ~/.cache/exposure (or
@@ -45,10 +56,13 @@ options:
                 runs no script and loads nothing, grouped by company, with
                 the evidence behind every finding and a checklist of what
                 you can do about it, which the scanner does not do for you.
-  --json FILE   Write the JSON report to FILE. With neither option the JSON
-                report goes to standard output.
+  --json FILE   Write the JSON report to FILE: the findings and every
+                evidence record, for programs and for `exposure report`.
+                A FILE of - is standard output. For `report`, with neither
+                option the JSON report goes to standard output.
                 A report lists the apps a person uses, so a report file is
                 created readable by its owner only.
+  --no-open     Do not open the report in the browser.
   --threads N   Worker threads for scan. Default: one per core. The report
                 does not depend on it.
   --no-cache    Read every app again, and neither use nor keep the cache.
@@ -73,6 +87,9 @@ pub(crate) struct Scan {
     pub(crate) json: Option<PathBuf>,
     pub(crate) threads: usize,
     pub(crate) cache: Cache,
+    /// Whether the report may be opened in the browser. It is only when
+    /// it goes to the default place and the scan runs in a terminal.
+    pub(crate) open: bool,
 }
 
 /// Where a scan keeps the results it can use again.
@@ -106,6 +123,7 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
     let mut threads: Option<usize> = None;
     let mut signature: Option<PathBuf> = None;
     let mut no_cache = false;
+    let mut no_open = false;
 
     while let Some(arg) = parser.next().map_err(|error| error.to_string())? {
         match arg {
@@ -115,6 +133,7 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
             Long("json") => json = Some(value(&mut parser, "--json")?.into()),
             Long("sig") => signature = Some(value(&mut parser, "--sig")?.into()),
             Long("no-cache") => no_cache = true,
+            Long("no-open") => no_open = true,
             Long("threads") => {
                 let text = value(&mut parser, "--threads")?;
                 let count = text.to_str().and_then(|text| text.parse::<usize>().ok());
@@ -126,6 +145,12 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
             Value(word) => words.push(word),
             other => return Err(other.unexpected().to_string()),
         }
+    }
+
+    if html.as_deref() == Some(std::path::Path::new("-"))
+        && json.as_deref() == Some(std::path::Path::new("-"))
+    {
+        return Err(String::from("--html and --json cannot both go to standard output"));
     }
 
     let mut words = words.into_iter();
@@ -145,12 +170,14 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
                 json,
                 threads: threads.unwrap_or(0),
                 cache,
+                open: !no_open,
             }))
         }
         Some("report") => {
             reject("--sig", signature.is_some(), "report")?;
             reject("--threads", threads.is_some(), "report")?;
             reject("--no-cache", no_cache, "report")?;
+            reject("--no-open", no_open, "report")?;
             match <[PathBuf; 1]>::try_from(rest) {
                 Ok([file]) => Ok(Command::Report(Report { file, html, json })),
                 Err(_) => Err(String::from("report takes exactly one FILE")),
@@ -161,6 +188,7 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
             reject("--json", json.is_some(), "rules")?;
             reject("--threads", threads.is_some(), "rules")?;
             reject("--no-cache", no_cache, "rules")?;
+            reject("--no-open", no_open, "rules")?;
             let mut rest = rest.into_iter();
             let action = rest.next();
             let pack = rest.next();
@@ -202,6 +230,7 @@ mod tests {
             json: Some("out.json".into()),
             threads: 4,
             cache: Cache::Default,
+            open: true,
         });
         assert_eq!(
             parse_words(&[
@@ -234,7 +263,8 @@ mod tests {
                 html: None,
                 json: None,
                 threads: 0,
-                cache: Cache::Default
+                cache: Cache::Default,
+                open: true
             }))
         );
     }
@@ -248,7 +278,8 @@ mod tests {
                 html: Some("report.html".into()),
                 json: None,
                 threads: 0,
-                cache: Cache::Default
+                cache: Cache::Default,
+                open: true
             }))
         );
         assert_eq!(
@@ -272,6 +303,12 @@ mod tests {
         assert_eq!(cache(&["scan", "x.app"]), Cache::Default);
         assert_eq!(cache(&["scan", "--no-cache", "x.app"]), Cache::Off);
         assert_eq!(cache(&["--no-cache", "scan"]), Cache::Off);
+        let open = |words: &[&str]| match parse_words(words) {
+            Ok(Command::Scan(scan)) => scan.open,
+            other => panic!("{words:?} gave {other:?}"),
+        };
+        assert!(open(&["scan"]));
+        assert!(!open(&["scan", "--no-open"]));
         for words in [&["scan", "x.app", "--cache-dir", "kept"][..], &["--cache-dir=kept", "scan"]]
         {
             assert!(parse_words(words).is_err(), "{words:?} should be refused");
@@ -287,7 +324,8 @@ mod tests {
                 html: None,
                 json: None,
                 threads: 0,
-                cache: Cache::Default
+                cache: Cache::Default,
+                open: true
             }))
         );
         assert_eq!(
@@ -297,7 +335,8 @@ mod tests {
                 html: None,
                 json: Some("out.json".into()),
                 threads: 2,
-                cache: Cache::Default
+                cache: Cache::Default,
+                open: true
             }))
         );
     }
@@ -311,7 +350,8 @@ mod tests {
                 html: None,
                 json: None,
                 threads: 0,
-                cache: Cache::Default
+                cache: Cache::Default,
+                open: true
             }))
         );
     }
@@ -345,6 +385,9 @@ mod tests {
             &["scan", "x.app", "--cache"],
             &["report", "a.json", "--no-cache"],
             &["rules", "show", "--no-cache"],
+            &["report", "a.json", "--no-open"],
+            &["rules", "show", "--no-open"],
+            &["scan", "--html", "-", "--json", "-"],
             &["scan", "x.app", "--sig", "s"],
             &["scan", "x.app", "--html"],
             &["report"],

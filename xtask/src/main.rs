@@ -11,6 +11,7 @@ mod guard;
 mod key;
 mod net;
 mod pack;
+mod repro;
 mod symbols;
 
 use std::path::{Path, PathBuf};
@@ -30,6 +31,10 @@ rule pack
 
 fixtures
   fixtures fetch --dir DIR  download the real apps pinned in tests/fixtures/real-apps.txt
+  fixtures negatives --dir DIR [--all]
+                          download and unpack the negative-control apps pinned in
+                          tests/fixtures/negative-apps.txt: those CI scans on every
+                          change, or with --all every one
 
 guarantees
   guardrails              prove the guardrails bite: banned crates and APIs are refused
@@ -37,11 +42,17 @@ guarantees
   audit-symbols FILE      list socket functions a binary imports
   netprobe                control program: exits 0 if it can open a socket, 3 if blocked
 
+release
+  repro [REV]             build the exposure binary twice from REV (default HEAD), each
+                          from its own copy of the commit, and check the binaries are
+                          the same bytes
+
 speed
-  bench [--strict] [PATH...]  time a scan at 1, 2, 4 and 8 threads, and with nothing
-                          changed since the last one, and measure its peak memory;
-                          gates: 3x at 8 threads, under 200 MB, under 5 s when
-                          nothing changed, one report.
+  bench [--strict] [PATH...]  time a scan at 1, 2, 4 and 8 threads, with an empty
+                          results cache and with nothing changed since the last one,
+                          and measure its peak memory; gates: under 60 s cold, 3x at
+                          8 threads, under 200 MB, under 5 s when nothing changed,
+                          one report.
                           Without a PATH: the apps installed on this machine.
                           --strict: no gate may be skipped
 ";
@@ -55,12 +66,20 @@ fn main() -> ExitCode {
         ["pack", "check"] => pack::check(),
         ["key", "generate", "--dir", dir] => key::generate(Path::new(dir)),
         ["fixtures", "fetch", "--dir", dir] => fixtures::fetch(Path::new(dir)),
+        ["fixtures", "negatives", "--dir", dir] => {
+            fixtures::fetch_negatives(Path::new(dir), fixtures::Set::EveryChange)
+        }
+        ["fixtures", "negatives", "--dir", dir, "--all"] => {
+            fixtures::fetch_negatives(Path::new(dir), fixtures::Set::All)
+        }
         ["guardrails"] => guard::run(),
         ["no-network"] => net::run(false),
         ["no-network", "--strict"] => net::run(true),
         ["audit-symbols", file] => symbols::report(Path::new(file)),
         ["netprobe"] => return net::probe(),
         ["bench", rest @ ..] => bench::run_all(rest),
+        ["repro"] => repro::run("HEAD"),
+        ["repro", rev] => repro::run(rev),
         _ => {
             eprint!("{USAGE}");
             return ExitCode::from(2);

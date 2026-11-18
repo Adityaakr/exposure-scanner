@@ -8,10 +8,13 @@
     reason = "tests run the binary and may read the environment"
 )]
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use common::report_options;
 use xs_formats::testkit::{self, Attr, AxmlBuilder, DexBuilder, ZipBuilder};
 use xs_model::record::{Grade, Record};
 use xs_model::{Confidence, MatcherKind, Report};
@@ -29,7 +32,7 @@ const BUNDLE: &str =
 fn exposure(args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_exposure"));
     if let Some((&"scan", rest)) = args.split_first() {
-        command.args(["scan", "--no-cache"]).args(rest);
+        command.args(["scan", "--no-cache"]).args(report_options(rest)).args(rest);
     } else {
         command.args(args);
     }

@@ -187,7 +187,9 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         .collect::<Option<Vec<String>>>()
         .ok_or("the repository path is not UTF-8")?;
     let home = target.join("no-network/home");
-    let mut cached: Vec<&str> = vec!["scan"];
+    // The report on standard output: a scan given no file for it writes the
+    // page to the home folder instead.
+    let mut cached: Vec<&str> = vec!["scan", "--json", "-"];
     cached.extend(paths.iter().map(String::as_str));
     cached.extend(["--threads", "2"]);
     let mut plain = cached.clone();

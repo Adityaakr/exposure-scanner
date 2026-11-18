@@ -82,7 +82,7 @@ fn cached(file: &str) -> Option<PathBuf> {
 
 fn scan(paths: &[&Path], threads: usize) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
-        .args(["scan", "--no-cache", "--threads", &threads.to_string()])
+        .args(["scan", "--no-cache", "--json", "-", "--threads", &threads.to_string()])
         .args(paths)
         .output()
         .unwrap();
