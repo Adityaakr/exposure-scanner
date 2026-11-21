@@ -65,23 +65,7 @@
     <div class="hero-object">
       <div class="term" role="group" aria-label="Terminal: exposure scanning two test apps">
         <div class="term-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">exposure-scanner/tests/fixtures</span></div>
-<pre><span class="c"># two synthetic test apps from the repository</span>
-<span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk macos/ElectronSkeleton.app</span>
-<span class="dim">…</span>
-Your report: /Users/you/Library/Application Support/exposure/report.html
-It is open in your browser.
-
-<span class="b">Scanned 2 apps.</span>
-  <span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like
-  <span class="hi">2</span> apps with code or an endpoint of a company other than their publisher
-
-What you can do first (2 of 2):
-
-  1. <span class="high">[High]</span> <span class="b">PostHog</span>
-       Analytics, by PostHog Inc., in 2 apps: ElectronSkeleton and Skeleton
-       Block app.posthog.com, eu.i.posthog.com, i.posthog.com and
-       us.i.posthog.com with an outbound firewall such as LuLu (free) or Little
-       Snitch.</pre>
+<pre class="lines"><span class="ln"><span class="c"># two synthetic test apps from the repository</span></span><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk macos/ElectronSkeleton.app</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 2 apps.</span></span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">2</span> apps with code or an endpoint of a company other than their publisher</span><span class="ln"> </span><span class="ln">What you can do first (2 of 2):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics, by PostHog Inc., in 2 apps: ElectronSkeleton and Skeleton</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with an outbound firewall such as LuLu (free) or Little</span><span class="ln i7">Snitch.</span><span class="ln"> </span><span class="ln i2 h3">2. <span class="dim">[Low]</span> <span class="b">Sentry</span></span><span class="ln i7">Crash reporting, by Functional Software, Inc. (Sentry), in 2 apps:</span><span class="ln i7">ElectronSkeleton and Skeleton</span><span class="ln i7">No setting to turn it off is on record. Remove the apps you can do</span><span class="ln i7">without.</span></pre>
       </div>
 
       <article class="finding-card" aria-label="The PostHog finding from the report">
