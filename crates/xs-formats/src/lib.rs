@@ -13,6 +13,7 @@
 #![cfg_attr(not(test), deny(clippy::indexing_slicing, clippy::arithmetic_side_effects))]
 
 pub mod android_manifest;
+pub mod android_resources;
 pub mod asar;
 pub mod codesign;
 pub mod dex;

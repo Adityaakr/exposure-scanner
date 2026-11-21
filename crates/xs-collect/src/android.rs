@@ -62,9 +62,11 @@
 //! Only the DEX files Android itself loads from a package are read: the
 //! root entries `classes.dex`, `classes2.dex` and so on. A `.dex` file
 //! anywhere else is counted in a coverage record. Native libraries are
-//! matched by name only, resources are not parsed (so an app's display name
-//! is known only when the manifest states it as text), and split packages
-//! are scanned one file at a time.
+//! matched by name only, and split packages are scanned one file at a
+//! time. Of the resources, only the one string the app's display name
+//! points at is looked up, in the resource table's default configuration
+//! ([`android_resources`]): the name the app declares before any
+//! translation.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -74,7 +76,7 @@ use std::path::Path;
 
 use xs_formats::dex::{self, Dex};
 use xs_formats::zip::{self, Entry};
-use xs_formats::{Budget, FormatError, ReadError, android_manifest};
+use xs_formats::{Budget, FormatError, ReadError, android_manifest, android_resources};
 use xs_match::{Finding, HitAcc, Matchers};
 use xs_model::record::{
     ArtifactRecord, Collector, CoverageReason, CoverageRecord, CoverageStatus, EdgeRecord,
@@ -97,6 +99,8 @@ pub const MAX_ENTRY_BYTES: u64 = 256 << 20;
 pub const MAX_INFLATED_BYTES: u64 = 1 << 30;
 
 const MANIFEST: &str = "AndroidManifest.xml";
+/// The compiled resource table, which holds the app's display name.
+const RESOURCES: &str = "resources.arsc";
 /// The app id of a package whose manifest does not give one. A constant,
 /// not the file's name: evidence must depend on the bytes of the artifact
 /// and on nothing else. The digest still tells two such packages apart.
@@ -168,6 +172,7 @@ const fn coverage_of(error: ReadError) -> (CoverageStatus, CoverageReason) {
 enum Kind {
     Manifest,
     Dex,
+    Resources,
 }
 
 impl Kind {
@@ -176,6 +181,7 @@ impl Kind {
         match self {
             Self::Manifest => android_manifest::MAX_BYTES as u64,
             Self::Dex => MAX_ENTRY_BYTES,
+            Self::Resources => android_resources::MAX_BYTES as u64,
         }
     }
 }
@@ -199,6 +205,10 @@ enum Content {
     Manifest(android_manifest::Manifest),
     /// The hits in the class table and the string table of a DEX file.
     Dex(HitAcc),
+    /// The resource table, kept whole until the manifest says which of its
+    /// strings is the app's name: the table may come before the manifest
+    /// in the archive.
+    Resources(Vec<u8>),
 }
 
 /// One entry the pass copies out of the archive as it goes by.
@@ -292,6 +302,7 @@ impl<'a> Capture<'a> {
         Ok(match self.kind {
             Kind::Manifest => Content::Manifest(android_manifest::parse(&content)?),
             Kind::Dex => Content::Dex(dex_hits(&content, matchers)?),
+            Kind::Resources => Content::Resources(content.into_owned()),
         })
     }
 
@@ -573,6 +584,7 @@ fn plan<'a>(
     gaps: &mut Gaps,
 ) -> Vec<Capture<'a>> {
     let mut manifest = None;
+    let mut resources = None;
     let mut dex_files: Vec<(u32, RelPath, Entry<'a>)> = Vec::new();
     for entry in entries {
         if entry.is_directory() {
@@ -592,6 +604,8 @@ fn plan<'a>(
         matchers.match_value(MatcherKind::ApkFile, SCOPE, entry.name, names);
         if name == MANIFEST {
             manifest = Some((path, *entry));
+        } else if name == RESOURCES {
+            resources = Some((path, *entry));
         } else if let Some(number) = dex_number(name) {
             dex_files.push((number, path, *entry));
         } else if name.ends_with(".dex") {
@@ -608,6 +622,7 @@ fn plan<'a>(
     let wanted = manifest
         .into_iter()
         .map(|(path, entry)| (Kind::Manifest, path, entry))
+        .chain(resources.map(|(path, entry)| (Kind::Resources, path, entry)))
         .chain(dex_files.into_iter().map(|(_, path, entry)| (Kind::Dex, path, entry)));
     let mut captures = Vec::new();
     let mut total: u64 = 0;
@@ -692,11 +707,13 @@ fn records(
     matchers: &Matchers<'_>,
 ) -> Vec<Record> {
     let mut manifest = None;
+    let mut resources = None;
     let mut dex_files: Vec<(RelPath, HitAcc)> = Vec::new();
     for (name, content) in entries {
         match content {
             Ok(Content::Manifest(parsed)) => manifest = Some((name, parsed)),
             Ok(Content::Dex(hits)) => dex_files.push((name, hits)),
+            Ok(Content::Resources(table)) => resources = Some((name, table)),
             Err(error) => gaps.at(&name, coverage_of(error)),
         }
     }
@@ -713,6 +730,19 @@ fn records(
         gaps.at(location, (CoverageStatus::Unrecognized, CoverageReason::ParseError));
     }
     let version = declared(parsed.and_then(|m| m.version_name.as_ref()), text::MAX_VERSION_BYTES);
+    // The name: as text in the manifest, or the string it points at. A
+    // table that cannot be read for it leaves a gap; one that does not hold
+    // the string does not, since the name is then simply not declared.
+    let mut label = parsed.and_then(|m| m.label.clone());
+    if let (None, Some(id), Some((location, table))) =
+        (&label, parsed.and_then(|m| m.label_ref), &resources)
+    {
+        match android_resources::string(table, id) {
+            Ok(found) => label = found,
+            Err(error) => gaps.at(location, coverage_of(error.into())),
+        }
+    }
+    drop(resources);
     let subject = Subject {
         kind: SubjectKind::App,
         platform: Platform::Android,
@@ -726,7 +756,7 @@ fn records(
         collector: Collector::AndroidApk,
         subject: subject.clone(),
         facts: Facts {
-            name: declared(parsed.and_then(|m| m.label.as_ref()), text::MAX_NAME_BYTES),
+            name: declared(label.as_ref(), text::MAX_NAME_BYTES),
             team_id: None,
             sandbox: None,
             files_scanned: 1,
@@ -1326,6 +1356,67 @@ mod tests {
         // The build number is not a version name and does not stand in.
         assert_eq!(artifact.subject.version, None);
         assert_eq!(coverage(&records), ["Unrecognized ParseError AndroidManifest.xml None 1"]);
+    }
+
+    /// A manifest whose application label points at the string resource
+    /// `label`.
+    fn labelled_manifest(label: u32) -> Vec<u8> {
+        testkit::AxmlBuilder::new()
+            .start("manifest", &[testkit::Attr::plain("package", "com.example.app")])
+            .start(
+                "application",
+                &[testkit::Attr::reference(testkit::ANDROID_LABEL, "label", label)],
+            )
+            .end()
+            .end()
+            .finish()
+    }
+
+    #[test]
+    fn the_name_a_label_points_at_is_read_from_the_resource_table() {
+        const LABEL: u32 = 0x7f0f_0001;
+        let table = testkit::ArscBuilder::new()
+            .string(LABEL, &[(None, "Example App"), (Some(*b"de"), "Beispiel")])
+            .finish();
+        let pack = tracker_pack();
+        // The table may come before or after the manifest in the archive.
+        let after = ZipBuilder::new()
+            .deflated(MANIFEST, &labelled_manifest(LABEL))
+            .stored(RESOURCES, &table)
+            .finish();
+        let before = ZipBuilder::new()
+            .stored(RESOURCES, &table)
+            .deflated(MANIFEST, &labelled_manifest(LABEL))
+            .finish();
+        for apk in [after, before] {
+            let records = scan(&apk, &pack);
+            assert_eq!(artifact(&records).facts.name.as_deref(), Some("Example App"));
+            assert_eq!(coverage(&records), Vec::<String>::new());
+        }
+
+        // A label the table does not hold is no name, and no gap.
+        let apk = ZipBuilder::new()
+            .deflated(MANIFEST, &labelled_manifest(0x7f0f_0009))
+            .stored(RESOURCES, &table)
+            .finish();
+        let records = scan(&apk, &pack);
+        assert_eq!(artifact(&records).facts.name, None);
+        assert_eq!(coverage(&records), Vec::<String>::new());
+
+        // Without a table there is no name either.
+        let apk = ZipBuilder::new().deflated(MANIFEST, &labelled_manifest(LABEL)).finish();
+        assert_eq!(artifact(&scan(&apk, &pack)).facts.name, None);
+
+        // A table that cannot be read for the name is a gap, and the rest
+        // of the package is still reported.
+        let apk = ZipBuilder::new()
+            .deflated(MANIFEST, &labelled_manifest(LABEL))
+            .stored(RESOURCES, b"not a resource table")
+            .finish();
+        let records = scan(&apk, &pack);
+        assert_eq!(artifact(&records).subject.id, "com.example.app");
+        assert_eq!(artifact(&records).facts.name, None);
+        assert_eq!(coverage(&records), ["Unrecognized ParseError resources.arsc None 1"]);
     }
 
     #[test]

@@ -214,9 +214,15 @@ fn the_play_build_of_bitwarden_reports_the_five_google_sdks() {
 fn the_fdroid_build_of_bitwarden_and_newpipe_report_nothing() {
     let newpipe: [(&str, &[&str]); 2] =
         [("network-client", &["INTERNET"]), ("shared-storage", &["WRITE_EXTERNAL_STORAGE"])];
-    for (file, id, version, asked) in [
-        (BITWARDEN_FDROID, "com.x8bit.bitwarden", "2026.9.1", &BITWARDEN_MAY_ACCESS[..]),
-        (NEWPIPE, "org.schabi.newpipe", "0.29.3", &newpipe[..]),
+    for (file, id, name, version, asked) in [
+        (
+            BITWARDEN_FDROID,
+            "com.x8bit.bitwarden",
+            "Bitwarden",
+            "2026.9.1",
+            &BITWARDEN_MAY_ACCESS[..],
+        ),
+        (NEWPIPE, "org.schabi.newpipe", "NewPipe", "0.29.3", &newpipe[..]),
     ] {
         let Some(apk) = cached(file) else { return };
         let report: Report = serde_json::from_str(&scan(&[&apk], 2)).unwrap();
@@ -234,6 +240,8 @@ fn the_fdroid_build_of_bitwarden_and_newpipe_report_nothing() {
             panic!("{file}: expected one artifact record, got {records:?}")
         };
         assert_eq!(artifact.subject.id, id);
+        // The name the label points at, from the resource table.
+        assert_eq!(artifact.facts.name.as_deref(), Some(name), "{file}");
         assert_eq!(artifact.subject.version.as_deref(), Some(version));
         assert_eq!(artifact.subject.digest.to_string(), format!("sha256:{}", pinned(file)));
     }
@@ -256,4 +264,39 @@ fn the_real_apps_give_one_report_whatever_the_order_and_thread_count() {
         assert!(scan(&forward, threads) == reference, "{threads} threads");
         assert!(scan(&backward, threads) == reference, "{threads} threads, reversed");
     }
+}
+
+/// The release-audit job: `exposure diff` of the two builds of Bitwarden
+/// says what the Play build ships that the F-Droid build does not, by name.
+#[test]
+fn the_diff_of_the_two_builds_of_bitwarden_is_the_five_google_sdks() {
+    let (Some(play), Some(fdroid)) = (cached(BITWARDEN_PLAY), cached(BITWARDEN_FDROID)) else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = (dir.path().join("fdroid.json"), dir.path().join("play.json"));
+    std::fs::write(&old, scan(&[&fdroid], 2)).unwrap();
+    std::fs::write(&new, scan(&[&play], 2)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
+        .args(["diff"])
+        .args([&old, &new])
+        .args(["--fail-on", "company:google"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "Bitwarden (Android, com.x8bit.bitwarden), 2026.9.1\n\
+         \x20 + Firebase Cloud Messaging (Push messaging, Google LLC): contains\n\
+         \x20 + Firebase Crashlytics (Crash reporting, Google LLC): contains\n\
+         \x20 + Firebase Installations (Installation identifiers, Google LLC): contains\n\
+         \x20 + Google DataTransport (Telemetry transport, Google LLC): contains\n\
+         \x20 + Google Play Billing Library (Payments, Google LLC): contains\n\
+         \n\
+         5 findings added, 0 findings removed, 0 findings changed grade, in 1 of 1 app.\n"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("fail-on company:google: met by 5 added findings in 1 app")
+    );
 }

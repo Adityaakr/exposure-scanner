@@ -64,7 +64,8 @@ const UTF8_FLAG: u32 = 1 << 8;
 const NO_INDEX: u32 = u32::MAX;
 
 /// Typed value kinds (`Res_value`).
-const TYPE_STRING: u8 = 0x03;
+pub(crate) const TYPE_REFERENCE: u8 = 0x01;
+pub(crate) const TYPE_STRING: u8 = 0x03;
 /// The range of integer kinds (`TYPE_FIRST_INT` to `TYPE_LAST_INT`).
 const TYPE_INTS: core::ops::RangeInclusive<u8> = 0x10..=0x1f;
 
@@ -86,9 +87,13 @@ pub struct Manifest {
     /// `android:versionName`, the version shown to users.
     pub version_name: Option<String>,
     /// `android:label` of the application, when the manifest holds it as
-    /// text. Most apps point at a string resource instead, which this
-    /// reader does not resolve.
+    /// text.
     pub label: Option<String>,
+    /// The resource `android:label` of the application points at, when the
+    /// manifest holds a reference rather than text, as most apps do. The
+    /// resource table of the package says what it is
+    /// ([`android_resources::string`](crate::android_resources::string)).
+    pub label_ref: Option<u32>,
     /// The components and `meta-data` entries, in document order.
     pub components: Vec<Component>,
     /// Every `uses-permission` and `uses-permission-sdk-23` element that
@@ -133,15 +138,15 @@ enum Tag {
 }
 
 /// One chunk: its type, its header and its whole extent.
-struct Chunk<'a> {
-    kind: u16,
-    header_bytes: usize,
-    bytes: &'a [u8],
+pub(crate) struct Chunk<'a> {
+    pub(crate) kind: u16,
+    pub(crate) header_bytes: usize,
+    pub(crate) bytes: &'a [u8],
 }
 
 impl<'a> Chunk<'a> {
     /// The chunk at the start of `bytes`.
-    fn read(bytes: &'a [u8]) -> Result<Self, FormatError> {
+    pub(crate) fn read(bytes: &'a [u8]) -> Result<Self, FormatError> {
         let kind = u16_at(bytes, 0).ok_or(FormatError::Malformed)?;
         let header_bytes = usize::from(u16_at(bytes, 2).ok_or(FormatError::Malformed)?);
         let size = usize_at(bytes, 4).ok_or(FormatError::Malformed)?;
@@ -153,13 +158,13 @@ impl<'a> Chunk<'a> {
     }
 
     /// What follows the chunk's header.
-    fn body(&self) -> &'a [u8] {
+    pub(crate) fn body(&self) -> &'a [u8] {
         self.bytes.get(self.header_bytes..).unwrap_or_default()
     }
 }
 
 /// The string pool of the document.
-struct Pool<'a> {
+pub(crate) struct Pool<'a> {
     /// The offsets of the strings, four bytes each.
     offsets: &'a [u8],
     /// The string data the offsets point into.
@@ -175,7 +180,7 @@ enum Encoded<'a> {
 }
 
 impl<'a> Pool<'a> {
-    fn read(chunk: &Chunk<'a>) -> Result<Self, FormatError> {
+    pub(crate) fn read(chunk: &Chunk<'a>) -> Result<Self, FormatError> {
         let field = |at| usize_at(chunk.bytes, at).ok_or(FormatError::Malformed);
         let (count, strings_start) = (field(8)?, field(20)?);
         let flags = u32_at(chunk.bytes, 16).ok_or(FormatError::Malformed)?;
@@ -247,7 +252,11 @@ impl<'a> Pool<'a> {
 
     /// String `index` as text, charged against `budget`. Bytes that are not
     /// valid in their encoding become U+FFFD.
-    fn text(&self, index: u32, budget: &mut usize) -> Result<Option<String>, FormatError> {
+    pub(crate) fn text(
+        &self,
+        index: u32,
+        budget: &mut usize,
+    ) -> Result<Option<String>, FormatError> {
         let Some(encoded) = self.encoded(index) else { return Ok(None) };
         let text = match encoded {
             Encoded::Utf8(bytes) => {
@@ -425,10 +434,14 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, FormatError> {
                             }
                         }
                         (Some(Tag::Manifest), Some(ATTR_LABEL))
-                            if manifest.label.is_none() && pool.is(name, "application") =>
+                            if manifest.label.is_none()
+                                && manifest.label_ref.is_none()
+                                && pool.is(name, "application") =>
                         {
                             if let Some(index) = attribute.typed_string() {
                                 manifest.label = pool.text(index, &mut text_budget)?;
+                            } else if attribute.kind == TYPE_REFERENCE && attribute.data != 0 {
+                                manifest.label_ref = Some(attribute.data);
                             }
                         }
                         (Some(Tag::Application | Tag::Component), Some(ATTR_NAME)) => {
@@ -593,6 +606,7 @@ mod tests {
             package: Some("com.example.app".into()),
             version_name: Some("2026.9.1".into()),
             label: None,
+            label_ref: Some(0x7f0f_0001),
             components: [
                 "com.example.app.MainActivity",
                 "android.app.shortcuts",
