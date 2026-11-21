@@ -574,7 +574,7 @@ fn diff_compares_two_reports_app_by_app() {
     let output = exposure(&["diff", text(&older), text(&android), "--fail-on", "headline"]);
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
     assert!(String::from_utf8_lossy(&output.stdout).contains("\n  + PostHog ("));
-    assert!(stderr(&output).contains("fail-on headline: met by 1 added finding in 1 app"));
+    assert!(stderr(&output).contains("fail-on headline: met by 1 new finding in 1 app"));
 
     // Apps in one report only are said to be, and the comparison as JSON
     // goes to standard output alone with `--json -`.
@@ -597,6 +597,48 @@ fn diff_compares_two_reports_app_by_app() {
     // A report that is not one is refused.
     let output = exposure(&["diff", text(&android), FIXTURE]);
     assert_eq!(output.status.code(), Some(1));
+}
+
+/// On a diff, `--fail-on` closes on a finding both reports have when it
+/// newly meets the condition there: a finding of the app's own vendor is
+/// counted in the headline from `contains` up, not at `declares`. One that
+/// met it in the old report as well leaves the gate open.
+#[test]
+fn diff_fail_on_closes_on_a_finding_that_newly_meets_the_condition() {
+    let dir = tempfile::tempdir().unwrap();
+    let android = dir.path().join("android.json");
+    exposure(&["scan", ANDROID_FIXTURE, "--json", text(&android)]);
+    let report: Report = serde_json::from_slice(&fs::read(&android).unwrap()).unwrap();
+    let at = |grade: Grade| {
+        let mut edited = report.clone();
+        let posthog =
+            edited.claims.iter_mut().find(|claim| claim.object.id == "sdk/posthog").unwrap();
+        assert!(posthog.headline);
+        posthog.party = Party::First;
+        posthog.grade = grade;
+        posthog.rungs = vec![grade];
+        let path = dir.path().join(format!("{grade:?}.json"));
+        fs::write(&path, serde_json::to_vec(&edited).unwrap()).unwrap();
+        path
+    };
+    let (declares, contains) = (at(Grade::Declares), at(Grade::Contains));
+
+    let output = exposure(&["diff", text(&declares), text(&contains), "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("\n  ~ PostHog ("),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(stderr(&output).contains("fail-on headline: met by 1 new finding in 1 app"));
+
+    let output = exposure(&["diff", text(&contains), text(&declares), "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(stderr(&output).contains("fail-on headline: not met"), "{}", stderr(&output));
+
+    // Counted in both, as the third-party finding of the fixture is.
+    let output = exposure(&["diff", text(&android), text(&contains), "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
 }
 
 /// Beside the headline, the summary counts what the Android apps ship in

@@ -220,6 +220,9 @@ struct Gap {
 struct Gaps {
     located: Vec<Gap>,
     counted: BTreeMap<(CoverageStatus, CoverageReason), u32>,
+    /// Why the resource table was not read. It is a gap only when the
+    /// manifest points at the app's name in the table.
+    table: Option<Gap>,
 }
 
 impl Gaps {
@@ -232,13 +235,25 @@ impl Gaps {
         self.located.push(Gap { status, reason, location: location.clone(), bytes: None });
     }
 
-    fn over_budget(&mut self, location: &RelPath, bytes: u64) {
-        self.located.push(Gap {
-            status: CoverageStatus::Skipped,
-            reason: CoverageReason::OverBudget,
-            location: location.clone(),
-            bytes: Some(bytes),
-        });
+    fn over_budget(&mut self, kind: Kind, location: &RelPath, bytes: u64) {
+        self.push(
+            kind,
+            Gap {
+                status: CoverageStatus::Skipped,
+                reason: CoverageReason::OverBudget,
+                location: location.clone(),
+                bytes: Some(bytes),
+            },
+        );
+    }
+
+    /// A gap at an entry of `kind`, kept aside if it is the resource table.
+    fn push(&mut self, kind: Kind, gap: Gap) {
+        if kind.is_table() {
+            self.table = Some(gap);
+        } else {
+            self.located.push(gap);
+        }
     }
 }
 
@@ -278,6 +293,10 @@ impl Kind {
             Self::Resources => android_resources::MAX_BYTES as u64,
             Self::BundleResources => android_proto::MAX_BYTES as u64,
         }
+    }
+
+    const fn is_table(self) -> bool {
+        matches!(self, Self::Resources | Self::BundleResources)
     }
 }
 
@@ -422,11 +441,12 @@ impl<'a> Capture<'a> {
     /// The entry's name and what it held. An entry the pass never went over
     /// all of, because the file ends before the entry does, is read from
     /// what there is, which fails.
-    fn finish(mut self, matchers: &Matchers<'_>) -> (RelPath, Result<Content, ReadError>) {
+    fn finish(mut self, matchers: &Matchers<'_>) -> (RelPath, Kind, Result<Content, ReadError>) {
         if self.outcome.is_none() {
             self.read(matchers);
         }
-        (self.name, self.outcome.unwrap_or(Err(ReadError::Format(FormatError::Malformed))))
+        let outcome = self.outcome.unwrap_or(Err(ReadError::Format(FormatError::Malformed)));
+        (self.name, self.kind, outcome)
     }
 }
 
@@ -689,8 +709,9 @@ fn scan_package(
 ///
 /// Matches every entry name against the `apk_file` tokens, and picks the
 /// manifest, the resource table and the DEX files Android would load, in
-/// the order they are then read: the manifest, the table, then the DEX
-/// files by module (the base module first) and number. The byte budgets
+/// the order they are then read: the manifest, the DEX files by module (the
+/// base module first) and number, then the table, which holds only a name
+/// and so never takes the budget of a DEX file. The byte budgets
 /// are applied here, to the sizes the directory declares, so the same
 /// archive loses the same entries on every run.
 ///
@@ -776,8 +797,8 @@ fn plan<'a>(
 
     let wanted = manifest
         .into_iter()
-        .chain(resources)
-        .chain(dex_files.into_iter().map(|(_, path, entry)| (Kind::Dex, path, entry)));
+        .chain(dex_files.into_iter().map(|(_, path, entry)| (Kind::Dex, path, entry)))
+        .chain(resources);
     let mut captures = Vec::new();
     let mut total: u64 = 0;
     for (kind, path, entry) in wanted {
@@ -785,7 +806,7 @@ fn plan<'a>(
         // larger of the two is what the entry costs, and what is reported.
         let cost = u64::from(entry.bytes).max(u64::from(entry.compressed_bytes));
         if cost > kind.budget() || total.saturating_add(cost) > MAX_INFLATED_BYTES {
-            gaps.over_budget(&path, cost);
+            gaps.over_budget(kind, &path, cost);
             continue;
         }
         total = total.saturating_add(cost);
@@ -813,7 +834,15 @@ fn plan<'a>(
     captures.retain(|capture| {
         let keep = !shared.contains(&index);
         if !keep {
-            gaps.at(&capture.name, (CoverageStatus::Unrecognized, CoverageReason::ParseError));
+            gaps.push(
+                capture.kind,
+                Gap {
+                    status: CoverageStatus::Unrecognized,
+                    reason: CoverageReason::ParseError,
+                    location: capture.name.clone(),
+                    bytes: None,
+                },
+            );
         }
         index += 1;
         keep
@@ -837,8 +866,8 @@ fn manifest_missing(captures: &[Capture<'_>], gaps: &Gaps, layout: Layout) -> bo
 
 /// What the pass read of one package.
 struct Pass<'a> {
-    /// Each entry that was read, with what it held.
-    entries: Vec<(RelPath, Result<Content, ReadError>)>,
+    /// Each entry that was read, with what it was read as and what it held.
+    entries: Vec<(RelPath, Kind, Result<Content, ReadError>)>,
     /// The `apk_file` hits in the entry names.
     names: &'a HitAcc,
     /// For a bundle, the entry that has each name an APK would have.
@@ -873,12 +902,15 @@ fn records(
     let mut manifest = None;
     let mut resources = None;
     let mut dex_files: Vec<(RelPath, HitAcc)> = Vec::new();
-    for (name, content) in entries {
+    for (name, kind, content) in entries {
         match content {
             Ok(Content::Manifest(parsed)) => manifest = Some((name, parsed)),
             Ok(Content::Dex(hits)) => dex_files.push((name, hits)),
             Ok(Content::Resources(table)) => resources = Some((name, table)),
-            Err(error) => gaps.at(&name, coverage_of(error)),
+            Err(error) => {
+                let (status, reason) = coverage_of(error);
+                gaps.push(kind, Gap { status, reason, location: name, bytes: None });
+            }
         }
     }
 
@@ -896,14 +928,18 @@ fn records(
     let version = declared(parsed.and_then(|m| m.version_name.as_ref()), text::MAX_VERSION_BYTES);
     // The name: as text in the manifest, or the string it points at. A
     // table that cannot be read for it leaves a gap; one that does not hold
-    // the string does not, since the name is then simply not declared.
+    // the string does not, since the name is then simply not declared. A
+    // table the name does not need is no gap, whatever kept it from being
+    // read.
     let mut label = parsed.and_then(|m| m.label.clone());
-    if let (None, Some(id), Some((location, table))) =
-        (&label, parsed.and_then(|m| m.label_ref), &resources)
-    {
-        match table.string(id) {
-            Ok(found) => label = found,
-            Err(error) => gaps.at(location, coverage_of(error.into())),
+    let table_gap = gaps.table.take();
+    if let (None, Some(id)) = (&label, parsed.and_then(|m| m.label_ref)) {
+        match &resources {
+            Some((location, table)) => match table.string(id) {
+                Ok(found) => label = found,
+                Err(error) => gaps.at(location, coverage_of(error.into())),
+            },
+            None => gaps.located.extend(table_gap),
         }
     }
     drop(resources);
@@ -1586,6 +1622,41 @@ mod tests {
         assert_eq!(artifact(&records).subject.id, "com.example.app");
         assert_eq!(artifact(&records).facts.name, None);
         assert_eq!(coverage(&records), ["Unrecognized ParseError resources.arsc None 1"]);
+    }
+
+    /// A resource table that is over its budget or cannot be inflated is a
+    /// gap when the manifest points at the name in it, and none when the
+    /// manifest needs nothing from it.
+    #[test]
+    fn a_table_not_read_is_a_gap_only_when_the_name_needs_it() {
+        let pack = tracker_pack();
+        const OVER: u32 = android_resources::MAX_BYTES as u32 + 1;
+        type AddTable = fn(ZipBuilder) -> ZipBuilder;
+        let tables: [(AddTable, String); 2] = [
+            (
+                |zip| zip.raw(RESOURCES, 0, 0, b"x", OVER),
+                format!("Skipped OverBudget resources.arsc Some({OVER}) 1"),
+            ),
+            (
+                |zip| zip.raw(RESOURCES, 8, 0, b"\xff\xff\xff\xff", 16),
+                String::from("Unrecognized ParseError resources.arsc None 1"),
+            ),
+        ];
+        for (table, gap) in tables {
+            let labelled =
+                table(ZipBuilder::new().deflated(MANIFEST, &labelled_manifest(0x7f0f_0001)))
+                    .finish();
+            let records = scan(&labelled, &pack);
+            assert_eq!(artifact(&records).facts.name, None);
+            assert_eq!(coverage(&records), [gap.as_str()]);
+
+            let unlabelled = table(ZipBuilder::new().deflated(MANIFEST, &tracker_manifest()))
+                .stored("classes.dex", &tracker_dex())
+                .finish();
+            let records = scan(&unlabelled, &pack);
+            assert_eq!(artifact(&records).subject.id, "com.example.app");
+            assert_eq!(coverage(&records), Vec::<String>::new(), "{gap}");
+        }
     }
 
     /// The tracker's manifest in the protocol buffer form of a bundle.

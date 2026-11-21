@@ -47,7 +47,7 @@ pub(crate) enum Gate {
 /// checked, for the summary.
 fn close_on<'a>(
     conditions: &[gate::Condition],
-    claims: impl Iterator<Item = &'a xs_model::Claim> + Clone,
+    claims: impl Iterator<Item = (&'a xs_model::Claim, Option<&'a xs_model::Claim>)> + Clone,
     kind: &str,
 ) -> Gate {
     if conditions.is_empty() {
@@ -272,7 +272,7 @@ pub(crate) fn scan(args: &args::Scan) -> Result<Gate> {
         let opened = args.open && std::io::stdout().is_terminal() && open_in_browser(&page);
         print(&summary(&report, &scanned, &page, opened))?;
     }
-    Ok(close_on(&conditions, report.findings.iter(), ""))
+    Ok(close_on(&conditions, report.findings.iter().map(|claim| (claim, None)), ""))
 }
 
 /// What Android apps ship beside the headline, in a few words, or nothing
@@ -477,7 +477,7 @@ pub(crate) fn report(args: &args::Report) -> Result<Gate> {
         Outputs { html: args.html.as_deref(), json: args.json.as_deref(), checklist: false };
     let report = render(&saved.evidence, &pack, saved.scanner, saved.scope, outputs)?;
     deliver_all(&report, outputs)?;
-    Ok(close_on(&conditions, report.findings.iter(), ""))
+    Ok(close_on(&conditions, report.findings.iter().map(|claim| (claim, None)), ""))
 }
 
 /// `exposure diff`: what the findings of NEW add to and take from those of
@@ -507,7 +507,7 @@ pub(crate) fn diff(args: &args::Diff) -> Result<Gate> {
              may come from the rules rather than from the apps"
         );
     }
-    Ok(close_on(&conditions, diff.added(), "added "))
+    Ok(close_on(&conditions, diff.pairs(), "new "))
 }
 
 /// `exposure rules show`

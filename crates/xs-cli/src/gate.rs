@@ -1,7 +1,9 @@
 //! `--fail-on`: the findings a release gate stops on.
 //!
 //! A scan, a saved report or a diff is checked against each condition once
-//! its reports are written. A condition that a finding meets makes the
+//! its reports are written. Of a diff, the findings that newly meet a
+//! condition are checked: those the new report adds, and those that meet it
+//! there but did not in the old report. A condition that a finding meets makes the
 //! command exit with [`EXIT_MATCHED`](crate::EXIT_MATCHED), which a CI job
 //! can stop a release on; what was written is written either way.
 
@@ -95,15 +97,23 @@ pub(crate) struct Met {
     pub(crate) apps: usize,
 }
 
-/// Each condition with how many of `claims` meet it, in the order given.
+/// Each condition with how many of `claims` newly meet it, in the order
+/// given. A claim comes with the same finding in an earlier report, if one
+/// is compared: a finding that met the condition there is not counted.
 pub(crate) fn check<'a>(
     conditions: &[Condition],
-    claims: impl Iterator<Item = &'a Claim> + Clone,
+    claims: impl Iterator<Item = (&'a Claim, Option<&'a Claim>)> + Clone,
 ) -> Vec<Met> {
     conditions
         .iter()
         .map(|condition| {
-            let met: Vec<&Claim> = claims.clone().filter(|claim| condition.meets(claim)).collect();
+            let met: Vec<&Claim> = claims
+                .clone()
+                .filter(|(claim, was)| {
+                    condition.meets(claim) && !was.is_some_and(|was| condition.meets(was))
+                })
+                .map(|(claim, _)| claim)
+                .collect();
             let apps: BTreeSet<_> =
                 met.iter().map(|claim| (claim.subject.platform, &claim.subject.id)).collect();
             Met { condition: condition.written.clone(), findings: met.len(), apps: apps.len() }
@@ -113,7 +123,7 @@ pub(crate) fn check<'a>(
 
 /// The lines the summary on standard error gives the gate, and whether any
 /// condition was met. It names the conditions the user gave, and no app.
-/// `kind` says which findings were checked, such as `added ` for a diff.
+/// `kind` says which findings were checked, such as `new ` for a diff.
 pub(crate) fn summary(met: &[Met], kind: &str) -> (String, bool) {
     let mut out = String::new();
     let mut any = false;
@@ -152,14 +162,14 @@ mod tests {
              exposure: fail-on company:google: met by 5 findings in 1 app\n\
              exposure: fail-on: a condition was met, so the exit status is 3\n"
         );
-        let (text, any) = summary(&met[..1], "added ");
+        let (text, any) = summary(&met[..1], "new ");
         assert!(!any);
         assert_eq!(text, "exposure: fail-on headline: not met\n");
         let one = [Met { condition: "headline".into(), findings: 1, apps: 1 }];
         assert!(
-            summary(&one, "added ")
+            summary(&one, "new ")
                 .0
-                .starts_with("exposure: fail-on headline: met by 1 added finding in 1 app\n")
+                .starts_with("exposure: fail-on headline: met by 1 new finding in 1 app\n")
         );
     }
 }

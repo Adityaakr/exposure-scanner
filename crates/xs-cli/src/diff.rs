@@ -100,9 +100,6 @@ pub(crate) struct Change<'a> {
     /// The grade in the report that has the finding: the new one, except
     /// for a finding the new report no longer has.
     pub(crate) grade: Grade,
-    /// The claim itself, for `--fail-on`.
-    #[serde(skip)]
-    pub(crate) claim: &'a Claim,
 }
 
 impl<'a> Change<'a> {
@@ -116,7 +113,6 @@ impl<'a> Change<'a> {
             headline: claim.headline,
             old_grade,
             grade: claim.grade,
-            claim,
         }
     }
 
@@ -177,6 +173,10 @@ pub(crate) struct Diff<'a> {
     pub(crate) totals: Totals,
     /// The apps with a change, ordered by name as a reader sees it.
     pub(crate) apps: Vec<AppDiff<'a>>,
+    /// Each finding of the new report with the same finding in the old
+    /// one, if it has it, for `--fail-on`.
+    #[serde(skip)]
+    pairs: Vec<(&'a Claim, Option<&'a Claim>)>,
 }
 
 /// Compares `old` with `new`.
@@ -186,6 +186,7 @@ pub(crate) fn compare<'a>(old: &'a Report, new: &'a Report) -> Diff<'a> {
     let keys: BTreeSet<AppKey<'a>> = before.keys().chain(after.keys()).copied().collect();
     let mut totals = Totals { apps: keys.len(), ..Totals::default() };
     let mut apps = Vec::new();
+    let mut pairs = Vec::new();
     for key in keys {
         let (old_side, new_side) = (before.remove(&key), after.remove(&key));
         let presence = match (&old_side, &new_side) {
@@ -207,7 +208,9 @@ pub(crate) fn compare<'a>(old: &'a Report, new: &'a Report) -> Diff<'a> {
             changed: Vec::new(),
         };
         for (claim_key, &claim) in &new_side.claims {
-            match old_side.claims.get(claim_key) {
+            let was = old_side.claims.get(claim_key).copied();
+            pairs.push((claim, was));
+            match was {
                 None => app.added.push(Change::of(claim, None)),
                 Some(was) if was.grade != claim.grade => {
                     app.changed.push(Change::of(claim, Some(was.grade)));
@@ -244,13 +247,15 @@ pub(crate) fn compare<'a>(old: &'a Report, new: &'a Report) -> Diff<'a> {
         same_rules: old.packs == new.packs,
         totals,
         apps,
+        pairs,
     }
 }
 
-impl Diff<'_> {
-    /// The findings the new report adds, for `--fail-on`.
-    pub(crate) fn added(&self) -> impl Iterator<Item = &Claim> + Clone {
-        self.apps.iter().flat_map(|app| app.added.iter().map(|change| change.claim))
+impl<'a> Diff<'a> {
+    /// Each finding of the new report with the same finding in the old
+    /// one, if it has it, for `--fail-on`.
+    pub(crate) fn pairs(&self) -> impl Iterator<Item = (&'a Claim, Option<&'a Claim>)> + Clone {
+        self.pairs.iter().copied()
     }
 }
 

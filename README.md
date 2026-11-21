@@ -258,7 +258,7 @@ exposure --help | --version
 | `--no-open` | Do not open the report in the browser. |
 | `--threads N` | Worker threads. Default: one per core. The report does not depend on it. |
 | `--no-cache` | Read every app again, and neither use nor keep the results cache. |
-| `--fail-on CONDITION` | Exit with status 3 when a finding meets `CONDITION`, after the reports are written: `headline` (a finding that counts in the headline), `category:ID` (such as `category:analytics`) or `company:ID` (such as `company:google`). `exposure rules show` lists the ids. Can be given more than once; any match fails. For `diff`, only the findings `NEW` adds are checked. |
+| `--fail-on CONDITION` | Exit with status 3 when a finding meets `CONDITION`, after the reports are written: `headline` (a finding that counts in the headline), `category:ID` (such as `category:analytics`) or `company:ID` (such as `company:google`). `exposure rules show` lists the ids. Can be given more than once; any match fails. For `diff`, only the findings that newly meet it are checked: those `NEW` adds, and those that meet it in `NEW` but did not in `OLD`, such as a finding of the app's own vendor that moves from `declares` to `contains`. |
 
 | Exit status | Means |
 |---|---|
@@ -325,7 +325,7 @@ Bitwarden (Android, com.x8bit.bitwarden), 2026.9.1
   + Google Play Billing Library (Payments, Google LLC): contains
 
 5 findings added, 0 findings removed, 0 findings changed grade, in 1 of 1 app.
-exposure: fail-on company:google: met by 5 added findings in 1 app
+exposure: fail-on company:google: met by 5 new findings in 1 app
 exposure: fail-on: a condition was met, so the exit status is 3
 ```
 

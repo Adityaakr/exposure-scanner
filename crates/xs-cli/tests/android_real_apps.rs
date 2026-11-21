@@ -297,6 +297,6 @@ fn the_diff_of_the_two_builds_of_bitwarden_is_the_five_google_sdks() {
     );
     assert!(
         String::from_utf8_lossy(&output.stderr)
-            .contains("fail-on company:google: met by 5 added findings in 1 app")
+            .contains("fail-on company:google: met by 5 new findings in 1 app")
     );
 }

@@ -21,7 +21,9 @@ version can change commands, the report format or the evidence format.
 - **`exposure diff OLD NEW`**: which findings a report adds, no longer has, or
   has at another grade, app by app, following an app by its platform and app
   id and a finding by its claim key. `--json FILE` writes the comparison as an
-  `exposure-diff/1` document, and `--fail-on` checks the added findings.
+  `exposure-diff/1` document, and `--fail-on` checks the findings that newly
+  meet a condition: those added, and those that meet it in NEW but did not in
+  OLD.
 - **Android app bundles (`.aab`)**: scanned like the APKs they stand for,
   with their protocol buffer manifest and resource table and the code of
   every module. The layout comes from the archive's directory, never from the
