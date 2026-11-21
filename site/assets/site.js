@@ -1,6 +1,6 @@
 // The only script on the site. It adds three conveniences and nothing else:
-// a light and dark switch, copy buttons on commands, and a rule under the
-// header once the page scrolls. It makes no request and stores nothing but
+// a light and dark switch, copy buttons on commands, and figures that settle
+// in as they come into view. It makes no request and stores nothing but
 // the theme you pick, in this browser.
 (function () {
   "use strict";
@@ -63,11 +63,22 @@
     pre.parentNode.appendChild(button);
   });
 
-  // A rule under the header once the page has scrolled.
-  var header = document.querySelector(".site-header");
-  if (header && !header.classList.contains("solid")) {
-    var onScroll = function () { header.classList.toggle("scrolled", window.scrollY > 8); };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
+  // Figures settle in once, the first time they come into view. The
+  // stylesheet only hides them when motion is welcome and this script runs,
+  // so without either they are simply there.
+  var figures = document.querySelectorAll(".reveal");
+  var show = function (node) { node.classList.add("is-in"); };
+  if (!("IntersectionObserver" in window)) {
+    Array.prototype.forEach.call(figures, show);
+  } else {
+    var watcher = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          show(entry.target);
+          watcher.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: "0px 0px -10% 0px", threshold: 0.15 });
+    Array.prototype.forEach.call(figures, function (node) { watcher.observe(node); });
   }
 })();

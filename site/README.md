@@ -12,7 +12,7 @@ policy on every page holds it to that.
 | `sample/report.html`, `sample/report.json` | The report `exposure` writes for the synthetic fixtures in `tests/fixtures`. Generated, never edited by hand |
 | `docs/index.html` | Install and docs |
 | `assets/site.css` | The one stylesheet. Its colours follow the HTML report (`crates/xs-render/src/html/report.css`) |
-| `assets/theme.js`, `assets/site.js` | The only scripts: the light and dark switch, copy buttons on commands. They make no request |
+| `assets/theme.js`, `assets/site.js` | The only scripts: the light and dark switch, copy buttons on commands, and figures that settle in as they scroll into view. They make no request, and the page is complete without them |
 | `assets/fonts/` | Geist and Geist Mono, under the SIL Open Font License (`OFL.txt`) |
 | `assets/og.png` | The image shown when a link to the site is shared |
 | `build.sh` | Builds the site into a folder, writing the sample report afresh |
