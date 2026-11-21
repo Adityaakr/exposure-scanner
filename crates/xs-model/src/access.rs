@@ -503,6 +503,29 @@ pub fn android_limit_note(level: u32) -> alloc::string::String {
     }
 }
 
+/// The usage descriptions Electron writes into the `Info.plist` of every
+/// app built with it, unless the app states its own purpose: the wording of
+/// Electron's own `shell/browser/resources/mac/Info.plist`
+/// (<https://github.com/electron/electron/blob/main/shell/browser/resources/mac/Info.plist>).
+///
+/// An app that keeps one of them asks for the permission because Electron
+/// does, and states no purpose of its own. That says nothing about whether
+/// the app uses the camera or the microphone, so the checklist ranks such a
+/// finding below one an app's own words back.
+pub const ELECTRON_DEFAULT_PURPOSES: [&str; 4] = [
+    "This app needs access to Bluetooth",
+    "This app needs access to audio capture",
+    "This app needs access to the camera",
+    "This app needs access to the microphone",
+];
+
+/// Whether `purpose`, a usage description as a record holds it, is one
+/// Electron writes for every app ([`ELECTRON_DEFAULT_PURPOSES`]).
+#[must_use]
+pub fn is_electron_default(purpose: &str) -> bool {
+    ELECTRON_DEFAULT_PURPOSES.contains(&purpose)
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::collections::BTreeSet;
@@ -513,6 +536,25 @@ mod tests {
 
     const DECLARATIONS: [MatcherKind; 3] =
         [MatcherKind::UsageDescription, MatcherKind::Entitlement, MatcherKind::AndroidPermission];
+
+    #[test]
+    fn electron_s_own_wording_is_told_from_an_app_s() {
+        assert!(is_electron_default("This app needs access to the camera"));
+        assert!(is_electron_default("This app needs access to audio capture"));
+        assert!(!is_electron_default("Slack requires camera access to make video calls."));
+        assert!(!is_electron_default("This app needs access to the camera to scan QR codes"));
+        assert!(!is_electron_default(""));
+        // Every one names a permission a usage description can ask for.
+        for (key, purpose) in [
+            ("NSBluetoothAlwaysUsageDescription", ELECTRON_DEFAULT_PURPOSES[0]),
+            ("NSAudioCaptureUsageDescription", ELECTRON_DEFAULT_PURPOSES[1]),
+            ("NSCameraUsageDescription", ELECTRON_DEFAULT_PURPOSES[2]),
+            ("NSMicrophoneUsageDescription", ELECTRON_DEFAULT_PURPOSES[3]),
+        ] {
+            assert!(declared(MatcherKind::UsageDescription, key).is_some(), "{key}");
+            assert!(is_electron_default(purpose));
+        }
+    }
 
     #[test]
     fn the_tables_are_sorted_and_hold_no_duplicate() {

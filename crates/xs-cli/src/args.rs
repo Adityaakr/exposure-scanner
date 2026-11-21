@@ -9,7 +9,9 @@ use lexopt::prelude::*;
 pub(crate) const USAGE: &str = "\
 usage:
   exposure scan [PATH...] [--html FILE] [--json FILE] [--no-open] [--threads N] [--no-cache]
-  exposure report FILE [--html FILE] [--json FILE]
+                [--fail-on CONDITION]...
+  exposure report FILE [--html FILE] [--json FILE] [--fail-on CONDITION]...
+  exposure diff OLD NEW [--json FILE] [--fail-on CONDITION]...
   exposure rules show
   exposure rules verify PACK --sig SIGNATURE
   exposure --help | --version
@@ -20,8 +22,8 @@ prints what to do first and opens the report in your browser.
 
 commands:
   scan     Read the apps at each PATH (a macOS .app bundle, an Android .apk
-           file, or a folder that holds either) and report which SDKs they
-           ship. A PATH may also be a browser extension (a Firefox .xpi
+           or .aab file, or a folder that holds any of them) and report
+           which SDKs they ship. A PATH may also be a browser extension (a Firefox .xpi
            file, or a Chromium <id>/<version> folder) or a folder of them:
            the report says what each asks the browser for. Without a PATH,
            on macOS: the apps installed in /Applications and in your own
@@ -49,6 +51,11 @@ commands:
            A scan run as root does not use it.
   report   Derive the report again from the evidence saved in FILE, a JSON
            report of an earlier scan.
+  diff     Compare two JSON reports, OLD and NEW, such as the scans of two
+           builds of one app: which findings NEW adds, which it no longer
+           has, and which changed grade, app by app. An app is followed
+           across builds by its platform and app id. The comparison is
+           printed; --json FILE writes it for programs as well.
   rules    Show the built-in rule pack, or verify a signed pack file.
 
 options:
@@ -66,6 +73,23 @@ options:
   --threads N   Worker threads for scan. Default: one per core. The report
                 does not depend on it.
   --no-cache    Read every app again, and neither use nor keep the cache.
+  --fail-on CONDITION
+                Exit with status 3 when a finding meets CONDITION, after the
+                reports are written. For `diff`, only the findings NEW adds
+                are checked. CONDITION is one of:
+                  headline      a finding that counts in the headline
+                  category:ID   a finding in the category ID, such as
+                                category:analytics or category:camera
+                  company:ID    a finding that names the company ID, such
+                                as company:google
+                `exposure rules show` lists the categories and companies.
+                The option can be given more than once; any match fails.
+
+exit status:
+  0  done, and no --fail-on CONDITION was met
+  1  an error, such as a file that cannot be read or written
+  2  a command line that is not understood
+  3  done, and a --fail-on CONDITION was met
 ";
 
 /// What the user asked for.
@@ -75,6 +99,7 @@ pub(crate) enum Command {
     Version,
     Scan(Scan),
     Report(Report),
+    Diff(Diff),
     RulesShow,
     RulesVerify(RulesVerify),
 }
@@ -90,6 +115,51 @@ pub(crate) struct Scan {
     /// Whether the report may be opened in the browser. It is only when
     /// it goes to the default place and the scan runs in a terminal.
     pub(crate) open: bool,
+    /// When the scan exits with [`EXIT_MATCHED`](crate::EXIT_MATCHED).
+    pub(crate) fail_on: Vec<FailOn>,
+}
+
+/// A condition of `--fail-on`: findings that, when a report has one, make
+/// the command exit with a status of its own, so that a script or a CI job
+/// can stop a release on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FailOn {
+    /// A finding that counts in the headline.
+    Headline,
+    /// A finding in this category, by id.
+    Category(String),
+    /// A finding that names this company, by id.
+    Company(String),
+}
+
+impl FailOn {
+    /// Reads `headline`, `category:ID` or `company:ID`.
+    fn parse(text: &str) -> Result<Self, String> {
+        let refused =
+            || format!("--fail-on takes `headline`, `category:ID` or `company:ID`, not `{text}`");
+        if text == "headline" {
+            return Ok(Self::Headline);
+        }
+        let (kind, id) = text.split_once(':').ok_or_else(refused)?;
+        if id.is_empty() || id.contains(char::is_whitespace) {
+            return Err(refused());
+        }
+        match kind {
+            "category" => Ok(Self::Category(id.to_owned())),
+            "company" => Ok(Self::Company(id.to_owned())),
+            _ => Err(refused()),
+        }
+    }
+}
+
+impl std::fmt::Display for FailOn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Headline => f.write_str("headline"),
+            Self::Category(id) => write!(f, "category:{id}"),
+            Self::Company(id) => write!(f, "company:{id}"),
+        }
+    }
 }
 
 /// Where a scan keeps the results it can use again.
@@ -107,6 +177,15 @@ pub(crate) struct Report {
     pub(crate) file: PathBuf,
     pub(crate) html: Option<PathBuf>,
     pub(crate) json: Option<PathBuf>,
+    pub(crate) fail_on: Vec<FailOn>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Diff {
+    pub(crate) old: PathBuf,
+    pub(crate) new: PathBuf,
+    pub(crate) json: Option<PathBuf>,
+    pub(crate) fail_on: Vec<FailOn>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -124,6 +203,7 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
     let mut signature: Option<PathBuf> = None;
     let mut no_cache = false;
     let mut no_open = false;
+    let mut fail_on: Vec<FailOn> = Vec::new();
 
     while let Some(arg) = parser.next().map_err(|error| error.to_string())? {
         match arg {
@@ -134,6 +214,14 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
             Long("sig") => signature = Some(value(&mut parser, "--sig")?.into()),
             Long("no-cache") => no_cache = true,
             Long("no-open") => no_open = true,
+            Long("fail-on") => {
+                let text = value(&mut parser, "--fail-on")?;
+                let text = text.to_str().ok_or("--fail-on takes text")?;
+                let condition = FailOn::parse(text)?;
+                if !fail_on.contains(&condition) {
+                    fail_on.push(condition);
+                }
+            }
             Long("threads") => {
                 let text = value(&mut parser, "--threads")?;
                 let count = text.to_str().and_then(|text| text.parse::<usize>().ok());
@@ -171,6 +259,7 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
                 threads: threads.unwrap_or(0),
                 cache,
                 open: !no_open,
+                fail_on,
             }))
         }
         Some("report") => {
@@ -179,11 +268,23 @@ pub(crate) fn parse(mut parser: lexopt::Parser) -> Result<Command, String> {
             reject("--no-cache", no_cache, "report")?;
             reject("--no-open", no_open, "report")?;
             match <[PathBuf; 1]>::try_from(rest) {
-                Ok([file]) => Ok(Command::Report(Report { file, html, json })),
+                Ok([file]) => Ok(Command::Report(Report { file, html, json, fail_on })),
                 Err(_) => Err(String::from("report takes exactly one FILE")),
             }
         }
+        Some("diff") => {
+            reject("--sig", signature.is_some(), "diff")?;
+            reject("--html", html.is_some(), "diff")?;
+            reject("--threads", threads.is_some(), "diff")?;
+            reject("--no-cache", no_cache, "diff")?;
+            reject("--no-open", no_open, "diff")?;
+            match <[PathBuf; 2]>::try_from(rest) {
+                Ok([old, new]) => Ok(Command::Diff(Diff { old, new, json, fail_on })),
+                Err(_) => Err(String::from("diff takes exactly two FILEs, OLD and NEW")),
+            }
+        }
         Some("rules") => {
+            reject("--fail-on", !fail_on.is_empty(), "rules")?;
             reject("--html", html.is_some(), "rules")?;
             reject("--json", json.is_some(), "rules")?;
             reject("--threads", threads.is_some(), "rules")?;
@@ -231,6 +332,7 @@ mod tests {
             threads: 4,
             cache: Cache::Default,
             open: true,
+            fail_on: vec![],
         });
         assert_eq!(
             parse_words(&[
@@ -264,7 +366,8 @@ mod tests {
                 json: None,
                 threads: 0,
                 cache: Cache::Default,
-                open: true
+                open: true,
+                fail_on: vec![]
             }))
         );
     }
@@ -279,7 +382,8 @@ mod tests {
                 json: None,
                 threads: 0,
                 cache: Cache::Default,
-                open: true
+                open: true,
+                fail_on: vec![]
             }))
         );
         assert_eq!(
@@ -287,7 +391,8 @@ mod tests {
             Ok(Command::Report(Report {
                 file: "saved.json".into(),
                 html: Some("report.html".into()),
-                json: Some("again.json".into())
+                json: Some("again.json".into()),
+                fail_on: vec![]
             }))
         );
     }
@@ -325,7 +430,8 @@ mod tests {
                 json: None,
                 threads: 0,
                 cache: Cache::Default,
-                open: true
+                open: true,
+                fail_on: vec![]
             }))
         );
         assert_eq!(
@@ -336,7 +442,8 @@ mod tests {
                 json: Some("out.json".into()),
                 threads: 2,
                 cache: Cache::Default,
-                open: true
+                open: true,
+                fail_on: vec![]
             }))
         );
     }
@@ -351,7 +458,8 @@ mod tests {
                 json: None,
                 threads: 0,
                 cache: Cache::Default,
-                open: true
+                open: true,
+                fail_on: vec![]
             }))
         );
     }
@@ -360,7 +468,12 @@ mod tests {
     fn the_other_commands_parse() {
         assert_eq!(
             parse_words(&["report", "saved.json"]),
-            Ok(Command::Report(Report { file: "saved.json".into(), html: None, json: None }))
+            Ok(Command::Report(Report {
+                file: "saved.json".into(),
+                html: None,
+                json: None,
+                fail_on: vec![]
+            }))
         );
         assert_eq!(parse_words(&["rules", "show"]), Ok(Command::RulesShow));
         assert_eq!(
@@ -373,6 +486,50 @@ mod tests {
         assert_eq!(parse_words(&["--help"]), Ok(Command::Help));
         assert_eq!(parse_words(&["scan", "-h"]), Ok(Command::Help));
         assert_eq!(parse_words(&["-V"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn fail_on_takes_conditions_once_each_and_diff_takes_two_reports() {
+        let fail_on = |words: &[&str]| match parse_words(words) {
+            Ok(Command::Scan(scan)) => scan.fail_on,
+            Ok(Command::Report(report)) => report.fail_on,
+            Ok(Command::Diff(diff)) => diff.fail_on,
+            other => panic!("{words:?} gave {other:?}"),
+        };
+        assert_eq!(fail_on(&["scan"]), vec![]);
+        assert_eq!(
+            fail_on(&[
+                "scan",
+                "--fail-on",
+                "headline",
+                "--fail-on=company:google",
+                "--fail-on",
+                "category:analytics",
+                "--fail-on",
+                "headline",
+            ]),
+            vec![
+                FailOn::Headline,
+                FailOn::Company("google".into()),
+                FailOn::Category("analytics".into())
+            ]
+        );
+        assert_eq!(
+            fail_on(&["report", "saved.json", "--fail-on", "company:x:y"]),
+            vec![FailOn::Company("x:y".into())]
+        );
+        assert_eq!(
+            parse_words(&["diff", "old.json", "new.json", "--json", "-", "--fail-on", "headline"]),
+            Ok(Command::Diff(Diff {
+                old: "old.json".into(),
+                new: "new.json".into(),
+                json: Some("-".into()),
+                fail_on: vec![FailOn::Headline],
+            }))
+        );
+        for condition in ["headline", "category:analytics", "company:google"] {
+            assert_eq!(FailOn::parse(condition).unwrap().to_string(), condition);
+        }
     }
 
     #[test]
@@ -400,7 +557,16 @@ mod tests {
             &["rules", "show", "--json", "x"],
             &["rules", "show", "--html", "x"],
             &["update"],
-            &["diff", "a", "b"],
+            &["diff", "a"],
+            &["diff", "a", "b", "c"],
+            &["diff", "a", "b", "--html", "x.html"],
+            &["diff", "a", "b", "--no-open"],
+            &["scan", "--fail-on"],
+            &["scan", "--fail-on", "everything"],
+            &["scan", "--fail-on", "company:"],
+            &["scan", "--fail-on", "vendor:google"],
+            &["scan", "--fail-on", "category:a b"],
+            &["rules", "show", "--fail-on", "headline"],
         ] {
             assert!(parse_words(words).is_err(), "{words:?} should be refused");
         }

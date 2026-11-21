@@ -452,6 +452,17 @@ fn rules_show_lists_the_built_in_pack() {
     }
     let sparkle = listing.lines().find(|line| line.starts_with("sdk/sparkle")).unwrap();
     assert!(sparkle.ends_with("component, no company"), "{sparkle}");
+
+    // The ids `--fail-on` takes are listed after the rules.
+    let after = |heading: &str| {
+        listing.split_once(heading).map(|(_, rest)| rest.to_owned()).unwrap_or_default()
+    };
+    let categories = after("categories, for --fail-on category:ID");
+    assert!(categories.contains("\nanalytics                    Analytics *\n"), "{listing}");
+    assert!(categories.contains("\ncrash_reporting              Crash reporting\n"), "{listing}");
+    assert!(categories.contains("\ncapture "), "{listing}");
+    let companies = after("companies, for --fail-on company:ID");
+    assert!(companies.contains("\ngoogle                       Google LLC\n"), "{listing}");
 }
 
 /// Build plan, task 3: a tampered pack is refused.
@@ -469,4 +480,121 @@ fn rules_verify_accepts_the_signed_pack_and_refuses_a_tampered_one() {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     assert!(stderr(&output).contains("not signed by a trusted key"), "{}", stderr(&output));
+}
+
+const ANDROID_FIXTURE: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/android/Skeleton.apk");
+
+/// `--fail-on` turns a scan into a release gate: the reports are written
+/// either way, and the exit status says whether a condition was met.
+#[test]
+fn fail_on_sets_the_exit_status_after_the_reports_are_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = dir.path().join("report.json");
+    let gate = |condition: &str| {
+        let _ = fs::remove_file(&json);
+        let output =
+            exposure(&["scan", ANDROID_FIXTURE, "--json", text(&json), "--fail-on", condition]);
+        (output.status.code(), stderr(&output), json.exists())
+    };
+
+    // The fixture ships PostHog (analytics, counted) and Sentry (crash
+    // reporting, not counted), both by companies other than its own.
+    for condition in ["headline", "company:posthog", "category:analytics", "company:sentry"] {
+        let (code, err, written) = gate(condition);
+        assert_eq!(code, Some(3), "{condition}: {err}");
+        assert!(written, "{condition}: the report is written before the gate closes");
+        assert!(err.contains(&format!("exposure: fail-on {condition}: met by 1 finding in 1 app")));
+        assert!(err.contains("a condition was met, so the exit status is 3"), "{err}");
+    }
+    for condition in ["company:google", "category:advertising"] {
+        let (code, err, written) = gate(condition);
+        assert_eq!(code, Some(0), "{condition}: {err}");
+        assert!(written);
+        assert!(err.contains(&format!("exposure: fail-on {condition}: not met\n")), "{err}");
+    }
+
+    // A condition the rule pack does not know is refused before anything
+    // is read, rather than being a gate that never closes.
+    let (code, err, written) = gate("company:nobody");
+    assert_eq!(code, Some(1), "{err}");
+    assert!(err.contains("the rule pack has no company `nobody`"), "{err}");
+    assert!(!written);
+    let (code, err, _) = gate("category:spying");
+    assert_eq!(code, Some(1), "{err}");
+
+    // A saved report is checked the same way.
+    exposure(&["scan", ANDROID_FIXTURE, "--json", text(&json)]);
+    let output = exposure(&["report", text(&json), "--json", "/dev/null", "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
+    let output = exposure(&["report", text(&json), "--json", "/dev/null"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+}
+
+/// `exposure diff` follows an app across builds by its platform and app
+/// id, and says which findings were added, which removed and which changed
+/// grade.
+#[test]
+fn diff_compares_two_reports_app_by_app() {
+    let dir = tempfile::tempdir().unwrap();
+    let android = dir.path().join("android.json");
+    let macos = dir.path().join("macos.json");
+    exposure(&["scan", ANDROID_FIXTURE, "--json", text(&android)]);
+    exposure(&["scan", FIXTURE, "--json", text(&macos)]);
+    let android_report: Report = serde_json::from_slice(&fs::read(&android).unwrap()).unwrap();
+
+    // The same report twice: nothing changed.
+    let same = stdout(&exposure(&["diff", text(&android), text(&android)]));
+    assert_eq!(same, "No finding was added, removed or changed grade, in 1 app.\n");
+
+    // A new build without PostHog: one finding removed, nothing added. The
+    // claims are edited, the way a later build would differ.
+    let mut without = android_report.clone();
+    without.claims.retain(|claim| claim.object.id != "sdk/posthog");
+    let older = dir.path().join("older.json");
+    fs::write(&older, serde_json::to_vec(&without).unwrap()).unwrap();
+    let output = exposure(&["diff", text(&android), text(&older), "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(0), "removing a finding never closes the gate");
+    let printed = stdout(&output);
+    assert!(
+        printed.contains(
+            "\n  - PostHog (Analytics, PostHog Inc., counted in the headline): contains\n"
+        ),
+        "{printed}"
+    );
+    assert!(
+        printed.ends_with(
+            "0 findings added, 1 finding removed, 0 findings changed grade, in 1 of 1 app.\n"
+        ),
+        "{printed}"
+    );
+    assert!(stderr(&output).contains("fail-on headline: not met"), "{}", stderr(&output));
+
+    // The other way round, PostHog is added, and the gate closes on it.
+    let output = exposure(&["diff", text(&older), text(&android), "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("\n  + PostHog ("));
+    assert!(stderr(&output).contains("fail-on headline: met by 1 added finding in 1 app"));
+
+    // Apps in one report only are said to be, and the comparison as JSON
+    // goes to standard output alone with `--json -`.
+    let output = exposure(&["diff", text(&macos), text(&android), "--json", "-"]);
+    let diff: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(diff["schema"], "exposure-diff/1");
+    assert_eq!(diff["same_rules"], true);
+    assert_eq!(diff["totals"]["apps"], 2);
+    assert_eq!(diff["totals"]["added"], 2);
+    assert_eq!(diff["totals"]["removed"], 1);
+    let presence: Vec<_> =
+        diff["apps"].as_array().unwrap().iter().map(|app| app["presence"].clone()).collect();
+    assert_eq!(presence.len(), 2);
+    assert!(presence.contains(&"only_new".into()) && presence.contains(&"only_old".into()));
+
+    // The same two reports give the same bytes.
+    let again = stdout(&exposure(&["diff", text(&macos), text(&android), "--json", "-"]));
+    assert_eq!(again, stdout(&output));
+
+    // A report that is not one is refused.
+    let output = exposure(&["diff", text(&android), FIXTURE]);
+    assert_eq!(output.status.code(), Some(1));
 }

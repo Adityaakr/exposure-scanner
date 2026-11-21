@@ -157,12 +157,25 @@ fn pane(
             names.push(permission.name);
         }
     }
-    let about = format!(
+    let mut about = format!(
         "{}. {}: {}",
         list_words(&names),
         plural(apps.len() as u64, "app may ask", "apps may ask"),
         app_names(apps.iter().filter_map(|(index, _)| view.apps.get(*index)).map(App::title)),
     );
+    let defaults = super::electron_s_purpose_only(view, apps);
+    if defaults > 0 {
+        let stated = if defaults == apps.len() && defaults == 1 {
+            String::from("It states")
+        } else if defaults == apps.len() {
+            String::from("Each states")
+        } else if defaults == 1 {
+            String::from("1 of them states")
+        } else {
+            format!("{defaults} of them state")
+        };
+        about.push_str(&format!(". {stated} only Electron's default purpose"));
+    }
     let step = format!(
         "Open System Settings > Privacy & Security > {pane} and turn off the apps that do not \
          need it."

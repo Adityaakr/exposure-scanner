@@ -1039,6 +1039,46 @@ fn three_zeros_beside_findings_are_explained() {
     assert!(summary.named("p")[0].text().starts_with("No scanned app matched a rule."));
 }
 
+/// An Android scan whose counts are zero says what its apps ship in the
+/// categories the counts leave out, so it does not read "nothing found".
+/// A macOS app's crash reporter is not part of that sentence.
+#[test]
+fn beside_zero_counts_android_names_the_sdks_they_leave_out() {
+    let pack = pack();
+    let droid = subject(Platform::Android, "org.example.droid", 3);
+    let mail = subject(Platform::Macos, "com.google.mail", 2);
+    let evidence = set([
+        artifact(&droid, "Droid", None),
+        sdk(&droid, "sdk/crashlytics", MatcherKind::AndroidClassPrefix, Some("com.c.A")),
+        artifact(&mail, "Mail", Some(GOOGLE_TEAM)),
+        sdk(&mail, "sdk/crashlytics", MatcherKind::MachoObjcClass, None),
+    ]);
+    let claims = claims(&evidence, &pack);
+    assert_eq!(xs_model::Headline::of(&claims), xs_model::Headline::default());
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let beside: Vec<String> = section(&root, "summary")
+        .descendants()
+        .into_iter()
+        .filter(|e| e.has_class("beside"))
+        .map(Element::text)
+        .collect();
+    assert_eq!(
+        beside,
+        ["Beside these counts, the Android apps ship 1 SDK of 1 company in categories the \
+          counts leave out: Google LLC (Crashlytics). They are in the list above and in the \
+          findings below."]
+    );
+
+    // Without an Android app there is no such sentence.
+    let evidence = set([
+        artifact(&mail, "Mail", Some(GOOGLE_TEAM)),
+        sdk(&mail, "sdk/crashlytics", MatcherKind::MachoObjcClass, None),
+    ]);
+    let macos = xs_derive::derive(&evidence, &pack).unwrap();
+    let root = render(&macos, &evidence, &meta(&pack), &pack);
+    assert!(root.descendants().into_iter().all(|e| !e.has_class("beside")));
+}
+
 /// The navigation is written from the sections that are on the page: one
 /// link per section, in the order of the page.
 #[test]
@@ -1749,6 +1789,56 @@ fn the_checklist_comes_first_and_puts_what_exposes_the_most_first() {
         let finding = root.by_id(target).unwrap_or_else(|| panic!("no element `{target}`"));
         assert!(finding.has_class("finding"), "{target}");
     }
+}
+
+/// A usage description in Electron's own wording is no purpose of the
+/// app's: an entry that rests on nothing else ranks with what is least
+/// exposing, and an entry that rests on it in part says how many apps state
+/// only that, here and in the terminal.
+#[test]
+fn electron_s_default_purposes_rank_an_entry_no_higher_than_low() {
+    let pack = advised_pack();
+    let notes = subject(Platform::Macos, "org.example.notes", 1);
+    let mail = subject(Platform::Macos, "com.google.mail", 2);
+    let stating = |subject: &Subject, key: &str, purpose: &str| {
+        let Record::Edge(mut edge) = asks(subject, key) else { unreachable!() };
+        edge.proof.example = Some(purpose.into());
+        Record::Edge(edge)
+    };
+    let evidence = set([
+        artifact(&notes, "Notes", None),
+        artifact(&mail, "Mail", Some(GOOGLE_TEAM)),
+        stating(&notes, "NSCameraUsageDescription", "This app needs access to the camera"),
+        stating(&mail, "NSCameraUsageDescription", "Mail scans documents with the camera."),
+        stating(&notes, "NSMicrophoneUsageDescription", "This app needs access to the microphone"),
+        stating(&mail, "NSMicrophoneUsageDescription", "This app needs access to the microphone"),
+        asks(&notes, "NSBluetoothAlwaysUsageDescription"),
+    ]);
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    // The camera stays where Mail's own purpose puts it; the microphone,
+    // asked for in Electron's words alone, goes with Bluetooth, ahead of it
+    // for being in more apps.
+    assert_eq!(checklist(&root), ["Medium Camera", "Low Microphone", "Low Bluetooth"]);
+    let actions = section(&root, "actions").text();
+    assert!(
+        actions.contains("1 of them states only Electron's default purpose, such as \"This app"),
+        "{actions}"
+    );
+    assert!(actions.contains("Each states only Electron's default purpose"), "{actions}");
+
+    let todos = super::checklist(&claims, &evidence, &meta(&pack), &pack).unwrap();
+    let about: Vec<&str> = todos.iter().map(|todo| todo.about.as_str()).collect();
+    assert_eq!(
+        about,
+        [
+            "Camera. 2 apps may ask: Mail and Notes. 1 of them states only Electron's default \
+             purpose",
+            "Microphone. 2 apps may ask: Mail and Notes. Each states only Electron's default \
+             purpose",
+            "Bluetooth. 1 app may ask: Notes",
+        ]
+    );
 }
 
 /// An app's own setting is shown where the pack documents one, as the

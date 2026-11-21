@@ -92,6 +92,7 @@ section { margin-top: 2.5rem; }
 .owner { color: var(--soft-ink); font-size: 0.9rem; }
 .where { font-size: 0.9rem; }
 .zero { font-weight: 600; }
+.beside { background: var(--panel); border-radius: 0.5rem; margin-top: 0.75rem; padding: 0.75rem 1rem; font-size: 0.9rem; }
 .note, .meta, .none { color: var(--soft-ink); font-size: 0.9rem; }
 .none { background: var(--panel); border-radius: 0.5rem; padding: 0.75rem 1rem; }
 .totals {

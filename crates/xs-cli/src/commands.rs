@@ -11,7 +11,7 @@ use xs_model::{EvidenceSet, Headline, Pack, Report};
 use xs_render::{ReportMeta, Todo};
 use xs_rules::{SignedLayer, TRUSTED_KEYS};
 
-use crate::args;
+use crate::{args, diff, gate};
 
 /// The rule pack compiled into the binary, with its signature. It is checked
 /// against the built-in keys on every start, exactly like a pack from a file,
@@ -30,6 +30,33 @@ const MAX_REPORT_BYTES: u64 = 1 << 30;
 
 /// Errors are messages for the user's terminal.
 type Result<T> = std::result::Result<T, String>;
+
+/// What a command that can stop a release says: whether a `--fail-on`
+/// condition was met. A command given none always leaves the gate open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Gate {
+    /// No condition was met.
+    Open,
+    /// A condition was met: the exit status is
+    /// [`EXIT_MATCHED`](crate::EXIT_MATCHED).
+    Closed,
+}
+
+/// Checks `claims` against `conditions`, says on standard error what each
+/// condition met, and returns the gate. `kind` says which findings were
+/// checked, for the summary.
+fn close_on<'a>(
+    conditions: &[gate::Condition],
+    claims: impl Iterator<Item = &'a xs_model::Claim> + Clone,
+    kind: &str,
+) -> Gate {
+    if conditions.is_empty() {
+        return Gate::Open;
+    }
+    let (summary, met) = gate::summary(&gate::check(conditions, claims), kind);
+    let _ = std::io::stderr().write_all(summary.as_bytes());
+    if met { Gate::Closed } else { Gate::Open }
+}
 
 fn built_in_pack() -> Result<Pack> {
     xs_rules::load_pack(
@@ -97,6 +124,8 @@ struct Rendered {
     claims: usize,
     /// Its headline counts.
     headline: Headline,
+    /// The claims, for `--fail-on`.
+    findings: Vec<xs_model::Claim>,
     /// The checklist in plain words, when it was asked for.
     todos: Vec<Todo>,
 }
@@ -127,7 +156,14 @@ fn render(
     } else {
         Vec::new()
     };
-    Ok(Rendered { json, html, claims: claims.len(), headline: Headline::of(&claims), todos })
+    Ok(Rendered {
+        json,
+        html,
+        claims: claims.len(),
+        headline: Headline::of(&claims),
+        todos,
+        findings: claims,
+    })
 }
 
 /// Writes the reports where `outputs` says. The JSON report goes to
@@ -156,8 +192,10 @@ fn plural(count: u64, noun: &str) -> String {
 }
 
 /// `exposure scan`
-pub(crate) fn scan(args: &args::Scan) -> Result<()> {
+pub(crate) fn scan(args: &args::Scan) -> Result<Gate> {
     let pack = built_in_pack()?;
+    // A condition is checked against the pack before anything is read.
+    let conditions = gate::conditions(&args.fail_on, &pack)?;
     let matchers = Matchers::build(&pack).map_err(|error| error.to_string())?;
     let cache_dir = match &args.cache {
         args::Cache::Default => xs_collect::cache::default_dir(),
@@ -207,6 +245,9 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
         plural(headline.apps_third_party.into(), "app"),
         outcome.scope,
     );
+    if let Some(beside) = beside_the_headline(&report) {
+        let _ = writeln!(std::io::stderr(), "exposure: beside the headline: {beside}");
+    }
     // What the cache did. It names no folder unless the folder is at fault.
     let cache = match (&args.cache, &cache_dir, &outcome.cache_failure) {
         (args::Cache::Off, ..) => None,
@@ -231,7 +272,20 @@ pub(crate) fn scan(args: &args::Scan) -> Result<()> {
         let opened = args.open && std::io::stdout().is_terminal() && open_in_browser(&page);
         print(&summary(&report, &scanned, &page, opened))?;
     }
-    Ok(())
+    Ok(close_on(&conditions, report.findings.iter(), ""))
+}
+
+/// What Android apps ship beside the headline, in a few words, or nothing
+/// when they ship nothing it leaves out. It names no app and no company.
+fn beside_the_headline(report: &Rendered) -> Option<String> {
+    let uncounted = xs_model::Uncounted::android(&report.findings);
+    (uncounted.sdks() > 0).then(|| {
+        format!(
+            "{} of {} in the Android apps, in categories the headline does not count",
+            plural(uncounted.sdks().into(), "SDK"),
+            plural(uncounted.companies().into(), "company"),
+        )
+    })
 }
 
 /// How far the lines of a checklist entry are indented.
@@ -366,6 +420,9 @@ fn summary(report: &Rendered, scanned: &str, page: &Path, opened: bool) -> Strin
         plural(headline.companies_contains.into(), "company"),
         plural(headline.apps_third_party.into(), "app"),
     ));
+    if let Some(beside) = beside_the_headline(report) {
+        out.push_str(&format!("  and beside these: {beside}\n"));
+    }
 
     let todos = &report.todos;
     if todos.is_empty() {
@@ -397,24 +454,60 @@ fn summary(report: &Rendered, scanned: &str, page: &Path, opened: bool) -> Strin
     out
 }
 
-/// `exposure report`: the pure half of the pipeline, run on saved evidence.
-pub(crate) fn report(args: &args::Report) -> Result<()> {
-    let fail =
-        |error: &dyn std::fmt::Display| format!("cannot read {}: {error}", args.file.display());
-    let size = fs::metadata(&args.file).map_err(|error| fail(&error))?.len();
+/// Reads a JSON report an earlier scan wrote.
+fn read_saved(path: &Path) -> Result<Report> {
+    let fail = |error: &dyn std::fmt::Display| format!("cannot read {}: {error}", path.display());
+    let size = fs::metadata(path).map_err(|error| fail(&error))?.len();
     if size > MAX_REPORT_BYTES {
         return Err(fail(&"the file is larger than 1 GiB"));
     }
-    let bytes = fs::read(&args.file).map_err(|error| fail(&error))?;
+    let bytes = fs::read(path).map_err(|error| fail(&error))?;
     // Parsing re-checks every record and every record id, so evidence that
     // was edited after the scan is refused here.
-    let saved: Report = serde_json::from_slice(&bytes).map_err(|error| fail(&error))?;
+    serde_json::from_slice(&bytes).map_err(|error| fail(&error))
+}
+
+/// `exposure report`: the pure half of the pipeline, run on saved evidence.
+pub(crate) fn report(args: &args::Report) -> Result<Gate> {
     let pack = built_in_pack()?;
+    let conditions = gate::conditions(&args.fail_on, &pack)?;
+    let saved = read_saved(&args.file)?;
     // The evidence was gathered by the scanner the file names; keep that.
     let outputs =
         Outputs { html: args.html.as_deref(), json: args.json.as_deref(), checklist: false };
     let report = render(&saved.evidence, &pack, saved.scanner, saved.scope, outputs)?;
-    deliver_all(&report, outputs)
+    deliver_all(&report, outputs)?;
+    Ok(close_on(&conditions, report.findings.iter(), ""))
+}
+
+/// `exposure diff`: what the findings of NEW add to and take from those of
+/// OLD. The comparison goes to standard output, and to `--json FILE` as a
+/// document as well; with `--json -` the document is all that standard
+/// output gets.
+pub(crate) fn diff(args: &args::Diff) -> Result<Gate> {
+    let pack = built_in_pack()?;
+    let conditions = gate::conditions(&args.fail_on, &pack)?;
+    let old = read_saved(&args.old)?;
+    let new = read_saved(&args.new)?;
+    let diff = diff::compare(&old, &new);
+    let to_stdout = args.json.as_deref() == Some(Path::new(STDOUT));
+    if let Some(path) = &args.json {
+        let mut document = serde_json::to_string_pretty(&diff)
+            .map_err(|error| format!("cannot write the comparison: {error}"))?;
+        document.push('\n');
+        deliver(&document, Some(path))?;
+    }
+    if !to_stdout {
+        print(&diff::text(&diff, &pack))?;
+    }
+    if !diff.same_rules {
+        let _ = writeln!(
+            std::io::stderr(),
+            "exposure: the two reports were made with different rule packs, so a difference \
+             may come from the rules rather than from the apps"
+        );
+    }
+    Ok(close_on(&conditions, diff.added(), "added "))
 }
 
 /// `exposure rules show`
@@ -433,6 +526,29 @@ pub(crate) fn rules_show() -> Result<()> {
         let owner = rule.entity.as_deref().and_then(|entity| pack.company_of(entity));
         let owner = owner.map_or("component, no company", |company| company.name.as_str());
         out.push_str(&format!("{:<28} {:<32} {:<16} {owner}\n", rule.id, rule.name, rule.category));
+    }
+
+    // The ids `--fail-on` takes.
+    out.push_str("\ncategories, for --fail-on category:ID (* counts in the headline)\n\n");
+    for category in pack.layers().iter().flat_map(|loaded| &loaded.layer.categories) {
+        let counted = if category.headline { " *" } else { "" };
+        out.push_str(&format!("{:<28} {}{counted}\n", category.id, category.name));
+    }
+    for category in xs_model::access::CATEGORIES {
+        out.push_str(&format!("{:<28} {} (what an app may access)\n", category.id, category.name));
+    }
+    let extension = xs_model::permission::CATEGORY;
+    out.push_str(&format!("{extension:<28} {}\n", xs_model::permission::CATEGORY_NAME));
+    out.push_str("\ncompanies, for --fail-on company:ID\n\n");
+    let mut companies: Vec<_> = pack
+        .layers()
+        .iter()
+        .flat_map(|loaded| &loaded.layer.entities)
+        .filter(|entity| entity.parent.is_none())
+        .collect();
+    companies.sort_by(|a, b| a.id.cmp(&b.id));
+    for company in companies {
+        out.push_str(&format!("{:<28} {}\n", company.id, company.name));
     }
     print(&out)
 }

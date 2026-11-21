@@ -15,7 +15,7 @@ use xs_model::pack::{Entity, Pack};
 use xs_model::record::{
     Browser, CoverageRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject,
 };
-use xs_model::{Claim, EvidenceSet, Headline, SubjectDigest};
+use xs_model::{Claim, EvidenceSet, Headline, MatcherKind, SubjectDigest, Uncounted};
 use xs_model::{access, permission};
 
 use crate::RenderError;
@@ -219,6 +219,10 @@ pub(crate) struct View<'a> {
     pub(crate) records: u64,
     /// The names of the categories the headline counts.
     pub(crate) counted_categories: Vec<&'a str>,
+    /// What the Android apps ship beside the headline: each company, by
+    /// name, with the names of its SDKs in categories the headline does not
+    /// count.
+    pub(crate) uncounted: Vec<(&'a Entity, Vec<&'a str>)>,
 }
 
 impl<'a> View<'a> {
@@ -297,6 +301,17 @@ impl<'a> View<'a> {
 
         let coverage_notes =
             evidence.iter().filter(|(_, record)| matches!(record, Record::Coverage(_))).count();
+        let mut uncounted: Vec<(&'a Entity, Vec<&'a str>)> = Vec::new();
+        for (company, sdks) in Uncounted::android(claims).by_company {
+            let Some(entity) = pack.entity(company) else { continue };
+            let mut names: Vec<&'a str> = sdks
+                .into_iter()
+                .map(|id| pack.rule(id).map_or(id, |rule| rule.name.as_str()))
+                .collect();
+            names.sort_by_key(|name| name.to_lowercase());
+            uncounted.push((entity, names));
+        }
+        uncounted.sort_by_key(|(entity, _)| (entity.name.to_lowercase(), entity.id.as_str()));
         Ok(Self {
             apps,
             index,
@@ -315,12 +330,33 @@ impl<'a> View<'a> {
                 .filter(|category| category.headline)
                 .map(|category| category.name.as_str())
                 .collect(),
+            uncounted,
         })
     }
 
     /// The build a claim or a record is about.
     pub(crate) fn app_of(&self, subject: &Subject) -> Option<&App<'a>> {
         self.apps.get(*self.index.get(&Build::of(subject))?)
+    }
+
+    /// Whether `claim` rests on nothing but usage descriptions in
+    /// Electron's own wording ([`access::is_electron_default`]): the app
+    /// asks because Electron does, and states no purpose of its own.
+    pub(crate) fn states_only_electron_s_purpose(&self, claim: &Claim) -> bool {
+        let Some(app) = self.app_of(&claim.subject) else { return false };
+        !claim.evidence.is_empty() && claim.evidence.iter().all(|id| {
+            let record = app
+                .records
+                .binary_search_by(|(other, _)| (*other).cmp(id))
+                .ok()
+                .and_then(|at| app.records.get(at));
+            matches!(
+                record,
+                Some((_, Record::Edge(edge)))
+                    if edge.proof.matcher == MatcherKind::UsageDescription
+                        && edge.proof.example.as_deref().is_some_and(access::is_electron_default)
+            )
+        })
     }
 
     /// The apps the scan read, in the order a reader looks them up.
