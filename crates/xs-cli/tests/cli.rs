@@ -598,3 +598,24 @@ fn diff_compares_two_reports_app_by_app() {
     let output = exposure(&["diff", text(&android), FIXTURE]);
     assert_eq!(output.status.code(), Some(1));
 }
+
+/// Beside the headline, the summary counts what the Android apps ship in
+/// the categories it leaves out, and names no company: the fixture's
+/// Sentry, which is crash reporting. A macOS app's crash reporter is not
+/// part of it.
+#[test]
+fn the_summary_counts_what_android_apps_ship_beside_the_headline() {
+    let output = exposure(&["scan", ANDROID_FIXTURE, "--json", "/dev/null"]);
+    let err = stderr(&output);
+    assert!(output.status.success(), "{err}");
+    assert!(
+        err.contains(
+            "\nexposure: beside the headline: 1 SDK of 1 company in the Android apps, in \
+             categories the headline does not count\n"
+        ),
+        "{err}"
+    );
+    assert!(!err.contains("Sentry") && !err.contains("sentry"), "{err}");
+    let output = exposure(&["scan", FIXTURE, "--json", "/dev/null"]);
+    assert!(!stderr(&output).contains("beside the headline"), "{}", stderr(&output));
+}

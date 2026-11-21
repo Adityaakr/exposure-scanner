@@ -421,7 +421,7 @@ fn summary(report: &Rendered, scanned: &str, page: &Path, opened: bool) -> Strin
         plural(headline.apps_third_party.into(), "app"),
     ));
     if let Some(beside) = beside_the_headline(report) {
-        out.push_str(&format!("  and beside these: {beside}\n"));
+        out.push_str(&wrap(&format!("and beside these: {beside}"), "  "));
     }
 
     let todos = &report.todos;
