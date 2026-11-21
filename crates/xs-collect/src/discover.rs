@@ -2,7 +2,8 @@
 //! no file content.
 //!
 //! Three kinds of artifact are found: macOS application bundles, which are
-//! folders named `.app`; Android packages, which are files named `.apk`; and
+//! folders named `.app`; Android packages, which are files named `.apk` or,
+//! for an app bundle, `.aab`; and
 //! browser extensions, which are files named `.xpi` (Firefox) or folders
 //! `<id>/<version>` that hold a `manifest.json` (the Chromium family). They
 //! are found either below the paths a scan is given ([`artifacts`]) or, when
@@ -39,8 +40,10 @@ fn is_bundle_name(path: &Path) -> bool {
     named(path, "app")
 }
 
+/// An Android package: an APK, or an app bundle as uploaded to Google
+/// Play. Which of the two it is, the collector tells from its content.
 fn is_package_name(path: &Path) -> bool {
-    named(path, "apk")
+    named(path, "apk") || named(path, "aab")
 }
 
 /// The artifacts a scan covers, by kind. Each list holds canonical paths, is
@@ -50,7 +53,7 @@ fn is_package_name(path: &Path) -> bool {
 pub struct Artifacts {
     /// macOS application bundles: folders named `.app`.
     pub bundles: Vec<PathBuf>,
-    /// Android packages: regular files named `.apk`.
+    /// Android packages: regular files named `.apk` or `.aab`.
     pub packages: Vec<PathBuf>,
     /// Browser extensions: version folders of the Chromium family and
     /// Firefox archives named `.xpi`.
@@ -106,7 +109,7 @@ impl Found {
 /// Resolves `paths` to the artifacts they name or contain.
 ///
 /// A path to a bundle yields that bundle, and a path to a file named `.apk`
-/// that package. A path to a file named `.xpi` yields that Firefox add-on,
+/// or `.aab` that package. A path to a file named `.xpi` yields that Firefox add-on,
 /// and a path to an installed version of a Chromium extension, a folder
 /// `<id>/<version>` that holds a `manifest.json`, that extension. A path to
 /// any other folder yields the bundles, the packages and the extensions
@@ -115,7 +118,7 @@ impl Found {
 /// through a link named `Foo.app` is a bundle whatever the link points at is
 /// called. Inside a folder, a symbolic link to a bundle is followed once; a
 /// link to a package is followed once if what it points at is named `.apk`
-/// too, so that a link cannot pass any file of the machine off as an app.
+/// or `.aab` too, so that a link cannot pass any file of the machine off as an app.
 ///
 /// # Errors
 ///
@@ -342,6 +345,7 @@ mod tests {
             "Apps/one.apk",
             "Apps/Two.APK",
             "Apps/Utilities/three.apk",
+            "Apps/Utilities/release.aab",
             "Apps/Utilities/Deep/four.apk",
             "Apps/One.app/Contents/inside-a-bundle.apk",
             "Apps/notes.txt",
@@ -361,7 +365,12 @@ mod tests {
         let found = artifacts(&[dir.path().join("Apps")]).unwrap();
         assert_eq!(
             names(dir.path(), &found.packages),
-            ["Apps/Two.APK", "Apps/Utilities/three.apk", "Apps/one.apk"]
+            [
+                "Apps/Two.APK",
+                "Apps/Utilities/release.aab",
+                "Apps/Utilities/three.apk",
+                "Apps/one.apk"
+            ]
         );
         assert_eq!(found.bundles, bundles(&[dir.path().join("Apps")]).unwrap());
         assert_eq!(found.bundles.len(), 3);
@@ -369,7 +378,11 @@ mod tests {
         let found = artifacts(&[dir.path().join("Apps/Utilities")]).unwrap();
         assert_eq!(
             names(dir.path(), &found.packages),
-            ["Apps/Utilities/Deep/four.apk", "Apps/Utilities/three.apk"]
+            [
+                "Apps/Utilities/Deep/four.apk",
+                "Apps/Utilities/release.aab",
+                "Apps/Utilities/three.apk"
+            ]
         );
     }
 
@@ -387,7 +400,13 @@ mod tests {
         let found = artifacts(&[apps]).unwrap();
         assert_eq!(
             names(dir.path(), &found.packages),
-            ["Apps/Two.APK", "Apps/Utilities/three.apk", "Apps/one.apk", "Elsewhere/five.apk"]
+            [
+                "Apps/Two.APK",
+                "Apps/Utilities/release.aab",
+                "Apps/Utilities/three.apk",
+                "Apps/one.apk",
+                "Elsewhere/five.apk"
+            ]
         );
     }
 
@@ -436,7 +455,13 @@ mod tests {
         assert_eq!(found, artifacts(&backward).unwrap());
         assert_eq!(
             names(dir.path(), &found.packages),
-            ["Apps/Two.APK", "Apps/Utilities/three.apk", "Apps/one.apk", "Elsewhere/five.apk"]
+            [
+                "Apps/Two.APK",
+                "Apps/Utilities/release.aab",
+                "Apps/Utilities/three.apk",
+                "Apps/one.apk",
+                "Elsewhere/five.apk"
+            ]
         );
     }
 

@@ -1,4 +1,5 @@
-//! The Android package collector.
+//! The Android package collector: APKs, and the app bundles (`.aab`) that
+//! developers upload to Google Play.
 //!
 //! An APK is a zip archive. Four tables inside it say which SDKs the app
 //! ships, and each is an independent witness that survives a different
@@ -10,6 +11,30 @@
 //! | `android_class_prefix` | classes defined in the `class_defs` table of each `classes*.dex` | entry classes keep their names |
 //! | `dex_string` | the `string_ids` table of each `classes*.dex` | the code is fully obfuscated: string constants are not renamed |
 //! | `apk_file` | the names of the archive's entries | the code is fully obfuscated: files an SDK ships are not renamed |
+//!
+//! # App bundles
+//!
+//! An app bundle is a zip archive too, with one folder per module: `base/`,
+//! and a folder for each feature or asset module. What an APK keeps at its
+//! root a bundle keeps in the module folder, and its manifest and resource
+//! table are protocol buffers ([`android_proto`]) rather than binary XML:
+//!
+//! | APK | App bundle |
+//! |---|---|
+//! | `AndroidManifest.xml` | `base/manifest/AndroidManifest.xml` |
+//! | `resources.arsc` | `base/resources.pb` |
+//! | `classes.dex`, `classes2.dex`, ... | `<module>/dex/classes.dex`, ... |
+//! | `lib/...`, `assets/...`, `res/...` | `<module>/lib/...`, `<module>/assets/...`, `<module>/res/...` |
+//! | any other file, such as `billing.properties` | `<module>/root/billing.properties` |
+//!
+//! Which of the two a package is comes from its directory, never from the
+//! name of its file: a package with `AndroidManifest.xml` at its root is an
+//! APK, and one with `base/manifest/AndroidManifest.xml` and none at its
+//! root is a bundle. The four witnesses are the same. An `apk_file` token is
+//! matched against the name the entry would have in an APK, and its record
+//! names the entry of the bundle. The DEX files of every module are read,
+//! the manifest of the base module only: that of another module is counted
+//! in a coverage record.
 //!
 //! # One pass, and evidence only from the bytes that were hashed
 //!
@@ -76,7 +101,9 @@ use std::path::Path;
 
 use xs_formats::dex::{self, Dex};
 use xs_formats::zip::{self, Entry};
-use xs_formats::{Budget, FormatError, ReadError, android_manifest, android_resources};
+use xs_formats::{
+    Budget, FormatError, ReadError, android_manifest, android_proto, android_resources,
+};
 use xs_match::{Finding, HitAcc, Matchers};
 use xs_model::record::{
     ArtifactRecord, Collector, CoverageReason, CoverageRecord, CoverageStatus, EdgeRecord,
@@ -101,6 +128,69 @@ pub const MAX_INFLATED_BYTES: u64 = 1 << 30;
 const MANIFEST: &str = "AndroidManifest.xml";
 /// The compiled resource table, which holds the app's display name.
 const RESOURCES: &str = "resources.arsc";
+/// The manifest and the resource table of an app bundle.
+const BUNDLE_MANIFEST: &str = "base/manifest/AndroidManifest.xml";
+const BUNDLE_RESOURCES: &str = "base/resources.pb";
+/// The module of an app bundle that every install gets.
+const BASE_MODULE: &str = "base";
+/// Folders at the top of an app bundle that are no module: the bundle's
+/// signature and the build tool's metadata.
+const NOT_MODULES: [&str; 2] = ["META-INF", "BUNDLE-METADATA"];
+
+/// How a package lays out what the collector reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// An APK: everything at the root, the manifest in binary XML.
+    Apk,
+    /// An app bundle: a folder per module, the manifest a protocol buffer.
+    Bundle,
+}
+
+impl Layout {
+    /// The layout of the archive whose entries are `entries`: a bundle when
+    /// the bundle's manifest is there and an APK's is not.
+    fn of(entries: &[Entry<'_>]) -> Self {
+        let has = |name: &str| entries.iter().any(|entry| entry.name == name.as_bytes());
+        if !has(MANIFEST) && has(BUNDLE_MANIFEST) { Self::Bundle } else { Self::Apk }
+    }
+
+    /// Where the manifest is.
+    const fn manifest(self) -> &'static str {
+        match self {
+            Self::Apk => MANIFEST,
+            Self::Bundle => BUNDLE_MANIFEST,
+        }
+    }
+}
+
+/// What the collector reads an entry of a bundle as, from its name: the
+/// module it is in, and the rest of its name.
+fn module_of(name: &str) -> Option<(&str, &str)> {
+    let (module, rest) = name.split_once('/')?;
+    (!NOT_MODULES.contains(&module) && !module.is_empty()).then_some((module, rest))
+}
+
+/// The name an entry of a bundle would have in an APK, for the `apk_file`
+/// tokens: the name inside its module, without `root/`. `None` for what has
+/// no such twin: the bundle's own files, and the manifest, the DEX files and
+/// the tables of a module, which an APK holds in other forms.
+fn apk_twin(name: &str) -> Option<&str> {
+    let (_, rest) = module_of(name)?;
+    if let Some(root) = rest.strip_prefix("root/") {
+        return Some(root);
+    }
+    let own = rest.starts_with("manifest/")
+        || rest.starts_with("dex/")
+        || ["resources.pb", "assets.pb", "native.pb"].contains(&rest);
+    (!own).then_some(rest)
+}
+
+/// The module and the number of a DEX file that Android loads from a
+/// bundle: `<module>/dex/classes.dex` and so on.
+fn bundle_dex(name: &str) -> Option<(&str, u32)> {
+    let (module, rest) = module_of(name)?;
+    Some((module, dex_number(rest.strip_prefix("dex/")?)?))
+}
 /// The app id of a package whose manifest does not give one. A constant,
 /// not the file's name: evidence must depend on the bytes of the artifact
 /// and on nothing else. The digest still tells two such packages apart.
@@ -173,15 +263,20 @@ enum Kind {
     Manifest,
     Dex,
     Resources,
+    /// The manifest of a bundle.
+    BundleManifest,
+    /// The resource table of a bundle.
+    BundleResources,
 }
 
 impl Kind {
     /// The most bytes an entry of this kind may hold.
     const fn budget(self) -> u64 {
         match self {
-            Self::Manifest => android_manifest::MAX_BYTES as u64,
+            Self::Manifest | Self::BundleManifest => android_manifest::MAX_BYTES as u64,
             Self::Dex => MAX_ENTRY_BYTES,
             Self::Resources => android_resources::MAX_BYTES as u64,
+            Self::BundleResources => android_proto::MAX_BYTES as u64,
         }
     }
 }
@@ -208,7 +303,23 @@ enum Content {
     /// The resource table, kept whole until the manifest says which of its
     /// strings is the app's name: the table may come before the manifest
     /// in the archive.
-    Resources(Vec<u8>),
+    Resources(Table),
+}
+
+/// A resource table, in the form of an APK or of a bundle.
+enum Table {
+    Binary(Vec<u8>),
+    Proto(Vec<u8>),
+}
+
+impl Table {
+    /// The string resource `id` names, in the default configuration.
+    fn string(&self, id: u32) -> Result<Option<String>, FormatError> {
+        match self {
+            Self::Binary(table) => android_resources::string(table, id),
+            Self::Proto(table) => android_proto::string(table, id),
+        }
+    }
 }
 
 /// One entry the pass copies out of the archive as it goes by.
@@ -301,8 +412,10 @@ impl<'a> Capture<'a> {
         let content = zip::content(&self.entry, data, budget)?;
         Ok(match self.kind {
             Kind::Manifest => Content::Manifest(android_manifest::parse(&content)?),
+            Kind::BundleManifest => Content::Manifest(android_proto::manifest(&content)?),
             Kind::Dex => Content::Dex(dex_hits(&content, matchers)?),
-            Kind::Resources => Content::Resources(content.into_owned()),
+            Kind::Resources => Content::Resources(Table::Binary(content.into_owned())),
+            Kind::BundleResources => Content::Resources(Table::Proto(content.into_owned())),
         })
     }
 
@@ -535,11 +648,12 @@ fn scan_package(
     let mut gaps = Gaps::default();
     let mut names = HitAcc::new();
     let mut captures = Vec::new();
+    let mut twins = BTreeMap::new();
     let mut expected = vec![Expected { offset: tail_offset, bytes: &tail }];
     match &entries {
         Ok((entries, end)) => {
             expected.push(Expected { offset: end.directory_offset, bytes: &directory });
-            captures = plan(entries, matchers, &mut names, &mut gaps);
+            (captures, twins) = plan(entries, matchers, &mut names, &mut gaps);
         }
         Err(error) => {
             let (status, reason) = coverage_of(*error);
@@ -567,25 +681,33 @@ fn scan_package(
     }
     let entries = captures.into_iter().map(|capture| capture.finish(matchers)).collect();
     let digest = SubjectDigest::Sha256(sha256);
-    Ok(Scanned { records: records(digest, bytes, entries, &names, gaps, matchers), bytes })
+    let read = Pass { entries, names: &names, twins: &twins };
+    Ok(Scanned { records: records(digest, bytes, read, gaps, matchers), bytes })
 }
 
 /// Decides what to read from an archive, from its directory alone.
 ///
 /// Matches every entry name against the `apk_file` tokens, and picks the
-/// manifest and the DEX files Android would load, in the order they are
-/// then read: the manifest, then the DEX files by number. The byte budgets
+/// manifest, the resource table and the DEX files Android would load, in
+/// the order they are then read: the manifest, the table, then the DEX
+/// files by module (the base module first) and number. The byte budgets
 /// are applied here, to the sizes the directory declares, so the same
 /// archive loses the same entries on every run.
+///
+/// For a bundle it also returns, for each name an entry would have in an
+/// APK, the entry of the bundle that has it: where an `apk_file` hit is.
 fn plan<'a>(
     entries: &[Entry<'a>],
     matchers: &Matchers<'_>,
     names: &mut HitAcc,
     gaps: &mut Gaps,
-) -> Vec<Capture<'a>> {
+) -> (Vec<Capture<'a>>, BTreeMap<String, RelPath>) {
+    let layout = Layout::of(entries);
     let mut manifest = None;
     let mut resources = None;
-    let mut dex_files: Vec<(u32, RelPath, Entry<'a>)> = Vec::new();
+    let mut twins: BTreeMap<String, RelPath> = BTreeMap::new();
+    // The base module or an APK sorts first, then the other modules by name.
+    let mut dex_files: Vec<((bool, String, u32), RelPath, Entry<'a>)> = Vec::new();
     for entry in entries {
         if entry.is_directory() {
             continue;
@@ -601,19 +723,52 @@ fn plan<'a>(
             gaps.count(CoverageStatus::Unrecognized, CoverageReason::ParseError);
             continue;
         };
-        matchers.match_value(MatcherKind::ApkFile, SCOPE, entry.name, names);
-        if name == MANIFEST {
-            manifest = Some((path, *entry));
-        } else if name == RESOURCES {
-            resources = Some((path, *entry));
-        } else if let Some(number) = dex_number(name) {
-            dex_files.push((number, path, *entry));
-        } else if name.ends_with(".dex") {
-            // Code that Android does not load from the package by itself.
-            gaps.count(CoverageStatus::Skipped, CoverageReason::UnsupportedFormat);
+        match layout {
+            Layout::Apk => {
+                matchers.match_value(MatcherKind::ApkFile, SCOPE, entry.name, names);
+                if name == MANIFEST {
+                    manifest = Some((Kind::Manifest, path, *entry));
+                } else if name == RESOURCES {
+                    resources = Some((Kind::Resources, path, *entry));
+                } else if let Some(number) = dex_number(name) {
+                    dex_files.push(((false, String::new(), number), path, *entry));
+                } else if name.ends_with(".dex") {
+                    // Code that Android does not load from the package by itself.
+                    gaps.count(CoverageStatus::Skipped, CoverageReason::UnsupportedFormat);
+                }
+            }
+            Layout::Bundle => {
+                if let Some(twin) = apk_twin(name) {
+                    matchers.match_value(MatcherKind::ApkFile, SCOPE, twin.as_bytes(), names);
+                    // Of two entries with one twin, the one with the
+                    // smaller name is the place of the hit.
+                    twins
+                        .entry(twin.to_owned())
+                        .and_modify(|kept| {
+                            if path < *kept {
+                                *kept = path.clone();
+                            }
+                        })
+                        .or_insert_with(|| path.clone());
+                }
+                if name == BUNDLE_MANIFEST {
+                    manifest = Some((Kind::BundleManifest, path, *entry));
+                } else if name == BUNDLE_RESOURCES {
+                    resources = Some((Kind::BundleResources, path, *entry));
+                } else if let Some((module, number)) = bundle_dex(name) {
+                    let key = (module != BASE_MODULE, module.to_owned(), number);
+                    dex_files.push((key, path, *entry));
+                } else if module_of(name).is_some_and(|(_, rest)| {
+                    rest == "manifest/AndroidManifest.xml" || rest.ends_with(".dex")
+                }) {
+                    // The manifest of another module, or code that Android
+                    // does not load from the bundle by itself.
+                    gaps.count(CoverageStatus::Skipped, CoverageReason::UnsupportedFormat);
+                }
+            }
         }
     }
-    dex_files.sort_by_key(|(number, ..)| *number);
+    dex_files.sort_by(|a, b| a.0.cmp(&b.0));
     for _ in dex_files.iter().skip(MAX_DEX_FILES) {
         gaps.count(CoverageStatus::Skipped, CoverageReason::OverBudget);
     }
@@ -621,8 +776,7 @@ fn plan<'a>(
 
     let wanted = manifest
         .into_iter()
-        .map(|(path, entry)| (Kind::Manifest, path, entry))
-        .chain(resources.map(|(path, entry)| (Kind::Resources, path, entry)))
+        .chain(resources)
         .chain(dex_files.into_iter().map(|(_, path, entry)| (Kind::Dex, path, entry)));
     let mut captures = Vec::new();
     let mut total: u64 = 0;
@@ -665,20 +819,30 @@ fn plan<'a>(
         keep
     });
 
-    if manifest_missing(&captures, gaps) {
+    if manifest_missing(&captures, gaps, layout) {
         // Android does not install a package without a manifest.
-        if let Ok(location) = RelPath::new(MANIFEST) {
+        if let Ok(location) = RelPath::new(layout.manifest()) {
             gaps.at(&location, (CoverageStatus::Unrecognized, CoverageReason::ParseError));
         }
     }
-    captures
+    (captures, twins)
 }
 
 /// Whether the archive has no manifest at all: none to read, and none set
 /// aside as over budget.
-fn manifest_missing(captures: &[Capture<'_>], gaps: &Gaps) -> bool {
-    !captures.iter().any(|capture| capture.kind == Kind::Manifest)
-        && !gaps.located.iter().any(|gap| gap.location.as_str() == MANIFEST)
+fn manifest_missing(captures: &[Capture<'_>], gaps: &Gaps, layout: Layout) -> bool {
+    !captures.iter().any(|capture| matches!(capture.kind, Kind::Manifest | Kind::BundleManifest))
+        && !gaps.located.iter().any(|gap| gap.location.as_str() == layout.manifest())
+}
+
+/// What the pass read of one package.
+struct Pass<'a> {
+    /// Each entry that was read, with what it held.
+    entries: Vec<(RelPath, Result<Content, ReadError>)>,
+    /// The `apk_file` hits in the entry names.
+    names: &'a HitAcc,
+    /// For a bundle, the entry that has each name an APK would have.
+    twins: &'a BTreeMap<String, RelPath>,
 }
 
 /// The hits of one DEX file: its class table and its string table.
@@ -701,11 +865,11 @@ fn dex_hits(bytes: &[u8], matchers: &Matchers<'_>) -> Result<HitAcc, ReadError> 
 fn records(
     digest: SubjectDigest,
     bytes: u64,
-    entries: Vec<(RelPath, Result<Content, ReadError>)>,
-    names: &HitAcc,
+    read: Pass<'_>,
     mut gaps: Gaps,
     matchers: &Matchers<'_>,
 ) -> Vec<Record> {
+    let Pass { entries, names, twins } = read;
     let mut manifest = None;
     let mut resources = None;
     let mut dex_files: Vec<(RelPath, HitAcc)> = Vec::new();
@@ -737,7 +901,7 @@ fn records(
     if let (None, Some(id), Some((location, table))) =
         (&label, parsed.and_then(|m| m.label_ref), &resources)
     {
-        match android_resources::string(table, id) {
+        match table.string(id) {
             Ok(found) => label = found,
             Err(error) => gaps.at(location, coverage_of(error.into())),
         }
@@ -802,9 +966,14 @@ fn records(
     }
 
     // The entry names: one table. An `apk_file` token is a whole entry
-    // name, so the entry that matched is the place of the hit.
+    // name, so the entry that matched is the place of the hit: in a bundle,
+    // the entry whose name in an APK the token is.
     for finding in matchers.judge(names).edges {
-        if let Ok(location) = RelPath::new(&finding.token.lit) {
+        let location = match twins.get(&finding.token.lit) {
+            Some(entry) => Some(entry.clone()),
+            None => RelPath::new(&finding.token.lit).ok(),
+        };
+        if let Some(location) = location {
             edge(Collector::AndroidApk, finding, &location, Region::ZipEntries);
         }
     }
@@ -1417,6 +1586,179 @@ mod tests {
         assert_eq!(artifact(&records).subject.id, "com.example.app");
         assert_eq!(artifact(&records).facts.name, None);
         assert_eq!(coverage(&records), ["Unrecognized ParseError resources.arsc None 1"]);
+    }
+
+    /// The tracker's manifest in the protocol buffer form of a bundle.
+    fn tracker_bundle_manifest(label: Option<u32>) -> Vec<u8> {
+        let application: Vec<testkit::Attr> = label
+            .map(|id| testkit::Attr::reference(testkit::ANDROID_LABEL, "label", id))
+            .into_iter()
+            .collect();
+        testkit::ProtoXml::new()
+            .start(
+                "manifest",
+                &[
+                    testkit::Attr::android(testkit::ANDROID_VERSION_NAME, "versionName", "1.2.3"),
+                    testkit::Attr::plain("package", "com.example.app"),
+                ],
+            )
+            .start(
+                "uses-permission",
+                &[testkit::Attr::android(
+                    testkit::ANDROID_NAME,
+                    "name",
+                    "android.permission.CAMERA",
+                )],
+            )
+            .end()
+            .start("application", &application)
+            .start("activity", &[testkit::Attr::android(testkit::ANDROID_NAME, "name", ".Main")])
+            .end()
+            .start(
+                "service",
+                &[testkit::Attr::android(
+                    testkit::ANDROID_NAME,
+                    "name",
+                    "com.acme.tracker.UploadService",
+                )],
+            )
+            .end()
+            .end()
+            .end()
+            .finish()
+    }
+
+    /// The tracker package as an app bundle.
+    fn tracker_bundle() -> Vec<u8> {
+        let table =
+            testkit::ProtoResources::new().string(0x7f0f_0001, &[(None, "Example App")]).finish();
+        ZipBuilder::new()
+            .stored("BundleConfig.pb", b"")
+            .deflated(BUNDLE_MANIFEST, &tracker_bundle_manifest(Some(0x7f0f_0001)))
+            .stored(BUNDLE_RESOURCES, &table)
+            .deflated("base/dex/classes.dex", &tracker_dex())
+            .stored("base/root/acme-tracker.properties", b"version=1.0\n")
+            .deflated("base/res/layout/main.xml", b"<layout/>")
+            .stored("BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map", b"")
+            .finish()
+    }
+
+    /// An app bundle is read from its module folders, with the same
+    /// witnesses as the APK it stands for and the records naming the
+    /// entries of the bundle.
+    #[test]
+    fn an_app_bundle_is_read_like_the_apk_it_stands_for() {
+        let pack = tracker_pack();
+        let bundle = scan(&tracker_bundle(), &pack);
+        let artifact = artifact(&bundle);
+        assert_eq!(artifact.subject.id, "com.example.app");
+        assert_eq!(artifact.subject.version.as_deref(), Some("1.2.3"));
+        assert_eq!(artifact.facts.name.as_deref(), Some("Example App"));
+        assert_eq!(coverage(&bundle), Vec::<String>::new());
+        assert_eq!(
+            edges(&bundle),
+            [
+                "AndroidApk apk_file acme-tracker.properties 1 \
+                 Some(\"acme-tracker.properties\") base/root/acme-tracker.properties ZipEntries",
+                "AndroidDex android_class_prefix com.acme.tracker. 2 \
+                 Some(\"com.acme.tracker.Tracker\") base/dex/classes.dex ClassDefs",
+                "AndroidDex dex_string collect.acme.example 1 None base/dex/classes.dex StringIds",
+                "AndroidManifest android_permission android.permission.CAMERA 1 None \
+                 base/manifest/AndroidManifest.xml Permissions",
+                "AndroidManifest manifest_component com.acme.tracker.UploadService 1 \
+                 Some(\"com.acme.tracker.UploadService\") base/manifest/AndroidManifest.xml \
+                 Components",
+            ]
+        );
+
+        // The same witnesses as the APK, record for record, but for where
+        // each is.
+        let apk = scan(&tracker_apk(), &pack);
+        let without_place = |records: &[Record]| -> Vec<String> {
+            edges(records)
+                .into_iter()
+                .filter(|edge| !edge.contains("android_permission"))
+                .map(|edge| edge.split(' ').take(4).collect::<Vec<_>>().join(" "))
+                .collect()
+        };
+        assert_eq!(without_place(&bundle), without_place(&apk));
+    }
+
+    /// The code of every module is read; the manifest of a module other
+    /// than the base one is counted, not read.
+    #[test]
+    fn a_bundle_s_modules_are_read_for_their_code_the_base_one_first() {
+        let pack = tracker_pack();
+        let feature = DexBuilder::new().string("https://collect.acme.example/").finish();
+        let bundle = ZipBuilder::new()
+            .deflated("feature/dex/classes.dex", &feature)
+            .deflated("feature/manifest/AndroidManifest.xml", &tracker_bundle_manifest(None))
+            .deflated("feature/dex/extra.dex", &feature)
+            .deflated(BUNDLE_MANIFEST, &tracker_bundle_manifest(None))
+            .deflated("base/dex/classes2.dex", &tracker_dex())
+            .finish();
+        let records = scan(&bundle, &pack);
+        let places: Vec<String> = edges(&records)
+            .into_iter()
+            .filter(|edge| edge.starts_with("AndroidDex dex_string"))
+            .collect();
+        assert_eq!(
+            places,
+            [
+                "AndroidDex dex_string collect.acme.example 1 None base/dex/classes2.dex StringIds",
+                "AndroidDex dex_string collect.acme.example 1 None feature/dex/classes.dex \
+                 StringIds",
+            ]
+        );
+        assert_eq!(coverage(&records), ["Skipped UnsupportedFormat - None 2"]);
+        assert_eq!(artifact(&records).facts.name, None);
+    }
+
+    /// What decides the layout is the directory: a manifest at the root
+    /// makes an APK whatever else the archive holds, and a bundle without
+    /// its manifest is reported under the bundle's name for it.
+    #[test]
+    fn the_layout_comes_from_the_directory_and_a_missing_manifest_is_reported() {
+        let pack = tracker_pack();
+        let both = ZipBuilder::new()
+            .deflated(MANIFEST, &tracker_manifest())
+            .deflated(BUNDLE_MANIFEST, b"not read")
+            .finish();
+        let records = scan(&both, &pack);
+        assert_eq!(artifact(&records).subject.id, "com.example.app");
+        assert_eq!(coverage(&records), Vec::<String>::new());
+
+        let damaged = ZipBuilder::new().deflated(BUNDLE_MANIFEST, b"\x0f").finish();
+        let records = scan(&damaged, &pack);
+        assert_eq!(artifact(&records).subject.id, UNIDENTIFIED);
+        assert_eq!(
+            coverage(&records),
+            ["Unrecognized ParseError base/manifest/AndroidManifest.xml None 1"]
+        );
+    }
+
+    #[test]
+    fn the_name_of_an_entry_of_a_bundle_in_an_apk() {
+        assert_eq!(apk_twin("base/root/billing.properties"), Some("billing.properties"));
+        assert_eq!(apk_twin("base/root/META-INF/x.version"), Some("META-INF/x.version"));
+        assert_eq!(apk_twin("base/lib/arm64-v8a/libsentry.so"), Some("lib/arm64-v8a/libsentry.so"));
+        assert_eq!(apk_twin("feature/assets/a.json"), Some("assets/a.json"));
+        for none in [
+            "BundleConfig.pb",
+            "META-INF/BNDLTOOL.RSA",
+            "BUNDLE-METADATA/x/y",
+            "base/manifest/AndroidManifest.xml",
+            "base/dex/classes.dex",
+            "base/resources.pb",
+            "base/native.pb",
+            "/root/x",
+        ] {
+            assert_eq!(apk_twin(none), None, "{none}");
+        }
+        assert_eq!(bundle_dex("base/dex/classes.dex"), Some(("base", 1)));
+        assert_eq!(bundle_dex("feature/dex/classes12.dex"), Some(("feature", 12)));
+        assert_eq!(bundle_dex("base/dex/other.dex"), None);
+        assert_eq!(bundle_dex("base/classes.dex"), None);
     }
 
     #[test]

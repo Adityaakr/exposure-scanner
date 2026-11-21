@@ -1,5 +1,6 @@
-//! Writers for small synthetic artifacts: zip archives, DEX files and
-//! compiled Android manifests.
+//! Writers for small synthetic artifacts: zip archives, DEX files, compiled
+//! Android manifests and resource tables, in the binary form of an APK and
+//! in the protocol buffer form of an app bundle.
 //!
 //! Real apps are never stored in the repository, so tests build what they
 //! scan. These writers produce files that are well formed enough for the
@@ -756,6 +757,264 @@ impl ArscBuilder {
         out.extend_from_slice(&config);
         out.extend_from_slice(&offsets);
         out.extend_from_slice(&records);
+        out
+    }
+}
+
+/// Appends a varint.
+fn put_varint(out: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+/// Appends a varint field.
+fn proto_varint(out: &mut Vec<u8>, number: u64, value: u64) {
+    put_varint(out, number << 3);
+    put_varint(out, value);
+}
+
+/// Appends a length-delimited field: a string, bytes or a message.
+fn proto_bytes(out: &mut Vec<u8>, number: u64, bytes: &[u8]) {
+    put_varint(out, (number << 3) | 2);
+    put_varint(out, bytes.len() as u64);
+    out.extend_from_slice(bytes);
+}
+
+/// A message that holds one field, `id`, unless it is zero: a `PackageId`,
+/// `TypeId` or `EntryId`.
+fn proto_id(id: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    if id != 0 {
+        proto_varint(&mut out, 1, id);
+    }
+    out
+}
+
+/// An element of [`ProtoXml`] while it is written.
+#[derive(Debug, Clone, Default)]
+struct ProtoElement {
+    name: String,
+    attributes: Vec<Attr>,
+    children: Vec<ProtoElement>,
+}
+
+impl ProtoElement {
+    /// The `XmlElement` message.
+    fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        proto_bytes(&mut out, 3, self.name.as_bytes());
+        for attribute in &self.attributes {
+            let mut message = Vec::new();
+            if attribute.resource.is_some() {
+                proto_bytes(&mut message, 1, b"http://schemas.android.com/apk/res/android");
+            }
+            proto_bytes(&mut message, 2, attribute.name.as_bytes());
+            let (written, compiled) = match &attribute.value {
+                AttrValue::Text(text) => {
+                    let mut string = Vec::new();
+                    proto_bytes(&mut string, 1, text.as_bytes());
+                    let mut item = Vec::new();
+                    proto_bytes(&mut item, 2, &string);
+                    (text.clone(), item)
+                }
+                AttrValue::Int(value) => {
+                    let mut primitive = Vec::new();
+                    proto_varint(&mut primitive, 6, u64::from(*value));
+                    let mut item = Vec::new();
+                    proto_bytes(&mut item, 7, &primitive);
+                    (value.to_string(), item)
+                }
+                AttrValue::Reference(id) => {
+                    let mut reference = Vec::new();
+                    proto_varint(&mut reference, 2, u64::from(*id));
+                    let mut item = Vec::new();
+                    proto_bytes(&mut item, 1, &reference);
+                    (format!("@0x{id:08x}"), item)
+                }
+            };
+            proto_bytes(&mut message, 3, written.as_bytes());
+            // An attribute without a namespace keeps its value as written
+            // only, as the build tool does for `package`.
+            if let Some(id) = attribute.resource {
+                proto_varint(&mut message, 5, u64::from(id));
+                proto_bytes(&mut message, 6, &compiled);
+            }
+            proto_bytes(&mut out, 4, &message);
+        }
+        for child in &self.children {
+            let mut node = Vec::new();
+            proto_bytes(&mut node, 1, &child.encode());
+            proto_bytes(&mut out, 5, &node);
+        }
+        out
+    }
+}
+
+/// Writes the protocol buffer form of a manifest, as an app bundle holds it
+/// in `base/manifest/AndroidManifest.xml`. It takes the calls of
+/// [`AxmlBuilder`], so one test can build a document both ways.
+#[derive(Debug, Clone, Default)]
+pub struct ProtoXml {
+    /// The elements still open, the root first.
+    open: Vec<ProtoElement>,
+    /// The root, once it is closed.
+    root: Option<ProtoElement>,
+}
+
+impl ProtoXml {
+    /// A document with no elements yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Opens an element.
+    #[must_use]
+    pub fn start(mut self, name: &str, attributes: &[Attr]) -> Self {
+        self.open.push(ProtoElement {
+            name: name.into(),
+            attributes: attributes.to_vec(),
+            children: Vec::new(),
+        });
+        self
+    }
+
+    /// Closes the element opened last.
+    #[must_use]
+    pub fn end(mut self) -> Self {
+        if let Some(element) = self.open.pop() {
+            match self.open.last_mut() {
+                Some(parent) => parent.children.push(element),
+                None => self.root = Some(element),
+            }
+        }
+        self
+    }
+
+    /// The finished `XmlNode`. Elements still open are closed.
+    #[must_use]
+    pub fn finish(mut self) -> Vec<u8> {
+        while !self.open.is_empty() {
+            self = self.end();
+        }
+        let mut out = Vec::new();
+        if let Some(root) = &self.root {
+            proto_bytes(&mut out, 1, &root.encode());
+        }
+        out
+    }
+}
+
+/// A value of [`ProtoResources`]: a string, or a reference to a resource.
+#[derive(Debug, Clone)]
+enum ProtoValue {
+    String(String),
+    Reference(u32),
+}
+
+/// The values of one resource of [`ProtoResources`], each in its
+/// configuration: `None` for the default one, or a locale.
+type ProtoConfigValues = Vec<(Option<String>, ProtoValue)>;
+
+/// Writes the protocol buffer form of a resource table, as an app bundle
+/// holds it in `base/resources.pb`.
+#[derive(Debug, Clone, Default)]
+pub struct ProtoResources {
+    /// Each resource id with its value in each configuration: `None` for
+    /// the default one, or a locale.
+    values: Vec<(u32, ProtoConfigValues)>,
+}
+
+impl ProtoResources {
+    /// A table with no resources yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A string resource, with its text in each configuration given.
+    #[must_use]
+    pub fn string(mut self, id: u32, texts: &[(Option<&str>, &str)]) -> Self {
+        let values = texts
+            .iter()
+            .map(|(locale, text)| (locale.map(Into::into), ProtoValue::String((*text).into())))
+            .collect();
+        self.values.push((id, values));
+        self
+    }
+
+    /// A resource that refers to `target`, in the default configuration.
+    #[must_use]
+    pub fn reference(mut self, id: u32, target: u32) -> Self {
+        self.values.push((id, vec![(None, ProtoValue::Reference(target))]));
+        self
+    }
+
+    /// The finished `ResourceTable`.
+    #[must_use]
+    pub fn finish(self) -> Vec<u8> {
+        // Package, then type, then each entry with its values.
+        type Entries<'a> = Vec<(u16, &'a ProtoConfigValues)>;
+        let mut tree: BTreeMap<u8, BTreeMap<u8, Entries<'_>>> = BTreeMap::new();
+        for (id, values) in &self.values {
+            let [package, kind, high, low] = id.to_be_bytes();
+            tree.entry(package)
+                .or_default()
+                .entry(kind)
+                .or_default()
+                .push((u16::from_be_bytes([high, low]), values));
+        }
+        let mut out = Vec::new();
+        for (package, kinds) in tree {
+            let mut message = Vec::new();
+            proto_bytes(&mut message, 1, &proto_id(u64::from(package)));
+            proto_bytes(&mut message, 2, b"com.example.app");
+            for (kind, entries) in kinds {
+                let mut kind_message = Vec::new();
+                proto_bytes(&mut kind_message, 1, &proto_id(u64::from(kind)));
+                proto_bytes(&mut kind_message, 2, b"string");
+                for (entry, values) in entries {
+                    let mut entry_message = Vec::new();
+                    proto_bytes(&mut entry_message, 1, &proto_id(u64::from(entry)));
+                    proto_bytes(&mut entry_message, 2, format!("name_{entry}").as_bytes());
+                    for (locale, value) in values {
+                        let mut config = Vec::new();
+                        if let Some(locale) = locale {
+                            proto_bytes(&mut config, 3, locale.as_bytes());
+                        }
+                        let mut item = Vec::new();
+                        match value {
+                            ProtoValue::String(text) => {
+                                let mut string = Vec::new();
+                                proto_bytes(&mut string, 1, text.as_bytes());
+                                proto_bytes(&mut item, 2, &string);
+                            }
+                            ProtoValue::Reference(target) => {
+                                let mut reference = Vec::new();
+                                proto_varint(&mut reference, 2, u64::from(*target));
+                                proto_bytes(&mut item, 1, &reference);
+                            }
+                        }
+                        let mut value_message = Vec::new();
+                        proto_bytes(&mut value_message, 4, &item);
+                        let mut config_value = Vec::new();
+                        proto_bytes(&mut config_value, 1, &config);
+                        proto_bytes(&mut config_value, 2, &value_message);
+                        proto_bytes(&mut entry_message, 6, &config_value);
+                    }
+                    proto_bytes(&mut kind_message, 3, &entry_message);
+                }
+                proto_bytes(&mut message, 3, &kind_message);
+            }
+            proto_bytes(&mut out, 2, &message);
+        }
         out
     }
 }

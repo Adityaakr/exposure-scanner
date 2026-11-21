@@ -151,7 +151,7 @@ impl fmt::Display for ScanError {
             Self::Path { path, error } => write!(f, "cannot read {}: {error}", path.display()),
             Self::Unsupported(path) => write!(
                 f,
-                "{} is not a macOS application bundle, an Android package (.apk), a browser \
+                "{} is not a macOS application bundle, an Android package (.apk or .aab), a browser \
                  extension (a Firefox .xpi file, or a Chromium <id>/<version> folder) or a \
                  folder of them; other artifact kinds are not supported yet",
                 path.display()
@@ -175,7 +175,7 @@ impl From<EvidenceError> for ScanError {
 /// Scans the artifacts found at `paths` and returns the evidence.
 ///
 /// Each path is a macOS application bundle, an Android package (a file
-/// named `.apk`), a browser extension or a folder that holds any of them;
+/// named `.apk`, or an app bundle named `.aab`), a browser extension or a folder that holds any of them;
 /// see [`discover::artifacts`]. With no path at all, the apps and the
 /// browser extensions installed on this machine are scanned; see
 /// [`discover::installed`]. A path replaces those folders: when any is

@@ -58,3 +58,17 @@ path = "fuzz_targets/extension_manifest.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "android_resources"
+path = "fuzz_targets/android_resources.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "android_proto"
+path = "fuzz_targets/android_proto.rs"
+test = false
+doc = false
+bench = false
