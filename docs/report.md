@@ -112,6 +112,16 @@ company: **advertising, analytics, attribution, profiling and session
 replay**. Each claim says whether it counts in its `headline` field, so the
 numbers can be recounted from the claims.
 
+**Beside the headline, for Android.** On Android most of what ships is a
+large company's infrastructure, which the counts leave out: the Play build
+of Bitwarden ships five Google SDKs, none in a counted category, so its
+counts are zero. So that such a scan does not read as "nothing found", the
+terminal summary and the HTML report add one more line when the Android apps
+ship SDKs of a company outside the counted categories: "5 SDKs of 1 company
+in the Android apps, in categories the headline does not count". The HTML
+report names the companies and the SDKs. It is a tally of the claims like
+the three counts, is not stored in the JSON report, and is no score.
+
 ## What is not counted
 
 Hosting is not receiving. These are in the report, under their company where
@@ -175,7 +185,7 @@ It holds:
 
 | Part | What it says |
 |---|---|
-| Summary | What was found, first: one sentence with the totals, then each thing found once (an SDK or a declared host, under its company or under none) with its category, its grade as a fact with a count (`ships in 10 of 16 apps`), the apps as links to their findings, and whether it is counted. Then the three headline counts, said to count the counted categories only; when findings exist and all three counts are zero, the page says why. Then the totals. No score. |
+| Summary | What was found, first: one sentence with the totals, then each thing found once (an SDK or a declared host, under its company or under none) with its category, its grade as a fact with a count (`ships in 10 of 16 apps`), the apps as links to their findings, and whether it is counted. Then the three headline counts, said to count the counted categories only; when findings exist and all three counts are zero, the page says why; beside them, for Android, the SDKs of companies outside the counted categories. Then the totals. No score. |
 | What you can do | A checklist with what exposes the most first, one entry per service with the apps it is in, per System Settings pane with the apps that may ask for it, per extension and per Android app. Each entry links to the findings it is about. See [What you can do](#what-you-can-do). |
 | How to read it | What each grade shows and does not show, in one word each: declares, ships, contacted, confirmed; and, when the scan found what an app may access, the access grades too (may access). |
 | Findings by company | Companies with a counted finding first, then the others by name. Under each, the apps, and for each finding its grade, its confidence, how many kinds of evidence agree, whether the company is the app's publisher, and each record it rests on in words: the marker, the file, the table, an example, a count. Components and unmapped hosts come after the companies, under no company. Findings about what an app may access have a part of their own, by app. A company with no counted finding is tagged as outside the counted categories, as visibly as a counted one. |
@@ -219,6 +229,13 @@ The checklist lists what exposes the most first:
 Within a priority, services come first, then extensions, System Settings
 panes and Android apps. An update feed and a service of the app's own
 publisher get no entry.
+
+A permission an app asks for only in Electron's own wording ("This app needs
+access to the camera", and the like for the microphone, Bluetooth and audio
+capture, which Electron writes into every app built with it) is no purpose
+of the app's. It raises a System Settings pane no higher than **Low**, and
+an entry that rests on it in part says how many of its apps state only
+Electron's wording. The finding itself is reported as any other.
 
 For a service of another company in an app, the page gives the app's own
 setting where its publisher documents one, says so plainly where the

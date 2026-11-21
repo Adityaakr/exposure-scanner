@@ -72,7 +72,7 @@ flowchart TD
 | Crate | Role | May use |
 |---|---|---|
 | `xs-model` | Evidence, claim and pack types; canonical JSON; record ids; the fixed list of permissions | `no_std` |
-| `xs-formats` | Bounded parsers over byte slices: Mach-O, code signature, property lists, privacy manifests, asar, zip, DEX, binary Android XML, browser extension manifests | std without file, network, clock or environment APIs |
+| `xs-formats` | Bounded parsers over byte slices: Mach-O, code signature, property lists, privacy manifests, asar, zip, DEX, binary Android XML, the Android resource table, an app bundle's protocol buffers, browser extension manifests | std without file, network, clock or environment APIs |
 | `xs-match` | Matchers compiled from a pack; hit collection; the controls against false positives | `no_std` |
 | `xs-rules` | Pack loader and signature check; the source compiler and lints behind a `compile` feature that only `xtask` enables | std without file access |
 | `xs-derive` | Evidence and pack in, claims out: grades, companies, vendors, parties, headline counts | `no_std` |
@@ -91,9 +91,11 @@ the hash and the matcher. A Mach-O file says where to look in it, so its
 headers and load commands are picked out of the windows as they go by; the
 file is still read exactly once.
 
-An `.apk` file is read once from start to end for its SHA-256. On the way the
-manifest and the DEX files are copied out and parsed in memory, one at a
-time, so evidence only comes from bytes the hash covers.
+An `.apk` or `.aab` file is read once from start to end for its SHA-256. On
+the way the manifest, the resource table and the DEX files are copied out
+and parsed in memory, so evidence only comes from bytes the hash covers. The
+DEX files are let go one at a time; the resource table is kept until the
+manifest says which of its strings is the app's name.
 
 Records hold paths inside the artifact only, never a path of the machine.
 

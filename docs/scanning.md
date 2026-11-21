@@ -17,7 +17,8 @@ findings are graded and counted, see [Reading the report](report.md).
 
 ## Choosing what to scan
 
-A `PATH` is a macOS `.app` bundle, an Android `.apk` file, a browser
+A `PATH` is a macOS `.app` bundle, an Android `.apk` file or app bundle
+(`.aab`), a browser
 extension (a Firefox `.xpi` file, or a Chromium `<id>/<version>` folder that
 holds a `manifest.json`), or a folder. A folder is searched for all of them,
 in itself and in its sub-folders, never inside a bundle. An app reached two
@@ -93,6 +94,8 @@ read, and a header in a shape no archive writer produces is refused whole.
 
 ## Android packages
 
+APKs, and app bundles (`.aab`), the form a developer uploads to Google Play.
+
 ```console
 $ exposure scan tests/fixtures/android/Skeleton.apk --json report.json
 exposure: scanned 1 app (1 file, 1818 bytes): 2 claims, 0 coverage notes
@@ -117,6 +120,35 @@ are matched, each an independent witness:
 The manifest's `uses-permission` elements are read too, for
 [what the app may access](#what-an-app-may-access).
 
+**The app's name.** Most manifests do not hold the name as text:
+`android:label` points at a string resource. The scan looks that one string
+up in the package's resource table, `resources.arsc`, in its default
+configuration, which is the name before any translation, and the report
+shows it in place of the package id (Bitwarden, not `com.x8bit.bitwarden`).
+Nothing else of the table is decoded. A table that cannot be read for the
+name is a coverage note; a label the table does not hold leaves the app
+under its package id.
+
+**App bundles.** A bundle keeps what an APK has at its root in one folder
+per module, and its manifest and resource table as protocol buffers. The
+scan tells the two apart by the archive's own directory, never by the name
+of the file, and reads a bundle with the same four witnesses:
+
+| APK | App bundle |
+|---|---|
+| `AndroidManifest.xml` | `base/manifest/AndroidManifest.xml` |
+| `resources.arsc` | `base/resources.pb` |
+| `classes.dex`, `classes2.dex`, ... | `<module>/dex/classes.dex`, ... |
+| `lib/...`, `assets/...`, `res/...` | `<module>/lib/...`, `<module>/assets/...`, `<module>/res/...` |
+| Any other file, such as `billing.properties` | `<module>/root/billing.properties` |
+
+An `apk_file` token is matched against the name the entry would have in an
+APK, and the record names the entry of the bundle. The code of every module
+is read; the manifest of the base module only, and that of another module is
+counted in a coverage note. Converted to a bundle with `aapt2`, the Play
+build of Bitwarden and NewPipe give the same claims, from the same
+witnesses, as their APKs.
+
 A record names the table and the file a hit is in, so it can be checked with
 `unzip -l`, `aapt2 dump xmltree` or `dexdump`. A hit in the string table
 carries the rule's token and never the string, which could be a URL.
@@ -124,7 +156,8 @@ carries the rule's token and never the string, which could be a URL.
 Limits, each reported in the output where it applies:
 
 - Only the DEX files Android loads from a package are read (`classes.dex`,
-  `classes2.dex`, ...).
+  `classes2.dex`, ..., and in a bundle the same names under
+  `<module>/dex/`).
 - An entry over 256 MiB, or past 1 GiB in total, is set aside with its size.
 - Archives with the 64-bit zip extension and DEX container files (version
   041) are reported as unsupported.
@@ -240,6 +273,14 @@ authentication.
   `WAKE_LOCK`, is not listed and is no finding.
 - A usage description under a key the list does not know is a coverage note
   (`unrecognized`, `unrecognized_record`), not silence.
+- Electron writes four usage descriptions into every app built with it,
+  unless the app states its own purpose: "This app needs access to the
+  camera", "... the microphone", "... Bluetooth" and "... audio capture". An
+  app that keeps one asks because Electron does, which says nothing about
+  what it does with the permission. Such a finding is still reported, but a
+  checklist entry that rests on nothing else ranks `Low`, and an entry that
+  rests on it in part says how many of its apps state only Electron's
+  wording.
 - An entitlement that holds a list, such as a sandbox exception for paths on
   your disk, is recorded with the number of its entries and never the
   entries.
