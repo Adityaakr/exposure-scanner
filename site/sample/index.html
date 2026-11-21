@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Sample report · exposure</title>
+<meta name="description" content="The unchanged HTML report exposure writes, from a scan of the synthetic test apps in its repository: every finding with its grade and the evidence records behind it.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="A real exposure report">
+<meta property="og:description" content="The unchanged HTML report exposure writes, from a scan of the synthetic test apps in its repository.">
+<meta property="og:image" content="https://adityaakr.github.io/exposure-scanner/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../assets/icon.svg" type="image/svg+xml">
+<link rel="preload" href="../assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/site.css">
+<script src="../assets/theme.js"></script>
+<script src="../assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="exposure, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="7" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M9 11h8M9 15.5h4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><rect x="16" y="16" width="8" height="8" rx="2" fill="#f0b429"/></svg>
+      exposure
+    </a>
+    <nav aria-label="Main">
+      <ul class="nav">
+        <li class="wide"><a href="../#how">How it works</a></li>
+        <li class="wide"><a href="../#trust">Privacy</a></li>
+        <li><a href="./" aria-current="page">Sample report</a></li>
+        <li><a href="../docs/">Docs</a></li>
+        <li><a href="https://github.com/Adityaakr/exposure-scanner"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="label">GitHub</span></a></li>
+      </ul>
+    </nav>
+    <button class="theme-toggle" type="button" aria-label="Switch theme">
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <section class="page-head" aria-labelledby="page-title">
+    <div class="wrap">
+      <p class="kicker">Sample report</p>
+      <h1 id="page-title">A real report, from the repository's test apps.</h1>
+      <p class="lede">This is the HTML report exposure 0.1.0 writes, unchanged. It comes from a scan of the synthetic apps the project tests against, so it names no real app. A scan of your own Mac writes the same kind of page, to a folder only you can read.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="report.html">Open it full page
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7.5 8.5"/></svg></a>
+        <a class="btn btn-secondary" href="report.json" download>Download the JSON report</a>
+      </div>
+      <ul class="scanned" aria-label="What was scanned">
+        <li><strong><code>Skeleton.app</code></strong>A macOS app bundle holding a Sentry framework folder.</li>
+        <li><strong><code>ElectronSkeleton.app</code></strong>An Electron app whose archive holds the literals a bundler leaves of the Sentry and PostHog SDKs.</li>
+        <li><strong><code>Skeleton.apk</code></strong>A 1.8 kB Android package whose code defines PostHog and Sentry classes, plus decoys that must match nothing.</li>
+        <li><strong>Three extensions</strong>Two Chromium extensions and a Firefox add-on, one asking for every website and one asking for little.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-label="The report" id="report">
+    <div class="wrap sample-grid">
+      <div class="window">
+        <div class="window-bar">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="window-url"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>~/Library/Application Support/exposure/report.html</span>
+          <a class="window-open" href="report.html">Full page</a>
+        </div>
+        <iframe name="report" src="report.html" title="The sample exposure report" sandbox="" loading="lazy"></iframe>
+      </div>
+
+      <aside class="guide" aria-label="Reading the report">
+        <div class="panel">
+          <h2>What to look at</h2>
+          <ol>
+            <li><a href="report.html#summary" target="report">Summary<span>Three counts, and no score.</span></a></li>
+            <li><a href="report.html#actions" target="report">What you can do<span>Steps ranked by how much they matter. The scanner applies none of them.</span></a></li>
+            <li><a href="report.html#findings" target="report">Findings by company<span>Each with its grade, confidence and the records behind it.</span></a></li>
+            <li><a href="report.html#coverage" target="report">What was scanned<span>What was read, and what could not be.</span></a></li>
+            <li><a href="report.html#limits" target="report">What it cannot tell you<span>The limits every report states.</span></a></li>
+            <li><a href="report.html#records" target="report">Evidence records<span>Every raw record, by its SHA-256 id.</span></a></li>
+          </ol>
+        </div>
+        <div class="panel">
+          <h2>The files</h2>
+          <ul class="files">
+            <li><a href="report.html"><code>report.html</code><span class="soft">for reading</span></a></li>
+            <li><a href="report.json" download><code>report.json</code><span class="soft">for programs</span></a></li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="section alt" aria-labelledby="made-title">
+    <div class="wrap run-grid">
+      <div>
+        <p class="kicker">How it was made</p>
+        <h2 id="made-title" class="h2">One command, from the repository root.</h2>
+        <p class="lede">The site's build compiles exposure from the same commit and runs this command, so the page above is what that code writes. The same fixtures and rule pack give the same bytes on any machine, so you can check it.</p>
+      </div>
+      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan --no-open --no-cache \
+    --html report.html --json report.json \
+    tests/fixtures/macos/Skeleton.app \
+    tests/fixtures/macos/ElectronSkeleton.app \
+    tests/fixtures/android/Skeleton.apk \
+    tests/fixtures/browser/Extensions \
+    tests/fixtures/browser/addon@example.org.xpi
+<span class="o">exposure: scanned 3 apps and 3 browser extensions (13 files, 8889 bytes): 14 claims, 0 coverage notes
+exposure: headline: 0 companies at contacts or above, 1 company at contains, 2 apps with a third-party channel
+exposure: scope: the paths given and nothing else; the installed-app folders were not searched</span></pre></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="next-title">
+    <div class="wrap">
+      <div class="closing">
+        <h2 id="next-title">Now scan your own apps.</h2>
+        <p>The report stays on your machine. Nothing is sent anywhere, and nothing is changed.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="../#install">Install</a>
+          <a class="btn btn-secondary" href="../docs/">Read the docs</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-base">
+      <span>Code Apache-2.0 · Rules and company map CC BY 4.0 · <a href="https://github.com/Adityaakr/exposure-scanner">Source on GitHub</a></span>
+      <span class="no-track"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 9.5C8 19.3 5 15.5 5 11V6l7-3z"/></svg>This site sets no cookies, runs no analytics and loads nothing from other servers.</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
