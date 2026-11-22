@@ -71,7 +71,11 @@ own report, cache and files, and nothing here tries to stop them.
   inflates to a gigabyte, costs a scan about 270 MB at one thread and about
   1.1 GB at ten, however many there are; before this bound, 25 MB of them
   took a scan at one thread to 15.7 GB on macOS, whose allocator keeps freed
-  blocks. `cargo xtask bench` checks it on such a folder.
+  blocks. A DEX file whose header alone decides what it holds, because it
+  is refused for its header or holds no string and defines no class, is not
+  held at all: its stream is checked to its end in a window of memory, so
+  the same folder with DEX files of zeros costs about 25 MB at ten threads.
+  `cargo xtask bench` checks both on such folders.
 - **The zip reader is no stricter than Android.** A package that Android
   reads and the scanner does not is a package that hides from the scan, and
   malware does exactly that (BadPack, SoumniBot, Konfety). So the
