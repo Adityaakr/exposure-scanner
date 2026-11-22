@@ -18,7 +18,8 @@ usage:
 
 Start with `exposure scan`. It reads the apps installed on this Mac and the
 browser extensions in your profiles, writes the report to a private folder,
-prints what to do first and opens the report in your browser.
+prints what needs your attention first and opens the report in your
+browser.
 
 commands:
   scan     Read the apps at each PATH (a macOS .app bundle, an Android .apk
@@ -39,9 +40,10 @@ commands:
            With neither --html nor --json, the report for reading is written
            to report.html in a folder only you can read: ~/Library/
            Application Support/exposure on macOS, and ~/.local/share/exposure
-           (or under XDG_DATA_HOME) elsewhere. Its path and the first entries
-           of its checklist, \"What you can do\", are printed, and when the
-           scan runs in a terminal the report is opened in your browser.
+           (or under XDG_DATA_HOME) elsewhere. Its path and what needs your
+           attention first, the entries of its checklist \"What you can do\"
+           of high and medium priority, are printed, and when the scan runs
+           in a terminal the report is opened in your browser.
            Each scan replaces the report of the one before.
            An app that has not changed since an earlier scan is not read
            again: what was found in it is kept in a private cache, in

@@ -239,11 +239,12 @@ fn excerpt(text: &str) -> String {
     text.chars().take(60).collect()
 }
 
-/// The elements a report is made of.
-const ELEMENTS: [&str; 33] = [
+/// The elements a report is made of. `details` and `summary` show and hide
+/// what they hold with no script.
+const ELEMENTS: [&str; 36] = [
     "html", "head", "meta", "title", "style", "body", "header", "nav", "main", "section", "div",
-    "h1", "h2", "h3", "h4", "h5", "p", "a", "span", "strong", "code", "pre", "ul", "li", "dl",
-    "dt", "dd", "table", "thead", "tbody", "tr", "th", "td",
+    "h1", "h2", "h3", "h4", "h5", "p", "a", "span", "strong", "code", "pre", "ul", "ol", "li",
+    "dl", "dt", "dd", "table", "thead", "tbody", "tr", "th", "td", "details", "summary",
 ];
 
 /// Checks that a parsed report can run nothing and load nothing.

@@ -1,12 +1,22 @@
 //! The HTML report: one file a person can open, read and print.
 //!
-//! It leads with what was found, each thing once with the apps it is in, and
-//! then with what a person can do about it, as a checklist with what exposes
-//! the most first ([`advice`]). Then it shows the findings grouped by
-//! company, each with its grade, its confidence, what can be done about it
-//! and the records it rests on; what the scan covered and what it set aside;
-//! what no scan of a device can see; and every evidence record, exactly as
-//! stored.
+//! It leads with what needs a person's attention: how much was found, then
+//! the first entries of the checklist, each in one sentence with its first
+//! step. The headline counts and everything that was found, each thing once
+//! with the apps it is in, are under it, opened on demand. Then comes the
+//! whole checklist of what a person can do, with what exposes the most first
+//! ([`advice`]). Then the findings grouped by company, each with its grade,
+//! and, opened on demand, its confidence, what can be done about it and the
+//! records it rests on; what the scan covered and what it set aside; what no
+//! scan of a device can see; and every evidence record, exactly as stored.
+//!
+//! What is opened on demand is in a `details` element: the browser shows and
+//! hides it, with no script, and it is in the document whether it is open
+//! or not. Printing opens it in browsers that support the `::details-content`
+//! pseudo-element (current Chrome, Edge, Safari and Firefox); an older browser
+//! prints it closed. A link never leads into one: a browser that
+//! does not open it for the link would show nothing, so what a link names is
+//! outside every `details`.
 //!
 //! The page is made from one list, [`SECTIONS`]. The navigation at its top is
 //! written from the same list, so it names the sections that are on the page
@@ -53,7 +63,7 @@ use crate::{RenderError, ReportMeta, check_honest};
 /// it from the stylesheet.
 macro_rules! style_source {
     () => {
-        "'sha256-Tld4UI1dnEZpmcgNJQFrML+4BYY0W5thNJnRXMj7cqI='"
+        "'sha256-jh6LY3j9ajrAIb6lcb57XCIFPyyelrBK1+K1RRIWOO8='"
     };
 }
 
@@ -96,9 +106,9 @@ const HEAD: &str = concat!(
     "<header class=\"top\">\n",
     "<p class=\"kicker\">Device exposure scan</p>\n",
     "<h1>Exposure report</h1>\n",
-    "<p class=\"lede\">Which companies have a channel to your data through the apps that were \
-     scanned, and the evidence for each one. Every finding states how strong its evidence is \
-     and links to the raw record behind it.</p>\n",
+    "<p class=\"lede\">What the scanned apps ship and may access, what needs your attention, and \
+     what you can do about it. The evidence behind each finding is further down, for when you \
+     want it.</p>\n",
     "<p class=\"private\">This file was made on your device and lists apps you use, so treat \
      it as private. It loads nothing from the network and runs no script.</p>\n",
     "</header>\n",
@@ -135,7 +145,7 @@ macro_rules! section {
 
 /// The sections of the report, in the order they are on the page.
 const SECTIONS: [Section; 8] = [
-    section!("summary", "Summary", "Summary", summary),
+    section!("summary", "Summary", "What needs your attention", summary),
     section!("actions", "What you can do", "What you can do", actions),
     section!("reading", "How to read it", "How to read this report", reading),
     section!("findings", "Findings", "Findings by company", findings),
@@ -268,30 +278,21 @@ fn document(sections: &[Section], input: &Input<'_>) -> Result<String, RenderErr
     Ok(page.finish())
 }
 
-/// What was found, then the three counts of the headline, then the totals.
+/// How much was found, then what needs attention first, then the three
+/// counts of the headline and the totals, and everything that was found.
 fn summary(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
     let view = input.view;
-    found(page, view);
-    headline(page, view);
-    page.raw("<ul class=\"totals\">\n");
-    for total in [
-        plural(view.read_apps().count() as u64, "app scanned", "apps scanned"),
-        plural(view.claims, "finding", "findings"),
-        plural(view.company_count(), "company named", "companies named"),
-        plural(view.coverage_notes, "coverage note", "coverage notes"),
-        plural(view.records, "evidence record", "evidence records"),
-    ] {
-        page.element("li", &[], &total);
-        page.raw("\n");
+    lead(page, view);
+    if view.claims > 0 {
+        attention(page, input);
     }
-    page.raw("</ul>\n");
+    headline(page, view);
+    found(page, view);
     Ok(())
 }
 
-/// Everything the scan found, once each, whether or not it counts in the
-/// headline: what it is, whose it is, in how many apps, and in which.
-fn found(page: &mut Markup, view: &View<'_>) {
-    page.raw("<h3>What was found</h3>\n");
+/// One sentence with how much was found, or that nothing was.
+fn lead(page: &mut Markup, view: &View<'_>) {
     if view.claims == 0 {
         page.raw(NOTHING_FOUND);
         return;
@@ -306,15 +307,123 @@ fn found(page: &mut Markup, view: &View<'_>) {
     page.text(&plural(scanned, "app scanned", "apps scanned"));
     page.raw(".");
     page.close();
+    page.raw("\n");
+}
+
+/// The first entries of the checklist, each in one sentence with its first
+/// step and a link to every step: [`crate::first_todos`] of the checklist,
+/// which a scan prints on the terminal too.
+fn attention(page: &mut Markup, input: &Input<'_>) {
+    let items = advice::text::items(input.pack, input.view);
+    let todos: Vec<crate::Todo> = items.iter().map(|item| item.todo.clone()).collect();
+    let first = crate::first_todos(&todos);
+    let Some(top) = first.first() else {
+        page.raw(advice::NOTHING_TO_DO);
+        return;
+    };
+    page.open_class("p", "status");
+    let entries = plural(todos.len() as u64, "entry", "entries");
+    if top.priority.needs_attention() {
+        if first.len() == 1 {
+            page.raw("Start with this one. ");
+        } else {
+            page.raw("Start with these ");
+            page.number(first.len() as u64);
+            page.raw(". ");
+        }
+        page.raw("<a href=\"#actions\">What you can do</a> has every step, for ");
+        page.raw(if todos.len() > 1 { "all " } else { "its " });
+        page.text(&entries);
+        let mut by_priority: Vec<String> = Vec::new();
+        for priority in
+            [crate::TodoPriority::High, crate::TodoPriority::Medium, crate::TodoPriority::Low]
+        {
+            let count = todos.iter().filter(|todo| todo.priority == priority).count();
+            if count > 0 {
+                by_priority.push(format!("{count} {}", priority.name().to_lowercase()));
+            }
+        }
+        if by_priority.len() > 1 {
+            page.raw(": ");
+            let by_priority: Vec<&str> = by_priority.iter().map(String::as_str).collect();
+            page.text(&list_words(&by_priority));
+            page.raw(" priority");
+        }
+        page.raw(".");
+    } else {
+        page.raw("Nothing here needs your attention first: ");
+        page.raw(if todos.len() > 1 { "all " } else { "the " });
+        page.text(&entries);
+        page.raw(" of <a href=\"#actions\">What you can do</a> ");
+        page.raw(if todos.len() > 1 { "are" } else { "is" });
+        page.raw(" of low priority. ");
+        page.raw(if first.len() < todos.len() { "The first of them:" } else { "Here they are:" });
+    }
+    page.close();
+    page.raw("\n<ol class=\"first\">\n");
+    for (todo, item) in first.iter().zip(&items) {
+        page.open_class(
+            "li",
+            match todo.priority {
+                crate::TodoPriority::High => "first-high",
+                crate::TodoPriority::Medium => "first-medium",
+                crate::TodoPriority::Low => "first-low",
+            },
+        );
+        page.raw("\n");
+        page.open_class("p", "todo-head");
+        page.classed("span", priority_class(todo.priority), todo.priority.name());
+        page.raw(" ");
+        page.element("strong", &[], &todo.title);
+        page.close();
+        page.raw("\n");
+        page.element("p", &[], &todo.about);
+        page.raw("\n");
+        page.open_class("p", "do");
+        page.classed("span", "do-label", "First step:");
+        page.raw(" ");
+        page.text(&todo.step);
+        page.raw(" ");
+        page.element("a", &[("href", Value::Link("t-", item.anchor.id.digest()))], "Every step");
+        page.close();
+        page.raw("\n");
+        page.close();
+        page.raw("\n");
+    }
+    page.raw("</ol>\n");
+}
+
+/// The class of the badge of a priority, as the checklist writes it.
+const fn priority_class(priority: crate::TodoPriority) -> &'static str {
+    match priority {
+        crate::TodoPriority::High => "prio p-high",
+        crate::TodoPriority::Medium => "prio p-medium",
+        crate::TodoPriority::Low => "prio p-low",
+    }
+}
+
+/// Everything the scan found, once each, whether or not it counts in the
+/// headline: what it is, whose it is, in how many apps, and in which. It is
+/// opened on demand.
+fn found(page: &mut Markup, view: &View<'_>) {
+    if view.claims == 0 {
+        return;
+    }
+    let scanned = view.read_apps().count() as u64;
+    page.raw("<details class=\"more\">\n<summary>");
+    page.raw("Everything the scan found: ");
+    page.text(&plural(view.found.len() as u64, "thing", "things"));
+    page.raw(", each with the apps it is in");
+    page.raw("</summary>\n<h3>What was found</h3>\n");
     page.raw(
-        "\n<p class=\"note\">Each entry is one thing the scan found and the apps it is in, \
+        "<p class=\"note\">Each entry is one thing the scan found and the apps it is in, \
          with what is in the most apps first. An app's name links to its finding further \
          down, which shows the evidence.</p>\n<ul class=\"found\">\n",
     );
     for thing in &view.found {
         found_item(page, view, thing, scanned);
     }
-    page.raw("</ul>\n");
+    page.raw("</ul>\n</details>\n");
 }
 
 /// One thing that was found.
@@ -418,9 +527,32 @@ fn name_in_entry(view: &View<'_>, thing: &Found<'_>, app: &App<'_>) -> String {
     format!("{} ({told_by})", app.title())
 }
 
-/// The three counts of the headline, and what they count.
+/// The three counts of the headline, what they count, and the totals. The
+/// line that opens them on demand states the three numbers.
 fn headline(page: &mut Markup, view: &View<'_>) {
-    page.raw("<h3>The three headline counts</h3>\n");
+    let headline = view.headline;
+    let zeros = view.claims > 0 && headline == Headline::default();
+    page.raw("<details class=\"more\">\n<summary>The three headline counts: ");
+    page.text(&format!(
+        "{}, {} and {}",
+        plural(
+            headline.companies_contacts.into(),
+            "company with a recorded connection",
+            "companies with a recorded connection"
+        ),
+        plural(
+            headline.companies_contains.into(),
+            "company whose code the apps ship",
+            "companies whose code the apps ship"
+        ),
+        plural(
+            headline.apps_third_party.into(),
+            "app with a third-party channel",
+            "apps with a third-party channel"
+        ),
+    ));
+    page.raw(if zeros { ". None of the findings adds to them." } else { "." });
+    page.raw("</summary>\n<h3>The three headline counts</h3>\n");
     page.open_class("p", "note");
     page.raw(
         "These three numbers do not count every finding. They count the findings that name a \
@@ -432,20 +564,20 @@ fn headline(page: &mut Markup, view: &View<'_>) {
     }
     page.raw(
         ". Every other finding, such as crash reporting or an update feed, is in the list \
-         above and in the findings below, and in none of these numbers. There is no score.",
+         of what was found and in the findings below, and in none of these numbers. There is \
+         no score.",
     );
     page.close();
     page.raw("\n");
-    if view.claims > 0 && view.headline == Headline::default() {
+    if zeros {
         page.raw(
-            "<p class=\"zero\">None of the findings above adds to these three counts, which is \
-             why they are zero. A count takes a finding that names a company in a counted \
+            "<p class=\"zero\">None of the findings adds to these three counts, which is why \
+             they are zero. A count takes a finding that names a company in a counted \
              category: a company is counted from grade <code>contains</code> up, and an app \
              only for a third-party finding.</p>\n",
         );
     }
     page.raw("<div class=\"counts\">\n");
-    let headline = view.headline;
     count(
         page,
         headline.companies_contacts,
@@ -466,6 +598,18 @@ fn headline(page: &mut Markup, view: &View<'_>) {
     );
     page.raw("</div>\n");
     beside_the_headline(page, view);
+    page.raw("<ul class=\"totals\">\n");
+    for total in [
+        plural(view.read_apps().count() as u64, "app scanned", "apps scanned"),
+        plural(view.claims, "finding", "findings"),
+        plural(view.company_count(), "company named", "companies named"),
+        plural(view.coverage_notes, "coverage note", "coverage notes"),
+        plural(view.records, "evidence record", "evidence records"),
+    ] {
+        page.element("li", &[], &total);
+        page.raw("\n");
+    }
+    page.raw("</ul>\n</details>\n");
 }
 
 /// What the Android apps ship in categories the headline leaves out, so a
@@ -490,7 +634,7 @@ fn beside_the_headline(page: &mut Markup, view: &View<'_>) {
         page.text(&list_words(names));
         page.raw(")");
     }
-    page.raw(". They are in the list above and in the findings below.");
+    page.raw(". They are in the list of what was found and in the findings below.");
     page.close();
     page.raw("\n");
 }
@@ -520,6 +664,8 @@ fn reading(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
         "<p>Each finding is a graded fact about what an app's files hold. The grade says what \
          kind of evidence there is, and a finding takes the highest grade its evidence \
          reaches. No finding says what an app or a company intends.</p>\n\
+         <details class=\"more\">\n<summary>What each grade shows, and the other terms of a \
+         finding</summary>\n\
          <div class=\"scroll\">\n<table class=\"ladder\">\n\
          <thead><tr><th scope=\"col\">Grade</th><th scope=\"col\">In a word</th>\
          <th scope=\"col\">What it shows</th></tr></thead>\n<tbody>\n",
@@ -548,7 +694,7 @@ fn reading(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
          updater. It names no company.</dd>\n\
          <dt>Unmapped host</dt>\n<dd>A host the app declares that the rule pack lists under no \
          company. It is shown as itself and nobody is named as its owner.</dd>\n\
-         </dl>\n",
+         </dl>\n</details>\n",
     );
     Ok(())
 }
@@ -566,7 +712,8 @@ fn findings(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
     } else {
         page.raw(
             "<p>Companies with a finding that counts in the summary come first, then the \
-             others, each in alphabetical order.</p>\n",
+             others, each in alphabetical order. Open a finding to see what you can do about \
+             it and the evidence it rests on.</p>\n",
         );
     }
     for company in &view.companies {
@@ -736,7 +883,9 @@ fn finding_block(page: &mut Markup, input: &Input<'_>, finding: &Finding<'_>) {
     page.raw(" ");
     page.raw(words::grade_meaning(claim.grade));
     page.close();
-    page.raw("\n<dl class=\"facts\">\n");
+    page.raw("\n<details class=\"more\">\n<summary>What you can do, and the evidence: ");
+    page.text(&plural(claim.evidence.len() as u64, "record", "records"));
+    page.raw("</summary>\n<dl class=\"facts\">\n");
 
     match (claim.edge, claim.object.kind, finding.company) {
         (EdgeType::Access, _, _) | (_, ObjectKind::Permission, _) => {}
@@ -812,7 +961,7 @@ fn finding_block(page: &mut Markup, input: &Input<'_>, finding: &Finding<'_>) {
             evidence_item(page, id, edge);
         }
     }
-    page.raw("</ul>\n");
+    page.raw("</ul>\n</details>\n");
     page.close();
     page.raw("\n");
 }
@@ -944,6 +1093,9 @@ fn apps_scanned(page: &mut Markup, view: &View<'_>) {
     if view.read_apps().next().is_none() {
         page.raw("<p class=\"none\">The scan found no app to read.</p>\n");
     } else {
+        page.raw("<details class=\"more\">\n<summary>");
+        page.text(&plural(view.read_apps().count() as u64, "app", "apps"));
+        page.raw(", with what was read of each and how many findings it has</summary>\n");
         page.raw(
             "<div class=\"scroll\">\n<table>\n<thead><tr><th scope=\"col\">App</th>\
              <th scope=\"col\">App id</th><th scope=\"col\">Version</th>\
@@ -980,7 +1132,7 @@ fn apps_scanned(page: &mut Markup, view: &View<'_>) {
             page.close();
             page.raw("\n");
         }
-        page.raw("</tbody>\n</table>\n</div>\n");
+        page.raw("</tbody>\n</table>\n</div>\n</details>\n");
     }
 }
 
@@ -993,6 +1145,13 @@ fn set_aside(page: &mut Markup, view: &View<'_>) {
              interpret in these apps.</p>\n",
         );
     } else {
+        page.raw("<details class=\"more\">\n<summary>");
+        page.text(&plural(
+            view.coverage_notes,
+            "thing the scan set aside or could not interpret",
+            "things the scan set aside or could not interpret",
+        ));
+        page.raw("</summary>\n");
         page.raw(
             "<div class=\"scroll\">\n<table>\n<thead><tr><th scope=\"col\">App</th>\
              <th scope=\"col\">Where</th><th scope=\"col\">What happened</th>\
@@ -1003,7 +1162,7 @@ fn set_aside(page: &mut Markup, view: &View<'_>) {
                 coverage_row(page, app, id, note);
             }
         }
-        page.raw("</tbody>\n</table>\n</div>\n");
+        page.raw("</tbody>\n</table>\n</div>\n</details>\n");
     }
 }
 

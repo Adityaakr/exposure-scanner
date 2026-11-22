@@ -286,8 +286,10 @@ fn the_terminal_summary_names_no_app_and_no_path() {
 }
 
 /// With no file named, a scan writes the report for reading to a private
-/// folder of the user's, says where, and prints the first entries of the
-/// checklist. It never starts a browser when it is not run in a terminal.
+/// folder of the user's, says where, and prints what needs attention first,
+/// as the report's summary has it: the entries of the checklist of high and
+/// medium priority, or the low-priority ones when there is nothing else. It
+/// never starts a browser when it is not run in a terminal.
 #[test]
 fn a_scan_with_no_file_named_writes_the_page_to_a_private_folder_and_prints_the_checklist() {
     let home = tempfile::tempdir().unwrap();
@@ -308,9 +310,14 @@ fn a_scan_with_no_file_named_writes_the_page_to_a_private_folder_and_prints_the_
     let page = folder.join("report.html");
     assert!(said.contains(&format!("Your report: {}", page.display())), "{said}");
     assert!(said.contains("Scanned 2 apps."), "{said}");
-    assert!(said.contains("What you can do first (2 of 2):"), "{said}");
+    assert!(said.contains("What needs your attention first (1 of 2 things you can do):"), "{said}");
     assert!(said.contains("1. [High] PostHog"), "{said}");
-    assert!(said.contains("2. [Low] Sentry"), "{said}");
+    assert!(!said.contains("[Low] Sentry"), "only what needs attention first: {said}");
+    assert!(said.contains("1 more entry in the report, under What you can do."), "{said}");
+    // What needs attention comes before the headline counts.
+    let at = |part: &str| said.find(part).unwrap_or_else(|| panic!("no `{part}`: {said}"));
+    assert!(at("Scanned 2 apps.") < at("[High] PostHog"));
+    assert!(at("[High] PostHog") < at("The headline counts:"));
     assert!(!said.contains("open in your browser"), "no browser outside a terminal: {said}");
     assert!(stderr(&output).contains("scanned 2 apps"), "{}", stderr(&output));
     assert_eq!(fs::metadata(&folder).unwrap().permissions().mode() & 0o777, 0o700);
@@ -327,7 +334,13 @@ fn a_scan_with_no_file_named_writes_the_page_to_a_private_folder_and_prints_the_
         .output()
         .unwrap();
     let said = stdout(&output);
-    assert!(said.contains("What you can do first (1 of 1):"), "{said}");
+    assert!(
+        said.contains(
+            "Nothing needs your attention first. Things you can do, all of low priority (1 of 1):"
+        ),
+        "{said}"
+    );
+    assert!(said.contains("1. [Low] Sentry"), "{said}");
     assert_eq!(fs::metadata(&folder).unwrap().permissions().mode() & 0o777, 0o700);
     assert!(!fs::read_to_string(&page).unwrap().contains("PostHog"));
 }

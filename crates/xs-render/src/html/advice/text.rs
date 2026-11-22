@@ -14,6 +14,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use xs_model::Claim;
 use xs_model::access;
 use xs_model::claim::Party;
 use xs_model::permission::Permission;
@@ -33,11 +34,25 @@ const NAMED_APPS: usize = 3;
 /// report lists.
 const NAMED_HOSTS: usize = 3;
 
+/// One entry of the checklist in plain words, with the finding the HTML
+/// report anchors the entry by.
+pub(crate) struct Item<'a> {
+    pub(crate) todo: Todo,
+    pub(crate) anchor: &'a Claim,
+}
+
 /// The checklist, in the order a reader should act on it.
 pub(crate) fn todos(pack: &xs_model::pack::Pack, view: &View<'_>) -> Vec<Todo> {
+    items(pack, view).into_iter().map(|item| item.todo).collect()
+}
+
+/// The checklist, in the order a reader should act on it, each entry with
+/// its anchor.
+pub(crate) fn items<'a>(pack: &xs_model::pack::Pack, view: &View<'a>) -> Vec<Item<'a>> {
     checklist(view)
         .into_iter()
         .filter_map(|(priority, _, entry)| {
+            let anchor = entry.anchor()?;
             let priority = match priority {
                 Priority::High => TodoPriority::High,
                 Priority::Medium => TodoPriority::Medium,
@@ -49,7 +64,9 @@ pub(crate) fn todos(pack: &xs_model::pack::Pack, view: &View<'_>) -> Vec<Todo> {
                 Entry::Pane(pane, apps) => self::pane(view, pane, &apps),
                 Entry::Android(app, findings) => android(view.apps.get(app)?, &findings),
             };
-            Some(Todo { priority, title: plain(&title), about: plain(&about), step: plain(&step) })
+            let todo =
+                Todo { priority, title: plain(&title), about: plain(&about), step: plain(&step) };
+            Some(Item { todo, anchor })
         })
         .collect()
 }
@@ -77,29 +94,28 @@ fn channel(
         .collect();
     let mut about = String::from(found.category.name);
     if let Some(company) = found.company {
-        about.push_str(", by ");
+        about.push_str(" by ");
         about.push_str(&company.name);
     }
     about.push_str(", in ");
-    about.push_str(&plural(apps.len() as u64, "app", "apps"));
-    about.push_str(": ");
+    if apps.len() > NAMED_APPS + 1 {
+        about.push_str(&plural(apps.len() as u64, "app", "apps"));
+        about.push_str(": ");
+    }
     about.push_str(&app_names(apps.iter().map(|(app, _)| app.title())));
+    about.push('.');
+    let title = String::from(found.name);
 
-    // The first step the report gives: what the app's publisher documents
-    // about its own settings, then a block list, then removing the app.
+    // The first step that does something: an app's own setting, then a
+    // block list. Only then what a publisher says cannot be done, and last
+    // that nothing is on record.
     for &(app, claim) in &apps {
-        let mut step = match in_app(pack, app, &claim.category) {
-            InApp::Settings(_, settings) => match settings.first() {
-                Some(setting) => format!("In {}, turn it off: {}", app.title(), setting.steps),
-                None => continue,
-            },
-            InApp::None(none) => format!("In {}: {}", app.title(), none.says),
-            InApp::Unknown => continue,
-        };
-        if !step.ends_with('.') {
-            step.push('.');
+        if let InApp::Settings(_, settings) = in_app(pack, app, &claim.category)
+            && let Some(setting) = settings.first()
+        {
+            let step = sentence(format!("In {}, turn it off: {}", app.title(), setting.steps));
+            return (title, about, step);
         }
-        return (String::from(found.name), about, step);
     }
     for &(app, claim) in &apps {
         if let Some(hosts) = block_hosts(pack, claim, found.category.headline)
@@ -112,12 +128,25 @@ fn channel(
                 format!("{shown} and {} more hosts the report lists", hosts.len() - NAMED_HOSTS)
             };
             let step = format!("Block {named} with {}.", firewall(app.subject.platform));
-            return (String::from(found.name), about, step);
+            return (title, about, step);
+        }
+    }
+    for &(app, claim) in &apps {
+        if let InApp::None(none) = in_app(pack, app, &claim.category) {
+            return (title, about, sentence(format!("In {}: {}", app.title(), none.says)));
         }
     }
     let step =
         String::from("No setting to turn it off is on record. Remove the apps you can do without.");
-    (String::from(found.name), about, step)
+    (title, about, step)
+}
+
+/// `text` ending with a full stop.
+fn sentence(mut text: String) -> String {
+    if !text.ends_with('.') {
+        text.push('.');
+    }
+    text
 }
 
 fn extension(app: &App<'_>, findings: &[&Finding<'_>]) -> (String, String, String) {
@@ -158,7 +187,7 @@ fn pane(
         }
     }
     let mut about = format!(
-        "{}. {}: {}",
+        "{}. {}: {}.",
         list_words(&names),
         plural(apps.len() as u64, "app may ask", "apps may ask"),
         app_names(apps.iter().filter_map(|(index, _)| view.apps.get(*index)).map(App::title)),
@@ -174,7 +203,7 @@ fn pane(
         } else {
             format!("{defaults} of them state")
         };
-        about.push_str(&format!(". {stated} only Electron's default purpose"));
+        about.push_str(&format!(" {stated} only Electron's default purpose."));
     }
     let step = format!(
         "Open System Settings > Privacy & Security > {pane} and turn off the apps that do not \

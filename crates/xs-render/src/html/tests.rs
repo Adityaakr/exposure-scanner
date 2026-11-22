@@ -707,15 +707,20 @@ fn a_finding_says_who_operates_it_whose_party_it_is_and_whether_it_counts() {
     ));
 }
 
-/// The entries of the summary's list of what was found: the text of each
-/// paragraph of each entry.
-fn found(root: &Element) -> Vec<Vec<String>> {
-    let list = section(root, "summary")
+/// The summary's list of what was found.
+fn found_list(root: &Element) -> &Element {
+    section(root, "summary")
         .named("ul")
         .into_iter()
         .find(|list| list.has_class("found"))
-        .expect("the summary lists what was found");
-    list.named("li")
+        .expect("the summary lists what was found")
+}
+
+/// The entries of the summary's list of what was found: the text of each
+/// paragraph of each entry.
+fn found(root: &Element) -> Vec<Vec<String>> {
+    found_list(root)
+        .named("li")
         .into_iter()
         .map(|entry| entry.named("p").into_iter().map(Element::text).collect())
         .collect()
@@ -731,16 +736,27 @@ fn counts(root: &Element) -> Vec<String> {
         .collect()
 }
 
-/// The summary leads with what was found, whether or not it counts: the
-/// fixture has six findings in three of its four apps, about five things.
-/// Each is stated once, as a graded fact with the number of apps, what is
-/// in the most apps first and then by name.
+/// The summary leads with how much was found, whether or not it counts:
+/// the fixture has six findings in three of its four apps, about five
+/// things. Under it, opened on demand, the headline counts and then each
+/// thing that was found, stated once, as a graded fact with the number of
+/// apps, what is in the most apps first and then by name.
 #[test]
 fn the_summary_leads_with_everything_that_was_found() {
     let root = report();
     let summary = section(&root, "summary");
     let parts: Vec<String> = summary.named("h3").into_iter().map(Element::text).collect();
-    assert_eq!(parts, ["What was found", "The three headline counts"]);
+    assert_eq!(parts, ["The three headline counts", "What was found"]);
+    // Each part is in a `details` of its own, closed, whose line says what
+    // opening it shows.
+    let parts: Vec<&Element> = summary.named("details");
+    assert_eq!(parts.len(), 2);
+    assert!(parts.iter().all(|part| part.attr("open").is_none()));
+    assert_eq!(
+        parts[1].named("summary")[0].text(),
+        "Everything the scan found: 5 things, each with the apps it is in"
+    );
+    assert!(parts[1].named("ul")[0].has_class("found"));
     let lead = summary.named("p")[0];
     assert!(lead.has_class("lead"));
     assert_eq!(lead.text(), "6 findings in 3 of 4 apps scanned.");
@@ -826,7 +842,7 @@ fn apps_that_share_a_name_are_told_apart_in_a_summary_entry() {
     let claims = claims(&evidence, &pack);
     let root = render(&claims, &evidence, &meta(&pack), &pack);
 
-    let entries = section(&root, "summary").named("ul")[0].named("li");
+    let entries = found_list(&root).named("li");
     let named = |entry: &Element| -> BTreeMap<String, String> {
         entry
             .named("a")
@@ -868,7 +884,7 @@ fn each_app_in_the_summary_links_to_its_finding() {
     let (pack, evidence) = (pack(), evidence());
     let claims = claims(&evidence, &pack);
     let root = render(&claims, &evidence, &meta(&pack), &pack);
-    let list = section(&root, "summary").named("ul")[0];
+    let list = found_list(&root);
     let links: Vec<(String, &str)> =
         list.named("a").into_iter().map(|link| (link.text(), link.attr("href").unwrap())).collect();
     let to = |app: &str, object: &str| {
@@ -931,14 +947,16 @@ fn the_summary_is_the_headline_of_the_claims_and_says_what_it_counts() {
     assert!(text.contains("in the categories Analytics and Session replay."));
     assert!(text.contains("There is no score."));
     assert!(summary.descendants().into_iter().all(|e| !e.has_class("zero")));
-    // What was found, then the counts, then the totals.
+    // How much was found, then the counts and the totals, then what was
+    // found.
     let at = |part: &str| text.find(part).unwrap_or_else(|| panic!("no `{part}`"));
     let order = [
+        at("6 findings in 3 of 4 apps scanned."),
+        at("The three headline counts: 0 companies with a recorded connection, 1 company \
+            whose code the apps ship and 2 apps with a third-party channel."),
+        at("13 evidence records"),
         at("What was found"),
         at("In Droid, Notes"),
-        at("The three headline counts"),
-        at("companies with a recorded connection"),
-        at("13 evidence records"),
     ];
     assert!(order.is_sorted(), "{order:?}");
     let totals: Vec<String> = summary
@@ -964,8 +982,8 @@ fn the_summary_is_the_headline_of_the_claims_and_says_what_it_counts() {
 
 /// What the summary says of three zero counts beside findings. It holds
 /// whichever way the findings missed the counts.
-const ZEROS: &str = "None of the findings above adds to these three counts, which is why they \
-                     are zero. A count takes a finding that names a company in a counted \
+const ZEROS: &str = "None of the findings adds to these three counts, which is why they are \
+                     zero. A count takes a finding that names a company in a counted \
                      category: a company is counted from grade contains up, and an app only for \
                      a third-party finding.";
 
@@ -1065,8 +1083,8 @@ fn beside_zero_counts_android_names_the_sdks_they_leave_out() {
     assert_eq!(
         beside,
         ["Beside these counts, the Android apps ship 1 SDK of 1 company in categories the \
-          counts leave out: Google LLC (Crashlytics). They are in the list above and in the \
-          findings below."]
+          counts leave out: Google LLC (Crashlytics). They are in the list of what was found \
+          and in the findings below."]
     );
 
     // Without an Android app there is no such sentence.
@@ -1833,10 +1851,10 @@ fn electron_s_default_purposes_rank_an_entry_no_higher_than_low() {
         about,
         [
             "Camera. 2 apps may ask: Mail and Notes. 1 of them states only Electron's default \
-             purpose",
+             purpose.",
             "Microphone. 2 apps may ask: Mail and Notes. Each states only Electron's default \
-             purpose",
-            "Bluetooth. 1 app may ask: Notes",
+             purpose.",
+            "Bluetooth. 1 app may ask: Notes.",
         ]
     );
 }
@@ -1886,11 +1904,14 @@ fn an_app_s_own_setting_is_shown_as_its_publisher_documents_it() {
     assert!(entry.contains("The rule pack names no host for AcmeAnalytics"), "{entry}");
 }
 
-/// Where the publisher documents that no setting turns a service off, the
-/// terminal checklist gives that statement as the first step, as the HTML
-/// checklist does, rather than a block list or "nothing on record".
+/// The first step of an entry is one a person can take: an app's own
+/// setting, then a block list. Where the publisher documents that no
+/// setting turns a service off, the HTML checklist gives that statement
+/// with the other steps, and the first step is the block list; with no
+/// block list to give, the statement is the first step, rather than
+/// "nothing on record".
 #[test]
-fn the_terminal_checklist_gives_the_publisher_s_statement_that_there_is_no_setting() {
+fn the_first_step_is_one_to_take_before_the_publisher_s_statement_that_there_is_no_setting() {
     let mut layer = advised_layer();
     layer.fixes.apps.retain(|fix| fix.id == "droid");
     let pack = Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap();
@@ -1901,6 +1922,29 @@ fn the_terminal_checklist_gives_the_publisher_s_statement_that_there_is_no_setti
     let root = render(&claims, &evidence, &meta(&pack), &pack);
     assert!(section(&root, "actions").text().contains(says));
     let todos = super::checklist(&claims, &evidence, &meta(&pack), &pack).unwrap();
+    let analytics = todos.iter().find(|todo| todo.title == "AcmeAnalytics").unwrap();
+    assert_eq!(
+        analytics.step,
+        "Block collect.acme.com with a firewall app that works without root, such as NetGuard."
+    );
+
+    // An app's own setting comes before the block list.
+    let pack = advised_pack();
+    let derived = self::claims(&evidence, &pack);
+    let todos = super::checklist(&derived, &evidence, &meta(&pack), &pack).unwrap();
+    let analytics = todos.iter().find(|todo| todo.title == "AcmeAnalytics").unwrap();
+    assert_eq!(
+        analytics.step,
+        "In Notes, turn it off: Notes > Settings > Privacy > <b>Share usage data</b>: off."
+    );
+
+    // With no host to block, the publisher's statement is the first step.
+    let mut layer = advised_layer();
+    layer.fixes.apps.retain(|fix| fix.id == "droid");
+    layer.fixes.sdks.clear();
+    let pack = Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap();
+    let derived = self::claims(&evidence, &pack);
+    let todos = super::checklist(&derived, &evidence, &meta(&pack), &pack).unwrap();
     let analytics = todos.iter().find(|todo| todo.title == "AcmeAnalytics").unwrap();
     assert_eq!(analytics.step, says);
 }
@@ -2048,4 +2092,282 @@ fn a_scan_with_nothing_to_act_on_says_so() {
     let pack = pack();
     let root = render(&[], &EvidenceSet::new(), &meta(&pack), &pack);
     assert!(section(&root, "actions").text().contains("Nothing here calls for action"));
+}
+
+/// The entries of the summary's "What needs your attention": for each, the
+/// text of its paragraphs and where its link leads.
+fn attention(root: &Element) -> Vec<(Vec<String>, String)> {
+    section(root, "summary")
+        .named("ol")
+        .into_iter()
+        .find(|list| list.has_class("first"))
+        .map(|list| {
+            list.named("li")
+                .into_iter()
+                .map(|entry| {
+                    let paragraphs = entry.named("p").into_iter().map(Element::text).collect();
+                    let link = entry.named("a")[0].attr("href").unwrap().to_string();
+                    (paragraphs, link)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The summary answers what needs attention first: the entries of the
+/// checklist of high and medium priority, each in one sentence with its
+/// first step and a link to the entry with every step. They are the
+/// entries a scan prints on the terminal, in the same words.
+#[test]
+fn the_summary_leads_with_what_needs_attention_and_the_first_step_of_each() {
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let summary = section(&root, "summary");
+    assert_eq!(summary.named("h3").len(), 2, "both under the list, opened on demand");
+
+    let status = summary.descendants().into_iter().find(|e| e.has_class("status")).unwrap();
+    assert_eq!(
+        status.text(),
+        "Start with these 5. What you can do has every step, for all 6 entries: 3 high, 2 \
+         medium and 1 low priority."
+    );
+    assert_eq!(status.named("a")[0].attr("href"), Some("#actions"));
+
+    let todos = super::checklist(&claims, &evidence, &meta(&pack), &pack).unwrap();
+    let first = crate::first_todos(&todos);
+    assert_eq!(first.len(), 5);
+    assert!(first.iter().all(|todo| todo.priority.needs_attention()));
+    let shown = attention(&root);
+    assert_eq!(shown.len(), first.len());
+    for ((paragraphs, link), todo) in shown.iter().zip(first) {
+        assert_eq!(
+            paragraphs,
+            &[
+                format!("{} {}", todo.priority.name(), todo.title),
+                todo.about.clone(),
+                format!("First step: {} Every step", todo.step),
+            ]
+        );
+        // The link leads to the entry of the checklist with every step.
+        let entry = root.by_id(link.strip_prefix("#t-").map(|_| &link[1..]).unwrap()).unwrap();
+        assert!(entry.has_class("todo"), "{link}");
+        let head = entry.descendants().into_iter().find(|e| e.has_class("todo-head")).unwrap();
+        assert!(head.text().contains(&todo.title), "{link}");
+    }
+    assert_eq!(
+        shown[0].0,
+        [
+            "High AcmeAnalytics",
+            "Analytics by Acme <Analytics> & \"Sons\", in Droid and Notes.",
+            "First step: In Notes, turn it off: Notes > Settings > Privacy > <b>Share usage \
+             data</b>: off. Every step",
+        ]
+    );
+    // Every entry of the checklist has an anchor of its own.
+    let anchors: Vec<&str> = section(&root, "actions")
+        .descendants()
+        .into_iter()
+        .filter(|e| e.has_class("todo"))
+        .map(|entry| entry.attr("id").unwrap())
+        .collect();
+    assert_eq!(anchors.len(), todos.len());
+    let mut unique = anchors.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), anchors.len());
+}
+
+/// When every entry is of low priority, the summary says nothing needs
+/// attention first, and still gives the first of them, open on the page.
+#[test]
+fn with_only_low_priority_entries_nothing_needs_attention_first() {
+    let pack = advised_pack();
+    let notes = subject(Platform::Macos, "org.example.notes", 1);
+    let evidence = set([
+        artifact(&notes, "Notes", None),
+        sdk(&notes, "sdk/crashlytics", MatcherKind::MachoObjcClass, None),
+        asks(&notes, "NSBluetoothAlwaysUsageDescription"),
+    ]);
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let todos = super::checklist(&claims, &evidence, &meta(&pack), &pack).unwrap();
+    assert!(!todos.is_empty() && todos.iter().all(|todo| !todo.priority.needs_attention()));
+    let status = section(&root, "summary")
+        .descendants()
+        .into_iter()
+        .find(|e| e.has_class("status"))
+        .unwrap()
+        .text();
+    assert_eq!(
+        status,
+        "Nothing here needs your attention first: all 2 entries of What you can do are of low \
+         priority. Here they are:"
+    );
+    let shown: Vec<String> = attention(&root).into_iter().map(|(p, _)| p[0].clone()).collect();
+    assert_eq!(shown, ["Low Crashlytics", "Low Bluetooth"]);
+    // With nothing above them, they are not set aside in the checklist.
+    assert!(section(&root, "actions").named("details").iter().all(|d| !d.has_class("low")));
+    assert_eq!(checklist(&root), ["Low Crashlytics Crash reporting", "Low Bluetooth"]);
+}
+
+/// A scan with no finding leads with that, and has no list of what needs
+/// attention.
+#[test]
+fn an_empty_scan_needs_no_attention() {
+    let pack = advised_pack();
+    let notes = subject(Platform::Macos, "org.example.notes", 1);
+    let root = render(&[], &set([artifact(&notes, "Notes", None)]), &meta(&pack), &pack);
+    assert!(attention(&root).is_empty());
+    let summary = section(&root, "summary");
+    assert!(summary.descendants().into_iter().all(|e| !e.has_class("status")));
+    assert!(summary.named("p")[0].text().starts_with("No scanned app matched a rule."));
+}
+
+/// In the checklist, the entries of high and medium priority are on the
+/// page; those of low priority are under one line that names them, opened
+/// on demand.
+#[test]
+fn lower_priority_entries_open_on_demand() {
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let actions = section(&root, "actions");
+    let low: Vec<&Element> =
+        actions.named("details").into_iter().filter(|d| d.has_class("low")).collect();
+    let [low] = low.as_slice() else { panic!("one group of lower-priority entries") };
+    assert_eq!(low.named("summary")[0].text(), "1 lower-priority entry: Bluetooth");
+    let inside: Vec<String> = low
+        .descendants()
+        .into_iter()
+        .filter(|e| e.has_class("todo"))
+        .map(|e| e.attr("id").unwrap().to_string())
+        .collect();
+    assert_eq!(inside.len(), 1);
+    // What the summary links to is never in it.
+    for (_, link) in attention(&root) {
+        assert!(!inside.iter().any(|id| link == format!("#{id}")), "{link}");
+    }
+}
+
+/// A finding shows what it is and its grade; what can be done about it, its
+/// facts and the records it rests on are under it, opened on demand.
+#[test]
+fn the_detail_of_a_finding_opens_on_demand() {
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let findings: Vec<&Element> =
+        root.descendants().into_iter().filter(|e| e.has_class("finding")).collect();
+    assert_eq!(findings.len(), claims.len());
+    for finding in findings {
+        let all = finding.named("details");
+        let [details] = all.as_slice() else { panic!("one details in {:?}", finding.attr("id")) };
+        assert!(details.attr("open").is_none());
+        let records = details.named("ul").into_iter().find(|l| l.has_class("evidence")).unwrap();
+        let count = records.named("li").len();
+        let label = if count == 1 { String::from("1 record") } else { format!("{count} records") };
+        assert_eq!(
+            details.named("summary")[0].text(),
+            format!("What you can do, and the evidence: {label}")
+        );
+        assert!(details.named("dl").iter().any(|dl| dl.has_class("facts")));
+        assert!(details.named("ul").iter().any(|ul| ul.has_class("steps")));
+        // What the finding is stays outside.
+        assert!(details.named("h5").is_empty());
+        assert!(details.descendants().into_iter().all(|e| !e.has_class("graded")));
+    }
+}
+
+/// Every id inside a `details` element of `root`.
+fn ids_inside_details(root: &Element) -> Vec<String> {
+    root.named("details")
+        .into_iter()
+        .flat_map(|details| details.descendants().into_iter().skip(1))
+        .filter_map(|e| e.attr("id"))
+        .map(String::from)
+        .collect()
+}
+
+/// A link never leads into what is closed: a browser that does not open a
+/// `details` for a link would show nothing. Every target is outside every
+/// `details`, the summary's links included.
+#[test]
+fn no_link_leads_into_a_closed_part_of_the_page() {
+    for (pack, evidence) in [(advised_pack(), evidence_with_access()), (pack(), evidence())] {
+        let claims = claims(&evidence, &pack);
+        let root = render(&claims, &evidence, &meta(&pack), &pack);
+        let hidden = ids_inside_details(&root);
+        let mut links = 0;
+        for link in root.named("a") {
+            let target = link.attr("href").unwrap().trim_start_matches('#');
+            assert!(root.by_id(target).is_some(), "no element `{target}`");
+            assert!(!hidden.iter().any(|id| id == target), "`{target}` is inside a details");
+            links += 1;
+        }
+        assert!(links > 10);
+    }
+}
+
+/// A block list of more than a few hosts names how many there are and has
+/// them under the step, opened on demand; a short one names them in the
+/// sentence.
+#[test]
+fn a_long_block_list_opens_on_demand() {
+    let mut layer = advised_layer();
+    let hosts = ["a.acme.com", "b.acme.com", "c.acme.com", "d.acme.com", "e.acme.com"];
+    layer.fixes.sdks[0].block = hosts.iter().map(|&host| host.into()).collect();
+    let pack = Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap();
+    let evidence = evidence_with_access();
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let lists: Vec<&Element> =
+        root.named("details").into_iter().filter(|d| d.has_class("hosts")).collect();
+    // Two in the checklist, one for each platform's firewall, and one under
+    // each of the two findings.
+    assert_eq!(lists.len(), 4);
+    for list in lists {
+        assert_eq!(list.named("summary")[0].text(), "The 5 hosts");
+        let codes: Vec<String> = list.named("code").into_iter().map(Element::text).collect();
+        assert_eq!(codes, hosts);
+    }
+    let actions = section(&root, "actions").text();
+    assert!(actions.contains("Block these 5 hosts for Droid with"), "{actions}");
+
+    // The pack's own list is one host: it is in the sentence.
+    let pack = advised_pack();
+    let derived = self::claims(&evidence, &pack);
+    let root = render(&derived, &evidence, &meta(&pack), &pack);
+    assert!(root.named("details").iter().all(|d| !d.has_class("hosts")));
+    assert!(section(&root, "actions").text().contains("collect.acme.com"));
+}
+
+/// The steps of a service put what can be done first, in the checklist and
+/// under the finding alike: an app's own setting, then the block list, then
+/// what a publisher says cannot be done, and last removing the app.
+#[test]
+fn the_steps_that_do_something_come_first() {
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let steps = |list: &Element| -> Vec<String> {
+        list.named("li").into_iter().map(Element::text).collect::<Vec<_>>()
+    };
+    let entry = section(&root, "actions")
+        .descendants()
+        .into_iter()
+        .find(|e| e.has_class("todo") && e.text().contains("AcmeAnalytics"))
+        .unwrap();
+    let in_entry = steps(entry.named("ul")[0]);
+    let starts: Vec<&str> =
+        in_entry.iter().map(|step| step.split([':', ' ']).next().unwrap()).collect();
+    assert_eq!(starts, ["In", "Block", "Block", "In", "Or"], "{in_entry:#?}");
+    assert!(in_entry[0].contains("turn it off: Notes > Settings"), "{in_entry:#?}");
+    assert!(in_entry[3].starts_with("In Droid: Droid documents no setting"), "{in_entry:#?}");
+
+    let droid = finding(&root, &claims, "org.example.droid", "sdk/acme-analytics");
+    let under = steps(droid.named("ul").into_iter().find(|l| l.has_class("steps")).unwrap());
+    assert!(under[0].starts_with("Block this host for Droid"), "{under:#?}");
+    assert_eq!(under[1], "Droid documents no setting that turns off its analytics.");
+    assert!(under.last().unwrap().starts_with("Or remove Droid"), "{under:#?}");
 }

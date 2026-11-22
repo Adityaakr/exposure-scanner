@@ -348,8 +348,9 @@ pub(crate) fn finding_steps(
     }
 }
 
-/// The steps for a channel: the app's own setting, a block list, another
-/// app, removing the app.
+/// The steps for a channel, what a person can do first: the app's own
+/// setting, a block list, then what its publisher says cannot be done or
+/// that nothing is on record, another app, removing the app.
 fn channel_steps(page: &mut Markup, pack: &Pack, app: &App<'_>, finding: &Finding<'_>) {
     let claim = finding.claim;
     if is_update_feed(&claim.category) {
@@ -390,16 +391,18 @@ fn channel_steps(page: &mut Markup, pack: &Pack, app: &App<'_>, finding: &Findin
         }
         return;
     }
-    match in_app(pack, app, &claim.category) {
-        InApp::Settings(fix, settings) => {
-            setting_steps(page, fix, &settings, finding.category.name)
-        }
+    let own = in_app(pack, app, &claim.category);
+    if let InApp::Settings(fix, settings) = &own {
+        setting_steps(page, fix, settings, finding.category.name);
+    }
+    block_step(page, pack, app, finding);
+    match own {
+        InApp::Settings(..) => {}
         InApp::None(none) => step(page, |page| page.text(&none.says)),
         InApp::Unknown => step(page, |page| {
             page.raw("No setting of this app that turns it off is on record.");
         }),
     }
-    block_step(page, pack, app, finding);
     if let Some(fix) = pack.app_fix(app.subject.platform, &app.subject.id) {
         for alternative in &fix.alternatives {
             step(page, |page| {
@@ -442,25 +445,13 @@ fn setting_steps(page: &mut Markup, fix: &AppFix, settings: &[&Setting], categor
 fn block_step(page: &mut Markup, pack: &Pack, app: &App<'_>, finding: &Finding<'_>) {
     let claim = finding.claim;
     match block_hosts(pack, claim, finding.category.headline) {
-        Some(hosts) if !hosts.is_empty() => step(page, |page| {
-            page.raw("Block ");
-            page.raw(if hosts.len() == 1 { "this host" } else { "these hosts" });
-            page.raw(" for ");
-            page.text(app.title());
-            page.raw(" with ");
-            page.raw(firewall(app.subject.platform));
-            page.raw(": ");
-            for (at, host) in hosts.iter().enumerate() {
-                if at > 0 {
-                    page.raw(", ");
-                }
-                page.element("code", &[], host);
-            }
-            page.raw(BLOCK_COST);
-            if claim.party == Party::Unknown {
-                page.raw(UNKNOWN_HOST);
-            }
-        }),
+        Some(hosts) if !hosts.is_empty() => block(
+            page,
+            &hosts,
+            |page| page.text(app.title()),
+            firewall(app.subject.platform),
+            claim.party == Party::Unknown,
+        ),
         Some(_) => step(page, |page| {
             page.raw("The rule pack names no host for ");
             page.text(&claim.object.name);
@@ -474,6 +465,61 @@ fn block_step(page: &mut Markup, pack: &Pack, app: &App<'_>, finding: &Finding<'
         }),
         None => {}
     }
+}
+
+/// How many hosts a block step names in its sentence. A longer list is
+/// under the step, opened on demand.
+const HOSTS_IN_LINE: usize = 4;
+
+/// The step that blocks `hosts` for the apps `apps` writes, with `tool`.
+/// `unknown` is whether who publishes one of the apps is not established.
+fn block(
+    page: &mut Markup,
+    hosts: &[&str],
+    apps: impl FnOnce(&mut Markup),
+    tool: &'static str,
+    unknown: bool,
+) {
+    let listed = hosts.len() > HOSTS_IN_LINE;
+    let codes = |page: &mut Markup| {
+        for (at, host) in hosts.iter().enumerate() {
+            if at > 0 {
+                page.raw(", ");
+            }
+            page.element("code", &[], host);
+        }
+    };
+    step(page, |page| {
+        page.raw("Block ");
+        if hosts.len() == 1 {
+            page.raw("this host");
+        } else if listed {
+            page.raw("these ");
+            page.number(hosts.len() as u64);
+            page.raw(" hosts");
+        } else {
+            page.raw("these hosts");
+        }
+        page.raw(" for ");
+        apps(page);
+        page.raw(" with ");
+        page.raw(tool);
+        if !listed {
+            page.raw(": ");
+            codes(page);
+        }
+        page.raw(BLOCK_COST);
+        if unknown {
+            page.raw(UNKNOWN_HOST);
+        }
+        if listed {
+            page.raw("\n<details class=\"hosts\">\n<summary>The ");
+            page.number(hosts.len() as u64);
+            page.raw(" hosts</summary>\n<p>");
+            codes(page);
+            page.raw("</p>\n</details>");
+        }
+    });
 }
 
 fn uninstall_step(page: &mut Markup, app: &App<'_>) {
@@ -630,7 +676,7 @@ enum Entry<'v, 'a> {
     Android(usize, Vec<&'v Finding<'a>>),
 }
 
-impl Entry<'_, '_> {
+impl<'a> Entry<'_, 'a> {
     /// Where an entry of one priority sorts: channels first, then
     /// extensions, then what apps may access.
     const fn rank(&self) -> u8 {
@@ -647,6 +693,21 @@ impl Entry<'_, '_> {
             Self::Channel(found) => found.apps.len(),
             Self::Pane(_, apps) => apps.len(),
             Self::Extension(..) | Self::Android(..) => 1,
+        }
+    }
+
+    /// The finding the entry is anchored by, `t-` and the digest of its
+    /// claim. Every claim is under one entry at most, so no two entries
+    /// share an anchor.
+    fn anchor(&self) -> Option<&'a Claim> {
+        match self {
+            Self::Channel(found) => found.apps.values().next().map(|found_in| found_in.claim),
+            Self::Extension(_, findings) | Self::Android(_, findings) => {
+                findings.first().map(|finding| finding.claim)
+            }
+            Self::Pane(_, apps) => {
+                apps.iter().flat_map(|(_, findings)| findings).next().map(|finding| finding.claim)
+            }
         }
     }
 }
@@ -754,12 +815,25 @@ fn category_id<'a>(found: &Found<'a>) -> &'a str {
     found.apps.values().next().map_or("", |app| app.claim.category.as_str())
 }
 
+/// What the checklist says when it has no entry.
+pub(crate) const NOTHING_TO_DO: &str = "<p class=\"none\">Nothing here calls for action: no \
+finding is a service of another company than the app's publisher, and no app or extension asks \
+for a permission that can be turned off.</p>\n";
+
 /// Writes the checklist section.
 pub(crate) fn actions(page: &mut Markup, pack: &Pack, view: &View<'_>) {
     page.raw(
-        "<p>What you can do about what was found, with what exposes the most first. Nothing \
-         here is done for you: the scanner changes nothing on this device. Each entry links to \
-         the findings it is about, which show the evidence.</p>\n\
+        "<p class=\"intro\">Every step for what was found, with what exposes the most first. \
+         Nothing here is done for you: the scanner changes nothing on this device. Each entry \
+         links to the findings it is about, which show the evidence.</p>\n",
+    );
+    let entries = checklist(view);
+    if entries.is_empty() {
+        page.raw(NOTHING_TO_DO);
+        return;
+    }
+    page.raw(
+        "<details class=\"more\">\n<summary>What High, Medium and Low mean</summary>\n\
          <ul class=\"priorities\">\n\
          <li><span class=\"prio p-high\">High</span> Code of a company that does advertising, \
          analytics, attribution, profiling or session replay, in an app that company does not \
@@ -770,20 +844,64 @@ pub(crate) fn actions(page: &mut Markup, pack: &Pack, view: &View<'_>) {
          app declares for tracking.</li>\n\
          <li><span class=\"prio p-low\">Low</span> Other services of a company in an app, such \
          as crash reporting, and access to files, nearby devices and other apps.</li>\n\
-         </ul>\n",
+         </ul>\n</details>\n",
     );
-    let entries = checklist(view);
+    let urgent = entries.iter().take_while(|(priority, ..)| *priority != Priority::Low).count();
+    let (first, low) = entries.split_at(urgent);
+    entry_list(page, pack, view, first);
+    // Lower-priority entries open on demand, unless there is nothing else.
+    if !first.is_empty() && !low.is_empty() {
+        page.raw("<details class=\"more low\">\n<summary>");
+        page.text(&plural(low.len() as u64, "lower-priority entry", "lower-priority entries"));
+        page.raw(": ");
+        let titles: Vec<&str> = low.iter().map(|(_, _, entry)| entry_title(view, entry)).collect();
+        page.text(&list_words(&titles));
+        page.raw("</summary>\n");
+        entry_list(page, pack, view, low);
+        page.raw("</details>\n");
+    } else {
+        entry_list(page, pack, view, low);
+    }
+    page.raw(
+        "<p class=\"note\">The steps name menus as the publishers and the operating systems \
+         name them. A setting can move between versions of an app, and what a setting covers is \
+         what its publisher documents: a scan of files cannot show what an app sends once it is \
+         turned off. Block lists name only hosts of advertising, analytics, attribution, \
+         profiling and session replay, and domains an app declares for tracking: blocking a \
+         crash reporter or an app's own servers breaks more than it protects.</p>\n",
+    );
+}
+
+/// What an entry is about, as its head names it.
+fn entry_title<'a>(view: &View<'a>, entry: &Entry<'_, 'a>) -> &'a str {
+    match entry {
+        Entry::Channel(found) => found.name,
+        Entry::Pane(pane, _) => pane,
+        Entry::Extension(app, _) | Entry::Android(app, _) => {
+            view.apps.get(*app).map_or("", App::title)
+        }
+    }
+}
+
+/// Writes entries of the checklist as one list, each under its anchor.
+fn entry_list(
+    page: &mut Markup,
+    pack: &Pack,
+    view: &View<'_>,
+    entries: &[(Priority, String, Entry<'_, '_>)],
+) {
     if entries.is_empty() {
-        page.raw(
-            "<p class=\"none\">Nothing here calls for action: no finding is a service of another \
-             company than the app's publisher, and no app or extension asks for a permission \
-             that can be turned off.</p>\n",
-        );
         return;
     }
     page.raw("<ul class=\"checklist\">\n");
-    for (priority, _, entry) in &entries {
-        page.open_class("li", "todo");
+    for (priority, _, entry) in entries {
+        match entry.anchor() {
+            Some(claim) => page.open(
+                "li",
+                &[("class", Value::Fixed("todo")), ("id", Value::Anchor("t-", claim.id.digest()))],
+            ),
+            None => page.open_class("li", "todo"),
+        }
         page.raw("\n");
         match entry {
             Entry::Channel(found) => channel_entry(page, pack, view, *priority, found),
@@ -797,14 +915,6 @@ pub(crate) fn actions(page: &mut Markup, pack: &Pack, view: &View<'_>) {
         page.raw("\n");
     }
     page.raw("</ul>\n");
-    page.raw(
-        "<p class=\"note\">The steps name menus as the publishers and the operating systems \
-         name them. A setting can move between versions of an app, and what a setting covers is \
-         what its publisher documents: a scan of files cannot show what an app sends once it is \
-         turned off. Block lists name only hosts of advertising, analytics, attribution, \
-         profiling and session replay, and domains an app declares for tracking: blocking a \
-         crash reporter or an app's own servers breaks more than it protects.</p>\n",
-    );
 }
 
 fn entry_head(page: &mut Markup, priority: Priority, title: &str, tag: Option<&str>) {
@@ -841,7 +951,11 @@ fn channel_entry(
     page.text(&plural(found.apps.len() as u64, "app", "apps"));
     page.close();
     page.raw("\n<ul class=\"steps\">\n");
+    // What can be done comes first: each app's own setting, then the block
+    // lists. Then what publishers say cannot be done, and the apps for
+    // which nothing is on record.
     let mut silent: Vec<(&App<'_>, &Claim)> = Vec::new();
+    let mut none_said: Vec<(&App<'_>, &Claim, &NoSetting)> = Vec::new();
     let mut blockable: Vec<(&App<'_>, &Claim)> = Vec::new();
     for (&index, found_in) in &found.apps {
         let Some(app) = view.apps.get(index) else { continue };
@@ -872,30 +986,13 @@ fn channel_entry(
                     });
                 }
             }
-            InApp::None(none) => step(page, |page| {
-                page.raw("In ");
-                app_link(page, app, claim);
-                page.raw(": ");
-                page.text(&none.says);
-            }),
+            InApp::None(none) => none_said.push((app, claim, none)),
             InApp::Unknown => silent.push((app, claim)),
         }
         if matches!(block_hosts(pack, claim, found.category.headline), Some(hosts) if !hosts.is_empty())
         {
             blockable.push((app, claim));
         }
-    }
-    if !silent.is_empty() {
-        step(page, |page| {
-            page.raw("No setting that turns it off is on record for ");
-            for (at, (app, claim)) in silent.iter().enumerate() {
-                if at > 0 {
-                    page.raw(", ");
-                }
-                app_link(page, app, claim);
-            }
-            page.raw(".");
-        });
     }
     let mut firewalls: Vec<&'static str> = Vec::new();
     for (app, _) in &blockable {
@@ -909,29 +1006,35 @@ fn channel_entry(
             blockable.iter().filter(|(app, _)| firewall(app.subject.platform) == tool).collect();
         let Some(&&(_, claim)) = group.first() else { continue };
         let hosts = block_hosts(pack, claim, found.category.headline).unwrap_or_default();
-        step(page, |page| {
-            page.raw("Block ");
-            page.raw(if hosts.len() == 1 { "this host" } else { "these hosts" });
-            page.raw(" for ");
+        let unknown = group.iter().any(|(_, claim)| claim.party == Party::Unknown);
+        let apps = |page: &mut Markup| {
             for (at, (app, claim)) in group.iter().enumerate() {
                 if at > 0 {
                     page.raw(", ");
                 }
                 app_link(page, app, claim);
             }
-            page.raw(" with ");
-            page.raw(tool);
+        };
+        block(page, &hosts, apps, tool, unknown);
+    }
+    for (app, claim, none) in none_said {
+        step(page, |page| {
+            page.raw("In ");
+            app_link(page, app, claim);
             page.raw(": ");
-            for (at, host) in hosts.iter().enumerate() {
+            page.text(&none.says);
+        });
+    }
+    if !silent.is_empty() {
+        step(page, |page| {
+            page.raw("No setting that turns it off is on record for ");
+            for (at, (app, claim)) in silent.iter().enumerate() {
                 if at > 0 {
                     page.raw(", ");
                 }
-                page.element("code", &[], host);
+                app_link(page, app, claim);
             }
-            page.raw(BLOCK_COST);
-            if group.iter().any(|(_, claim)| claim.party == Party::Unknown) {
-                page.raw(UNKNOWN_HOST);
-            }
+            page.raw(".");
         });
     }
     let third = found.apps.values().any(|app| app.claim.party == Party::Third);

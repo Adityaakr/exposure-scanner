@@ -69,6 +69,13 @@ impl TodoPriority {
             Self::Low => "Low",
         }
     }
+
+    /// Whether an entry of this priority is one a person should look at
+    /// first: high and medium are, low is not.
+    #[must_use]
+    pub const fn needs_attention(self) -> bool {
+        !matches!(self, Self::Low)
+    }
 }
 
 /// One entry of the checklist, in plain words ([`checklist`]).
@@ -78,10 +85,26 @@ pub struct Todo {
     /// What it is about: a service, an extension, a pane of the settings or
     /// an app.
     pub title: String,
-    /// One line on what was found and where.
+    /// One sentence on what was found and where.
     pub about: String,
     /// The first thing to do. The HTML report has every step.
     pub step: String,
+}
+
+/// How many entries of the checklist a summary leads with, on the page and
+/// on the terminal alike.
+pub const FIRST_TODOS: usize = 5;
+
+/// The entries of `todos`, a checklist in its own order, that a summary
+/// leads with: the first [`FIRST_TODOS`] of those that need attention
+/// ([`TodoPriority::needs_attention`]), or, when none does, the first of
+/// the rest. The HTML report's "What needs your attention" and the summary
+/// a scan prints are both these entries.
+#[must_use]
+pub fn first_todos(todos: &[Todo]) -> &[Todo] {
+    let urgent = todos.iter().take_while(|todo| todo.priority.needs_attention()).count();
+    let shown = if urgent > 0 { urgent } else { todos.len() };
+    todos.get(..shown.min(FIRST_TODOS)).unwrap_or(todos)
 }
 
 /// What a report says about how it was made.
@@ -546,6 +569,28 @@ mod tests {
             headline(&claims),
             Headline { companies_contacts: 0, companies_contains: 1, apps_third_party: 1 }
         );
+    }
+
+    fn todo(priority: TodoPriority, title: &str) -> Todo {
+        Todo { priority, title: title.into(), about: String::new(), step: String::new() }
+    }
+
+    /// A summary leads with the entries that need attention, at most
+    /// [`FIRST_TODOS`] of them, and with low-priority ones only when there
+    /// is nothing else.
+    #[test]
+    fn a_summary_leads_with_what_needs_attention() {
+        use TodoPriority::{High, Low, Medium};
+        let titles = |todos: &[Todo]| todos.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
+        let mixed = [todo(High, "a"), todo(Medium, "b"), todo(Low, "c"), todo(Low, "d")];
+        assert_eq!(titles(first_todos(&mixed)), ["a", "b"]);
+        let many: Vec<Todo> = (0..7).map(|at| todo(Medium, &at.to_string())).collect();
+        assert_eq!(titles(first_todos(&many)), ["0", "1", "2", "3", "4"]);
+        let low: Vec<Todo> = (0..7).map(|at| todo(Low, &at.to_string())).collect();
+        assert_eq!(titles(first_todos(&low)), ["0", "1", "2", "3", "4"]);
+        assert_eq!(titles(first_todos(&low[..2])), ["0", "1"]);
+        assert!(first_todos(&[]).is_empty());
+        assert!(High.needs_attention() && Medium.needs_attention() && !Low.needs_attention());
     }
 
     #[test]
