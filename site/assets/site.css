@@ -6,8 +6,8 @@
  * boot.js sets data-theme on <html> before the page paints. Terminals and
  * commands stay dark in both themes.
  *
- * The content sits in one wide centred column (--col); long text keeps a
- * reading width (--read), and cards and steps use the width in grids.
+ * The content sits in one narrow centred column (--col), read from top to
+ * bottom: figures, cards and steps stack one above the other in it.
  * Behind it, terrain.js draws a wireframe landscape on a canvas. Headings
  * are set in Departure Mono, a pixel typeface; text in Geist; commands and
  * labels in Geist Mono. All three are self-hosted under the SIL Open Font
@@ -90,10 +90,9 @@
   --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --pixel: "Departure Mono", "Geist Mono", ui-monospace, monospace;
 
-  /* The column, the reading width inside it, and the gutter around it */
-  --col: 75rem;
-  --read: 44rem;
-  --gutter: clamp(1rem, 0.2rem + 3.2vw, 2.5rem);
+  /* The column and the gutter around it */
+  --col: 46rem;
+  --gutter: clamp(1rem, 0.4rem + 2.6vw, 2rem);
   --radius: 3px;
 }
 
@@ -699,16 +698,9 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
   .trace dl > div:nth-child(2) { border-top: 1px solid var(--line); }
   .trace dl > div:nth-child(2n) { border-left: 0; }
 }
-/* The claim on the left, a real scan on the right; one above the other
-   on a narrower screen. */
-.hero-grid { display: grid; gap: 2.5rem; }
+/* The claim, then a real scan below it. */
 .hero-copy, .hero-run { min-width: 0; }
-@media (min-width: 64rem) {
-  .hero-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 3rem; align-items: start; }
-  .hero-run { padding-top: 2.2rem; }
-  /* Terminal output is up to 80 columns wide; this keeps it on one line. */
-  .hero-run .term pre, .split-side .term pre { font-size: 0.7rem; }
-}
+.hero-run { margin-top: 1.75rem; }
 .note {
   margin-top: 0.85rem;
   font-family: var(--mono);
@@ -731,19 +723,14 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
   letter-spacing: -0.005em;
 }
 @media (min-width: 40rem) { .sec h2 { font-size: 33px; line-height: 1.15; } }
-.sec h2 { max-width: 48rem; text-wrap: balance; }
+.sec h2 { text-wrap: balance; }
 .sec h2 .em { color: var(--green); }
-/* Long text keeps a reading width; figures and grids take the column. */
-.story > p { margin-top: 1.1rem; max-width: var(--read); font-size: 1.02rem; line-height: 1.7; color: var(--prose); text-wrap: pretty; }
+.story > p { margin-top: 1.1rem; font-size: 1.02rem; line-height: 1.7; color: var(--prose); text-wrap: pretty; }
 .story > h2 + p { margin-top: 1.25rem; }
 .story > * + .scene, .story > .scene + *,
 .story > * + .duo, .story > .duo + * { margin-top: 2rem; }
-/* Two figures side by side on a wide screen. */
+/* Two figures, one above the other. */
 .duo { display: grid; gap: 1.5rem; }
-@media (min-width: 64rem) {
-  .duo { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
-  .duo .finding-card { max-width: none; }
-}
 .story > .try { margin-top: 1.5rem; }
 .story > * + .uses { margin-top: 1.75rem; }
 .story > .uses + * { margin-top: 1.75rem; }
@@ -757,7 +744,6 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 .cap::before { content: "// "; color: var(--faint); }
 .try { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.25rem; }
 .fine, .story > .fine {
-  max-width: var(--read);
   font-size: 0.875rem;
   line-height: 1.6;
   color: var(--muted);
@@ -767,7 +753,7 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 .fine a { color: var(--green-ink); }
 
 /* A list of short entries: a heading and a paragraph each. */
-.uses { list-style: none; display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); }
+.uses { list-style: none; display: grid; gap: 0.6rem; }
 .uses > li {
   padding: 1.1rem 1.2rem 1.2rem;
   border: 1px solid var(--line);
@@ -866,7 +852,6 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 /* ---------- Steps, and the system they are for ---------- */
 
 .os-pick {
-  max-width: 36rem;
   margin: 1.75rem 0 0;
   padding: 0;
   border: 0;
@@ -934,7 +919,6 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 }
 
 .os-msg {
-  max-width: var(--read);
   margin-top: 1.25rem;
   padding: 1rem 1.1rem;
   border: 1px dashed var(--line-strong);
@@ -998,18 +982,9 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
   line-height: 1.35;
 }
 :where(.step) p { margin-top: 0.55rem; font-size: 0.97rem; line-height: 1.65; }
-/* A step's text and commands on the left, what they print on the right. */
-.split { display: grid; gap: 0; }
+/* A step's text and commands, then what they print. */
 .split-main, .split-side { min-width: 0; }
 .split-main > :first-child { margin-top: 0.55rem; }
-/* A step whose commands are long and whose output is short reads in one
-   column, as wide as its longest command. */
-.step-body { max-width: 56rem; }
-@media (min-width: 64rem) {
-  .split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 2.5rem; align-items: start; }
-  .split-side > .shows:first-child { margin-top: 0.7rem; }
-  .step { padding-bottom: 3rem; }
-}
 .step .code, .step .term { margin-top: 0.85rem; }
 .step .code + .code { margin-top: 0.6rem; }
 .step .try { margin-top: 1rem; }
@@ -1061,7 +1036,6 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 .attn-lead { color: var(--ink); font-family: var(--pixel); font-size: 22px; line-height: 1.25; }
 .attn-status { margin-top: 0.4rem; font-size: 0.9rem; color: var(--muted); }
 .attn-list { list-style: none; display: grid; gap: 0.6rem; margin-top: 1rem; }
-@media (min-width: 64rem) { .attn-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .attn-list li, .fix {
   padding: 0.85rem 0.95rem 0.9rem;
   border: 1px solid var(--line);
@@ -1092,7 +1066,6 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 .attn-do a { font-family: var(--mono); font-size: 0.8rem; white-space: nowrap; }
 .attn-do a::after { content: " ->"; }
 .fixes { display: grid; gap: 0.6rem; margin-top: 1.25rem; }
-@media (min-width: 56rem) { .fixes { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
 .fix-sub { margin-top: 0.2rem; font-size: 0.82rem; color: var(--muted); }
 .fix-steps { list-style: none; counter-reset: fix; display: grid; gap: 0.45rem; margin-top: 0.7rem; }
 .fix-steps li { counter-increment: fix; position: relative; padding-left: 1.9rem; overflow-wrap: anywhere; }
@@ -1149,12 +1122,6 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 }
 .counts .n { font-family: var(--pixel); font-size: 33px; line-height: 1; color: var(--green); }
 @media (max-width: 34rem) { .counts { grid-template-columns: minmax(0, 1fr); } }
-/* The companies on the left, the two counts beside them. */
-@media (min-width: 64rem) {
-  .scan { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 0.75rem; align-items: start; }
-  .scan .counts { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
-  .scan .counts p { padding: 1.25rem 1.2rem; }
-}
 
 /* ---------- A row of stages, joined ---------- */
 
@@ -1193,7 +1160,7 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 
 /* ---------- Questions ---------- */
 
-.faq { max-width: 56rem; border-top: 1px solid var(--line); }
+.faq { border-top: 1px solid var(--line); }
 .faq details { border-bottom: 1px solid var(--line); }
 .faq summary {
   display: flex;
@@ -1244,7 +1211,7 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 /* ---------- Inner pages ---------- */
 
 .page-head { padding: clamp(2.5rem, 2rem + 3vw, 4rem) 0 clamp(2rem, 1.5rem + 2vw, 3rem); }
-.page-head h1 { font-size: 33px; max-width: 52rem; text-wrap: balance; }
+.page-head h1 { font-size: 33px; text-wrap: balance; }
 @media (min-width: 40rem) { .page-head h1 { font-size: 44px; } }
 .page-head .actions { margin-top: 1.6rem; }
 .section { padding: clamp(2.5rem, 2rem + 3vw, 4rem) 0; border-top: 1px solid var(--line); }
@@ -1264,11 +1231,6 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 .window iframe { display: block; width: 100%; height: min(78vh, 52rem); border: 0; background: #ffffff; }
 .guide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; margin-top: 0.6rem; }
 @media (max-width: 40rem) { .guide { grid-template-columns: minmax(0, 1fr); } }
-/* The report on the left, the guide to it beside it on a wide screen. */
-@media (min-width: 64rem) {
-  .sample-grid { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1rem; align-items: start; }
-  .guide { grid-template-columns: minmax(0, 1fr); margin-top: 0; position: sticky; top: 4.5rem; }
-}
 .guide h2 { margin: 0; font-family: var(--mono); font-size: 0.72rem; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); }
 .guide ol { list-style: none; counter-reset: g; display: grid; gap: 0.1rem; margin-top: 0.6rem; }
 .guide ol li { counter-increment: g; }
@@ -1300,18 +1262,11 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
   line-height: 1.25;
 }
 @media (min-width: 40rem) { .made h2 { font-size: 27.5px; } }
-.made p { margin-top: 0.9rem; max-width: var(--read); }
+.made p { margin-top: 0.9rem; }
 .made .code { margin-top: 1.25rem; }
 
-/* Docs page: the contents beside the text on a wide screen, above it on
-   a narrow one. */
+/* Docs page: the contents above the text. */
 .docs-nav { margin-bottom: 2.5rem; padding: 0.9rem 1rem 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
-@media (min-width: 64rem) {
-  .docs { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 3.5rem; align-items: start; }
-  .docs-nav { position: sticky; top: 4.5rem; margin-bottom: 0; }
-  .docs-nav ul { flex-direction: column; gap: 0.15rem; }
-  .docs-nav a { display: block; padding: 0.2rem 0; }
-}
 .docs-nav p { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .docs-nav ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; margin-top: 0.5rem; font-family: var(--mono); font-size: 0.8rem; }
 .docs-nav a { color: var(--green-ink); text-decoration: none; }
@@ -1326,8 +1281,6 @@ code.is-planned { color: var(--muted); background: none; box-shadow: inset 0 0 0
 .prose h3.sub-cat::before, .sdk-cat h3::before { content: none; }
 .prose h2 + p, .prose h2 + .code { margin-top: 1rem; }
 .prose p, .prose li { color: var(--prose); }
-.prose p, .prose > section > ul, .prose > section > ol:not(.steps-list), .prose .callout { max-width: var(--read); }
-.prose ol.steps-list { max-width: 52rem; }
 .prose p + p, .prose p + ul, .prose p + ol, .prose ul + p, .prose ol + p,
 .prose p + .code, .prose .code + p, .prose .code + .code, .prose h3 + p, .prose h3 + .code,
 .prose p + .table-wrap, .prose .table-wrap + p, .prose .table-wrap + .table-wrap, .prose h3 + .table-wrap, .prose ol + .code,
@@ -1397,7 +1350,6 @@ td.wrap-code code { white-space: normal; }
 .promises li { display: inline-flex; align-items: center; gap: 0.45rem; }
 .promises li::before { content: ""; width: 0.5rem; height: 0.5rem; flex: none; background: var(--green); }
 .plain-steps { list-style: none; counter-reset: plain; display: grid; gap: 0.75rem; margin-top: 2rem; }
-@media (min-width: 52rem) { .plain-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .plain-steps > li {
   counter-increment: plain;
   display: flex;
