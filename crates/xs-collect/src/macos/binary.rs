@@ -461,8 +461,15 @@ mod tests {
     fn read(matchers: &Matchers<'_>, scope: Scope, file: &[u8], window: usize) -> BinaryFindings {
         let mut binary = Binary::new(matchers, scope);
         let mut buf = vec![0x55; read::buffer_len_for(binary.overlap(), window)];
-        let hashed =
-            read::pass(&mut Cursor::new(file), &mut buf, window, &mut binary, |_| true).unwrap();
+        let hashed = read::pass(
+            &mut Cursor::new(file),
+            &mut buf,
+            window,
+            read::First::Head,
+            &mut binary,
+            |_| true,
+        )
+        .unwrap();
         assert_eq!(hashed.unwrap().1, file.len() as u64);
         binary.finish()
     }

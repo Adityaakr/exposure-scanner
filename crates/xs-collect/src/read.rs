@@ -127,8 +127,20 @@ pub fn one_pass<M: ContentMatcher + ?Sized>(
     wanted: impl FnOnce(&[u8]) -> bool,
 ) -> io::Result<Option<OnePass>> {
     let mut search = Search { matcher, hits: HitAcc::new() };
-    let hashed = pass(reader, buf, window, &mut search, wanted)?;
+    let hashed = pass(reader, buf, window, First::Head, &mut search, wanted)?;
     Ok(hashed.map(|(sha256, bytes)| OnePass { sha256, bytes, hits: search.hits }))
+}
+
+/// How much of a file is read before the caller is asked whether it wants
+/// the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum First {
+    /// The first [`HEAD`] bytes, so that a file turned down costs one small
+    /// read. For files told apart by their magic number.
+    Head,
+    /// A whole window, for a caller that takes any file: one read fewer,
+    /// which for a small file is a third of what reading it costs.
+    Window,
 }
 
 /// Hashes a stream in one pass and feeds its windows to `sink`.
@@ -138,7 +150,9 @@ pub fn one_pass<M: ContentMatcher + ?Sized>(
 /// turned the stream down after its first [`HEAD`] bytes, in which case
 /// `sink` saw nothing.
 ///
-/// `buf` is scratch space of at least [`buffer_len_for`] bytes.
+/// `buf` is scratch space of at least [`buffer_len_for`] bytes. `first`
+/// says how much is read before `wanted` sees the first [`HEAD`] bytes;
+/// what is hashed and what `sink` is given do not depend on it.
 ///
 /// # Errors
 ///
@@ -147,6 +161,7 @@ pub fn pass<S: Sink + ?Sized>(
     reader: &mut impl Read,
     buf: &mut [u8],
     window: usize,
+    first: First,
     sink: &mut S,
     wanted: impl FnOnce(&[u8]) -> bool,
 ) -> io::Result<Option<(Sha256Digest, u64)>> {
@@ -156,16 +171,29 @@ pub fn pass<S: Sink + ?Sized>(
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "scratch buffer is too small"));
     }
 
-    // First window: a small read to classify, then the rest of the window.
-    let (head_buf, _) = buf.split_at_mut(HEAD);
-    let head = read_full(reader, head_buf)?;
-    if !wanted(head_buf.get(..head).unwrap_or_default()) {
-        return Ok(None);
-    }
-    let mut got = head;
-    if head == HEAD {
-        got += read_full(reader, buf.get_mut(HEAD..window).unwrap_or_default())?;
-    }
+    // First window: a small read to classify, then the rest of the window;
+    // or the whole window at once.
+    let mut got = match first {
+        First::Head => {
+            let (head_buf, _) = buf.split_at_mut(HEAD);
+            let head = read_full(reader, head_buf)?;
+            if !wanted(head_buf.get(..head).unwrap_or_default()) {
+                return Ok(None);
+            }
+            if head == HEAD {
+                head + read_full(reader, buf.get_mut(HEAD..window).unwrap_or_default())?
+            } else {
+                head
+            }
+        }
+        First::Window => {
+            let got = read_full(reader, buf.get_mut(..window).unwrap_or_default())?;
+            if !wanted(buf.get(..got.min(HEAD)).unwrap_or_default()) {
+                return Ok(None);
+            }
+            got
+        }
+    };
 
     let mut hasher = Sha256Stream::new();
     let mut bytes: u64 = 0;
@@ -359,6 +387,55 @@ mod tests {
         assert_eq!(seen, &data[..HEAD]);
         assert_eq!(reader.1, 1);
         assert_eq!(reader.0.position(), HEAD as u64);
+    }
+
+    /// Reading a whole window first changes nothing but the number of reads:
+    /// the same hash, length and hits at every size around a window, the
+    /// classifier shown the same head, and one read fewer for any file
+    /// longer than the head.
+    #[test]
+    fn a_window_first_gives_what_a_head_first_gives_in_one_read_fewer() {
+        struct Counting<'a>(Cursor<&'a [u8]>, usize);
+        impl Read for Counting<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.1 += 1;
+                self.0.read(buf)
+            }
+        }
+        let window = 64;
+        let matcher = matcher();
+        for len in [0, 1, HEAD - 1, HEAD, HEAD + 1, 63, 64, 65, 128, 129, 1000] {
+            let data = corpus(len.max(32))[..len].to_vec();
+            let mut seen = Vec::new();
+            let mut by = |first: First| {
+                let mut search = Search { matcher: &matcher, hits: HitAcc::new() };
+                let mut buf = vec![0x5a; buffer_len(&matcher, window)];
+                let mut reader = Counting(Cursor::new(&data), 0);
+                let hashed = pass(&mut reader, &mut buf, window, first, &mut search, |head| {
+                    seen.push(head.to_vec());
+                    true
+                });
+                (hashed.unwrap().unwrap(), search.hits, reader.1)
+            };
+            let (head, head_hits, head_reads) = by(First::Head);
+            let (whole, whole_hits, whole_reads) = by(First::Window);
+            assert_eq!((head, head_hits), (whole, whole_hits), "len {len}");
+            assert_eq!(seen[0], seen[1], "len {len}");
+            // A file of at most HEAD bytes is read whole by the first read
+            // either way, and its end found by the next.
+            if len > HEAD {
+                assert_eq!(whole_reads + 1, head_reads, "len {len}");
+            } else {
+                assert_eq!(whole_reads, head_reads, "len {len}");
+            }
+        }
+        // A file turned down after a whole window was read is not hashed.
+        let data = corpus(300);
+        let mut buf = vec![0; buffer_len_for(0, window)];
+        let mut sink = Search { matcher: &NoContent, hits: HitAcc::new() };
+        let refused =
+            pass(&mut Cursor::new(&data), &mut buf, window, First::Window, &mut sink, |_| false);
+        assert_eq!(refused.unwrap(), None);
     }
 
     #[test]

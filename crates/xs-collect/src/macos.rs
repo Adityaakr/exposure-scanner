@@ -69,7 +69,7 @@ use self::binary::{Binary, BinaryFindings};
 use crate::access::Asked;
 use crate::cache::{Listing, Seen, State};
 use crate::electron;
-use crate::read::{self, OnePass, Sink, WINDOW};
+use crate::read::{self, First, OnePass, Sink, WINDOW};
 
 mod binary;
 
@@ -300,8 +300,10 @@ pub(crate) fn plan(root: &Path) -> Plan {
 /// [`Plan::sizes`]: one pass for its hash and for what is found in it.
 pub(crate) fn read(plan: &Plan, file: usize, matchers: &Matchers<'_>) -> FileRead {
     let result = match plan.files.get(file) {
-        Some((path, _)) => {
-            read_file(&plan.root.join(path.as_str()), path, matchers, MAX_FILE_BYTES)
+        Some((path, listed)) => {
+            let file =
+                Listed { path: &plan.root.join(path.as_str()), location: path, size: *listed };
+            read_file(&file, matchers, MAX_FILE_BYTES)
         }
         None => FileResult::Failed,
     };
@@ -596,8 +598,17 @@ impl Sink for ScriptSearch<'_> {
     }
 }
 
-/// Reads one file of a bundle, `location` being its path inside it, the way
-/// its place in the bundle calls for.
+/// A file of a bundle as the listing saw it.
+struct Listed<'a> {
+    /// Where it is.
+    path: &'a Path,
+    /// Its path inside the bundle.
+    location: &'a RelPath,
+    /// Its size when it was listed.
+    size: u64,
+}
+
+/// Reads one file of a bundle the way its place in the bundle calls for.
 ///
 /// A privacy manifest is read whole. An asar archive and a loose script of
 /// an Electron app are read by their path (see [`electron`]). Any other
@@ -607,7 +618,8 @@ impl Sink for ScriptSearch<'_> {
 /// A Mach-O file larger than `budget` is set aside after that one small
 /// read. One that grows while it is being read stops one byte past `budget`
 /// and is reported the same way, so the read is bounded in every case.
-fn read_file(path: &Path, location: &RelPath, matchers: &Matchers<'_>, budget: u64) -> FileResult {
+fn read_file(file: &Listed<'_>, matchers: &Matchers<'_>, budget: u64) -> FileResult {
+    let (path, location) = (file.path, file.location);
     if is_privacy_manifest(location) {
         return read_manifest(path);
     }
@@ -623,9 +635,10 @@ fn read_file(path: &Path, location: &RelPath, matchers: &Matchers<'_>, budget: u
             let content = matchers.content(MatcherKind::ContentLiteral, scope);
             let search = ScriptSearch { content, hits: HitAcc::new() };
             read_matching(
-                path,
+                file,
                 search,
                 budget,
+                First::Window,
                 |_| true,
                 |search, sha256, bytes| {
                     FileResult::Script(OnePass { sha256, bytes, hits: search.hits })
@@ -635,7 +648,7 @@ fn read_file(path: &Path, location: &RelPath, matchers: &Matchers<'_>, budget: u
         electron::FileKind::Other => {
             let binary = Binary::new(matchers, binary_scope(location));
             let is_macho = |head: &[u8]| macho::sniff(head).is_some();
-            read_matching(path, binary, budget, is_macho, |binary, sha256, bytes| {
+            read_matching(file, binary, budget, First::Head, is_macho, |binary, sha256, bytes| {
                 FileResult::Binary { sha256, bytes, found: binary.finish() }
             })
         }
@@ -646,14 +659,21 @@ fn read_file(path: &Path, location: &RelPath, matchers: &Matchers<'_>, budget: u
 /// its first bytes, within `budget` as [`read_file`] describes. A file read
 /// to the end is what `done` makes of the sink, the file's hash and its
 /// length.
+///
+/// The size the listing saw decides whether the file is asked for its size
+/// again before it is read: only one listed over `budget` is, so that it is
+/// set aside with the size it has now. One that grew past `budget` since it
+/// was listed is stopped one byte past it, as any file is, and set aside
+/// the same way.
 fn read_matching<S: Sink>(
-    path: &Path,
+    listed: &Listed<'_>,
     mut sink: S,
     budget: u64,
+    first: First,
     candidate: impl Fn(&[u8]) -> bool,
     done: impl FnOnce(S, Sha256Digest, u64) -> FileResult,
 ) -> FileResult {
-    let Ok(file) = File::open(path) else { return FileResult::Failed };
+    let Ok(file) = File::open(listed.path) else { return FileResult::Failed };
     let mut bounded = (&file).take(budget.saturating_add(1));
     SCRATCH.with_borrow_mut(|buf| {
         let needed = read::buffer_len_for(sink.overlap(), WINDOW);
@@ -665,6 +685,9 @@ fn read_matching<S: Sink>(
             if !candidate(head) {
                 return false;
             }
+            if listed.size <= budget {
+                return true;
+            }
             match file.metadata() {
                 Ok(metadata) if metadata.len() > budget => {
                     oversize = Some(metadata.len());
@@ -673,7 +696,7 @@ fn read_matching<S: Sink>(
                 _ => true,
             }
         };
-        match read::pass(&mut bounded, buf, WINDOW, &mut sink, wanted) {
+        match read::pass(&mut bounded, buf, WINDOW, first, &mut sink, wanted) {
             Ok(Some((_, bytes))) if bytes > budget => match file.metadata() {
                 Ok(metadata) => FileResult::OverBudget(metadata.len().max(bytes)),
                 Err(_) => FileResult::Failed,
@@ -1184,14 +1207,23 @@ mod tests {
         assert!(!is_privacy_manifest(&location("PrivacyInfo.xcprivacy/Info.plist")));
     }
 
-    /// The byte budget binds on the open file, whatever size the walk saw.
-    /// The oracle is the file's length as written here.
+    /// The byte budget binds on the open file, whatever size the walk saw:
+    /// none, the true one, or more. The oracle is the file's length as
+    /// written here.
     #[test]
     fn a_file_over_the_budget_when_read_is_set_aside_with_its_size() {
+        for seen in [0, 16, 99, 100, 1000] {
+            over_budget_whatever_size_was_listed(seen);
+        }
+    }
+
+    fn over_budget_whatever_size_was_listed(seen: u64) {
         let pack = pack(Vec::new());
         let matchers = Matchers::build(&pack).unwrap();
         let at = location("Contents/MacOS/Example");
-        let read = |path: &Path, budget| read_file(path, &at, &matchers, budget);
+        let read = |path: &Path, budget| {
+            read_file(&Listed { path, location: &at, size: seen }, &matchers, budget)
+        };
 
         let mut file = tempfile::NamedTempFile::new().unwrap();
         let mut bytes = vec![0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01];
@@ -1225,7 +1257,7 @@ mod tests {
         let mut other = tempfile::NamedTempFile::new().unwrap();
         other.write_all(document).unwrap();
         assert!(matches!(
-            read_file(other.path(), &manifest, &matchers, 50),
+            read_file(&Listed { path: other.path(), location: &manifest, size: seen }, &matchers, 50),
             FileResult::Manifest { sha256, bytes, declared: Ok(listed) }
                 if sha256 == Sha256Digest::of(document)
                     && bytes == document.len() as u64
@@ -1234,7 +1266,7 @@ mod tests {
         let oversized = privacy_manifest::MAX_BYTES as u64 + 1;
         other.as_file().set_len(oversized).unwrap();
         assert!(matches!(
-            read_file(other.path(), &manifest, &matchers, 50),
+            read_file(&Listed { path: other.path(), location: &manifest, size: seen }, &matchers, 50),
             FileResult::OverBudget(size) if size == oversized
         ));
     }
