@@ -237,9 +237,9 @@ pub(super) fn for_entry(stored: usize, inflated: usize) -> EntryBuffers {
     }
 }
 
-/// The buffer a resource table is kept in until the package has been read,
-/// with room for `need` bytes. Never shared: it is held while other entries
-/// of the package are read.
+/// The buffer a resource table read before its manifest is kept in until
+/// the package has been read, with room for `need` bytes. Never shared: it
+/// is held while other entries of the package are read.
 pub(super) fn for_table(need: usize) -> Buffer {
     kept(Slot::Table, need)
 }

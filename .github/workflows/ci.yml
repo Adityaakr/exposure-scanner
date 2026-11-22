@@ -24,11 +24,13 @@ env:
 jobs:
   linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The differential test builds the commit this change goes onto.
+          fetch-depth: 0
 
       - name: Install the pinned toolchain
         run: rustup toolchain install || rustup show
@@ -119,6 +121,30 @@ jobs:
       # 8 threads, with the cache off, empty and full, give one report.
       - name: Benchmark runs, within its memory gate, with one report
         run: cargo xtask bench tests/fixtures/macos tests/fixtures/android/Skeleton.apk
+
+      # The scanner of the commit this change goes onto and the scanner of
+      # the change, run over the committed fixtures, a corpus made from the
+      # rule pack, the pinned real apps and the negative-control apps,
+      # without the cache, on one thread and with the cache empty and full:
+      # every report must be the same, byte for byte. A change meant to
+      # change what is reported updates the rules or the committed fixture
+      # reports, and then the differences are only listed. The base build is
+      # not kept in the cached target folder.
+      - name: Every report is the base commit's
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          trap 'rm -rf target/difftest' EXIT
+          expect=""
+          if ! git diff --quiet "$BASE" HEAD -- rules ':(glob)tests/fixtures/**/*.report.*'; then
+            expect="--expect-changes"
+          fi
+          # The negative-control packages sit in their folder; each app that
+          # came as a zip is unpacked into a folder of its own beside them.
+          shopt -s nullglob
+          unpacked=("$RUNNER_TEMP"/negative-apps/*.d)
+          cargo xtask difftest --base "$BASE" $expect \
+            "$RUNNER_TEMP/real-apps" "$RUNNER_TEMP/negative-apps" "${unpacked[@]}"
 
   # The parsers of hostile files, under libFuzzer with the address
   # sanitizer: one target per parser and one for the Android collector as a

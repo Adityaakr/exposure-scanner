@@ -11,16 +11,21 @@
 //! | Warm scan | Populated cache, no changes | Under 5 s |
 //! | Determinism | The report of every run | One report |
 //!
-//! And one gate of the security review (M4), on input made to cost memory:
+//! And two gates of the security review (M4), on input made to cost memory:
 //!
 //! | Benchmark | Method | Gate |
 //! |---|---|---|
-//! | Hostile memory | A folder of 24 packages of 1 MB, each holding four DEX files that inflate to 255 MiB, scanned at 1 thread and at one per core | Under 600 MB at 1 thread, under 1.5 GB at one per core |
+//! | Hostile memory | A folder of 24 packages of 1 MB, each holding four DEX files that inflate to 255 MiB, each a valid file with one string, scanned at 1 thread and at one per core | Under 600 MB at 1 thread, under 1.5 GB at one per core |
+//! | Hollow memory | The same packages with DEX files of zeros, scanned at one per core | Under 150 MB |
 //!
-//! The packages are made by the benchmark, in its own folder. What they
-//! test is that memory is bounded by the scan's threads and not by the
+//! The packages are made by the benchmark, in its own folder. What the
+//! first test is that memory is bounded by the scan's threads and not by the
 //! number of packages: before the gate, 25 MB of them took one scan at one
 //! thread to a peak of 15.7 GB on macOS, whose allocator keeps freed blocks.
+//! A scan has to hold each of those DEX files whole to read its string. The
+//! second tests that one whose header alone decides what it holds is never
+//! held: a file of zeros is refused for its header once its stream has been
+//! checked, which takes a window of memory, not 255 MiB.
 //! On macOS the figure is the peak memory footprint, what the system
 //! charges against memory pressure, where it is larger than the peak
 //! resident size.
@@ -93,6 +98,9 @@ const HOSTILE_DEX_BYTES: usize = 255 << 20;
 /// The hostile-memory gates, in bytes: at one thread, and at one per core.
 const MAX_HOSTILE_ONE_THREAD: u64 = 600_000_000;
 const MAX_HOSTILE_ALL_THREADS: u64 = 1_500_000_000;
+/// The gate for the hollow folder, at one per core: packages as large, but
+/// whose DEX files hold nothing a scan reads, so need not be held at all.
+const MAX_HOLLOW_ALL_THREADS: u64 = 150_000_000;
 
 /// One measured run.
 struct Run {
@@ -192,16 +200,24 @@ fn run(
     Ok(Run { elapsed, peak_bytes, footprint_bytes, report: crate::read(&report)?, summary })
 }
 
-/// Writes the hostile folder into `dir/hostile` and returns its path: every
+/// Writes a hostile folder into `dir/<name>` and returns its path: every
 /// package one and the same file, which is the worst case for an allocator
 /// that keeps freed blocks.
-fn hostile_folder(dir: &Path) -> Result<PathBuf> {
-    use xs_formats::testkit::{self, ZipBuilder};
-    let folder = dir.join("hostile");
+///
+/// Each DEX file inflates to [`HOSTILE_DEX_BYTES`]. In the `hostile` folder
+/// it is a valid DEX file that defines a string, padded with zeros: a scan
+/// has to hold all of it to read the string, so this is what the shared
+/// buffers bound. In the `hollow` folder it is zeros, which a scan refuses
+/// for its header after checking the stream in a window of memory.
+fn hostile_folder(dir: &Path, name: &str) -> Result<PathBuf> {
+    use xs_formats::testkit::{self, DexBuilder, ZipBuilder};
+    let folder = dir.join(name);
     fs::create_dir(&folder)
         .map_err(|error| format!("cannot create {}: {error}", folder.display()))?;
-    let zeros = vec![0u8; HOSTILE_DEX_BYTES];
-    let stream = miniz_oxide::deflate::compress_to_vec(&zeros, 6);
+    let mut dex =
+        if name == "hollow" { Vec::new() } else { DexBuilder::new().string("hostile").finish() };
+    dex.resize(HOSTILE_DEX_BYTES, 0);
+    let stream = miniz_oxide::deflate::compress_to_vec(&dex, 6);
     let declared = u32::try_from(HOSTILE_DEX_BYTES).map_err(|error| error.to_string())?;
     let mut package = ZipBuilder::new()
         .deflated("AndroidManifest.xml", &testkit::manifest("org.example.hostile", "1.0", &[]));
@@ -357,11 +373,15 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
         }
     }
 
-    // The hostile folder, at one thread and at one per core.
-    let hostile = hostile_folder(dir)?;
+    // The hostile folder, at one thread and at one per core, and the hollow
+    // one at one per core.
+    let hostile = hostile_folder(dir, "hostile")?;
     let hostile = vec![hostile.to_string_lossy().into_owned()];
     let hostile_one = run(exposure, &hostile, 1, None, dir)?.footprint_bytes;
     let hostile_all = run(exposure, &hostile, cores, None, dir)?.footprint_bytes;
+    let hollow = hostile_folder(dir, "hollow")?;
+    let hollow = vec![hollow.to_string_lossy().into_owned()];
+    let hollow_all = run(exposure, &hollow, cores, None, dir)?.footprint_bytes;
 
     let mut failed = Vec::new();
     let mut skipped = Vec::new();
@@ -415,6 +435,16 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
             megabytes(hostile_all),
             megabytes(MAX_HOSTILE_ONE_THREAD),
             megabytes(MAX_HOSTILE_ALL_THREADS),
+        ),
+    );
+    check(
+        "hollow memory",
+        Some(hollow_all < MAX_HOLLOW_ALL_THREADS),
+        format!(
+            "the same packages with DEX files of zeros, which hold nothing to read: {} MB at \
+             {cores} threads (gate: under {} MB)",
+            megabytes(hollow_all),
+            megabytes(MAX_HOLLOW_ALL_THREADS),
         ),
     );
     let seconds = |elapsed: Duration| hundredths(elapsed.as_millis() / 10);

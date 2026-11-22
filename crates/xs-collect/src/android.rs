@@ -358,6 +358,59 @@ enum Content {
     /// strings is the app's name: the table may come before the manifest
     /// in the archive.
     Resources(Table),
+    /// What the resource table holds of the app's name, looked up as the
+    /// table was read because the manifest had already said which string
+    /// that is: the table is then not kept. `Ok(None)` also when the
+    /// manifest names the app without the table, or does not name it.
+    Name(Result<Option<String>, FormatError>),
+}
+
+/// What the app's name needs of the resource table, as far as the manifest
+/// has said by the time the table is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Need {
+    /// The manifest has not been read yet: the table is kept whole.
+    Unknown,
+    /// The name is in the manifest as text, or not there at all.
+    Nothing,
+    /// The manifest points at this string resource.
+    String(u32),
+}
+
+impl Need {
+    /// What the manifest among `captures` says, if it has been read.
+    fn of(captures: &[Capture<'_>]) -> Self {
+        let manifest = captures
+            .iter()
+            .find(|capture| matches!(capture.kind, Kind::Manifest | Kind::BundleManifest));
+        match manifest.map(|capture| &capture.outcome) {
+            Some(None) => Self::Unknown,
+            // Without a manifest that parsed, the name is not looked up.
+            None | Some(Some(Err(_) | Ok(_))) => match manifest.and_then(Capture::parsed) {
+                Some(parsed) if parsed.label.is_none() => {
+                    parsed.label_ref.map_or(Self::Nothing, Self::String)
+                }
+                _ => Self::Nothing,
+            },
+        }
+    }
+}
+
+/// The resource table, or what it was found to hold of the app's name.
+enum Lookup {
+    Table(Table),
+    /// Looked up as the table was read, for the string the manifest points
+    /// at: the one `records` asks for.
+    Found(Result<Option<String>, FormatError>),
+}
+
+impl Lookup {
+    fn string(&self, id: u32) -> Result<Option<String>, FormatError> {
+        match self {
+            Self::Table(table) => table.string(id),
+            Self::Found(found) => found.clone(),
+        }
+    }
 }
 
 /// A resource table, in the form of an APK or of a bundle.
@@ -441,7 +494,7 @@ impl<'a> Capture<'a> {
     /// Takes what `window`, the bytes of the file from `offset` on, holds of
     /// this entry, and reads the entry once all of it is there. Windows
     /// arrive in file order and without gaps.
-    fn feed(&mut self, offset: u64, window: &[u8], matchers: &Matchers<'_>) {
+    fn feed(&mut self, offset: u64, window: &[u8], need: Need, matchers: &Matchers<'_>) {
         while self.outcome.is_none() {
             let copied = self.buffers.as_ref().map_or(0, |buffers| buffers.stored.len());
             let missing = self.wanted.saturating_sub(copied);
@@ -479,14 +532,22 @@ impl<'a> Capture<'a> {
             if copied < self.wanted {
                 return;
             }
-            self.read(matchers);
+            self.read(need, matchers);
+        }
+    }
+
+    /// The manifest this entry was read as, if it is one that parsed.
+    fn parsed(&self) -> Option<&android_manifest::Manifest> {
+        match &self.outcome {
+            Some(Ok(Content::Manifest(parsed))) => Some(parsed),
+            _ => None,
         }
     }
 
     /// Reads the entry from what was copied of it, and lets the buffers go.
-    fn read(&mut self, matchers: &Matchers<'_>) {
+    fn read(&mut self, need: Need, matchers: &Matchers<'_>) {
         self.outcome = Some(match self.buffers.take() {
-            Some(mut buffers) => self.content(&mut buffers, matchers),
+            Some(mut buffers) => self.content(&mut buffers, need, matchers),
             // The pass never reached the entry: the file ends before it.
             None => Err(ReadError::Format(FormatError::Malformed)),
         });
@@ -498,25 +559,39 @@ impl<'a> Capture<'a> {
     fn content(
         &self,
         buffers: &mut EntryBuffers,
+        need: Need,
         matchers: &Matchers<'_>,
     ) -> Result<Content, ReadError> {
         let EntryBuffers { stored, inflated } = buffers;
         let data = zip::data(&self.entry, stored)?;
         let budget = usize::try_from(self.kind.budget()).unwrap_or(usize::MAX);
+        if matches!(self.kind, Kind::Dex)
+            && let Some(decided) = dex_decided_by_header(&self.entry, data, budget)
+        {
+            return decided;
+        }
         let content = zip::content(&self.entry, data, budget, inflated)?;
-        // The table is kept until the manifest says which string to look
-        // up, while the next entries are read into the entry buffers.
+        // A table read before the manifest is kept until the manifest says
+        // which string to look up, while the next entries are read into the
+        // entry buffers. One read after it is looked up at once.
         let table = || {
             let mut table = buffers::for_table(content.len());
             table.extend_from_slice(content);
             table
         };
-        Ok(match self.kind {
-            Kind::Manifest => Content::Manifest(android_manifest::parse(content)?),
-            Kind::BundleManifest => Content::Manifest(android_proto::manifest(content)?),
-            Kind::Dex => Content::Dex(dex_hits(content, matchers)?),
-            Kind::Resources => Content::Resources(Table::Binary(table())),
-            Kind::BundleResources => Content::Resources(Table::Proto(table())),
+        Ok(match (self.kind, need) {
+            (Kind::Manifest, _) => Content::Manifest(android_manifest::parse(content)?),
+            (Kind::BundleManifest, _) => Content::Manifest(android_proto::manifest(content)?),
+            (Kind::Dex, _) => Content::Dex(dex_hits(content, matchers)?),
+            (Kind::Resources, Need::Unknown) => Content::Resources(Table::Binary(table())),
+            (Kind::BundleResources, Need::Unknown) => Content::Resources(Table::Proto(table())),
+            (Kind::Resources | Kind::BundleResources, Need::Nothing) => Content::Name(Ok(None)),
+            (Kind::Resources, Need::String(id)) => {
+                Content::Name(android_resources::string(content, id))
+            }
+            (Kind::BundleResources, Need::String(id)) => {
+                Content::Name(android_proto::string(content, id))
+            }
         })
     }
 
@@ -525,7 +600,7 @@ impl<'a> Capture<'a> {
     /// what there is, which fails.
     fn finish(mut self, matchers: &Matchers<'_>) -> (RelPath, Kind, Result<Content, ReadError>) {
         if self.outcome.is_none() {
-            self.read(matchers);
+            self.read(Need::Unknown, matchers);
         }
         let outcome = self.outcome.unwrap_or(Err(ReadError::Format(FormatError::Malformed)));
         (self.name, self.kind, outcome)
@@ -780,8 +855,11 @@ fn scan_package(
     let mut unchanged = true;
     let (sha256, bytes) = pass(reader, file_bytes.saturating_add(1), buffer, |offset, window| {
         for &index in &in_file_order {
+            // Asked before each entry, so that a table read after the
+            // manifest knows what of it the name needs.
+            let need = Need::of(&captures);
             if let Some(capture) = captures.get_mut(index) {
-                capture.feed(offset, window, matchers);
+                capture.feed(offset, window, need, matchers);
             }
         }
         unchanged &= expected.iter().all(|region| region.agrees_with(offset, window));
@@ -972,6 +1050,36 @@ struct Pass<'a> {
     twins: &'a BTreeMap<String, RelPath>,
 }
 
+/// What a deflated DEX entry holds, if its header alone decides it: a file
+/// its header has it refused for, or one that defines no class and holds no
+/// string. `None` if the rest of the content is needed, as it is for every
+/// real DEX file; finding that out costs inflating its first 112 bytes.
+///
+/// The stream is still inflated to its end, for what [`zip::content`]
+/// would decide of it, but into a window of memory, not into a buffer of
+/// the size the entry declares. So a stream made to inflate to hundreds of
+/// megabytes of nothing costs what any small entry does. The outcome is
+/// the one reading the entry whole gives: the stream's error if it has one,
+/// or else the header's verdict.
+fn dex_decided_by_header(
+    entry: &Entry<'_>,
+    data: &[u8],
+    budget: usize,
+) -> Option<Result<Content, ReadError>> {
+    let declared = usize::try_from(entry.bytes).ok()?;
+    if !matches!(entry.method, zip::Method::Deflated) || declared > budget {
+        return None;
+    }
+    let header = zip::inflate_prefix(data, dex::HEADER_BYTES)?;
+    let verdict = match dex::Layout::read(&header, declared) {
+        Err(error) => Err(error),
+        Ok(layout) if layout.is_empty() => Ok(Content::Dex(HitAcc::new())),
+        Ok(_) => return None,
+    };
+    let (mut kept, mut window) = (Vec::new(), Vec::new());
+    Some(zip::inflate_head(data, declared, 0, &mut kept, &mut window).and(verdict))
+}
+
 /// The hits of one DEX file: its class table and its string table.
 fn dex_hits(bytes: &[u8], matchers: &Matchers<'_>) -> Result<HitAcc, ReadError> {
     let dex = Dex::parse(bytes)?;
@@ -1004,7 +1112,8 @@ fn records(
         match content {
             Ok(Content::Manifest(parsed)) => manifest = Some((name, parsed)),
             Ok(Content::Dex(hits)) => dex_files.push((name, hits)),
-            Ok(Content::Resources(table)) => resources = Some((name, table)),
+            Ok(Content::Resources(table)) => resources = Some((name, Lookup::Table(table))),
+            Ok(Content::Name(found)) => resources = Some((name, Lookup::Found(found))),
             Err(error) => {
                 let (status, reason) = coverage_of(error);
                 gaps.push(kind, Gap { status, reason, location: name, bytes: None });
@@ -1033,7 +1142,7 @@ fn records(
     let table_gap = gaps.table.take();
     if let (None, Some(id)) = (&label, parsed.and_then(|m| m.label_ref)) {
         match &resources {
-            Some((location, table)) => match table.string(id) {
+            Some((location, lookup)) => match lookup.string(id) {
                 Ok(found) => label = found,
                 Err(error) => gaps.at(location, coverage_of(error.into())),
             },
@@ -1773,14 +1882,21 @@ mod tests {
             assert_eq!(coverage(&records), Vec::<String>::new());
         }
 
+        // Each case below in both orders: a table read after the manifest
+        // is looked up as it is read, one read before it is kept whole.
+        let both = |manifest: &[u8], table: &[u8]| {
+            [
+                ZipBuilder::new().deflated(MANIFEST, manifest).stored(RESOURCES, table).finish(),
+                ZipBuilder::new().stored(RESOURCES, table).deflated(MANIFEST, manifest).finish(),
+            ]
+        };
+
         // A label the table does not hold is no name, and no gap.
-        let apk = ZipBuilder::new()
-            .deflated(MANIFEST, &labelled_manifest(0x7f0f_0009))
-            .stored(RESOURCES, &table)
-            .finish();
-        let records = scan(&apk, &pack);
-        assert_eq!(artifact(&records).facts.name, None);
-        assert_eq!(coverage(&records), Vec::<String>::new());
+        for apk in both(&labelled_manifest(0x7f0f_0009), &table) {
+            let records = scan(&apk, &pack);
+            assert_eq!(artifact(&records).facts.name, None);
+            assert_eq!(coverage(&records), Vec::<String>::new());
+        }
 
         // Without a table there is no name either.
         let apk = ZipBuilder::new().deflated(MANIFEST, &labelled_manifest(LABEL)).finish();
@@ -1788,14 +1904,19 @@ mod tests {
 
         // A table that cannot be read for the name is a gap, and the rest
         // of the package is still reported.
-        let apk = ZipBuilder::new()
-            .deflated(MANIFEST, &labelled_manifest(LABEL))
-            .stored(RESOURCES, b"not a resource table")
-            .finish();
-        let records = scan(&apk, &pack);
-        assert_eq!(artifact(&records).subject.id, "com.example.app");
-        assert_eq!(artifact(&records).facts.name, None);
-        assert_eq!(coverage(&records), ["Unrecognized ParseError resources.arsc None 1"]);
+        for apk in both(&labelled_manifest(LABEL), b"not a resource table") {
+            let records = scan(&apk, &pack);
+            assert_eq!(artifact(&records).subject.id, "com.example.app");
+            assert_eq!(artifact(&records).facts.name, None);
+            assert_eq!(coverage(&records), ["Unrecognized ParseError resources.arsc None 1"]);
+        }
+
+        // A manifest that names the app in text needs nothing of a table,
+        // even one that cannot be read.
+        let named = testkit::manifest("com.example.app", "1.0", &[]);
+        for apk in both(&named, b"not a resource table") {
+            assert_eq!(coverage(&scan(&apk, &pack)), Vec::<String>::new());
+        }
     }
 
     /// A resource table that is over its budget or cannot be inflated is a
@@ -2334,6 +2455,62 @@ mod tests {
             ]
         );
         assert_eq!(edges(&records).len(), 3, "the manifest and the last DEX file");
+    }
+
+    /// A DEX entry whose header decides what it holds is inflated into a
+    /// window rather than whole. Whatever the header says, and whether or
+    /// not the stream is sound, the records are those of reading the same
+    /// bytes whole: here, stored, which is always read whole.
+    #[test]
+    fn a_dex_file_its_header_decides_gives_what_reading_it_whole_gives() {
+        const LARGE: usize = 1 << 20;
+        let pack = tracker_pack();
+        let padded = |mut dex: Vec<u8>| {
+            dex.resize(LARGE, 0);
+            dex
+        };
+        let empty = padded(DexBuilder::new().finish());
+        let mut version_41 = empty.clone();
+        version_41[4..7].copy_from_slice(b"041");
+        let mut swapped = empty.clone();
+        swapped[0x28..0x2c].copy_from_slice(&0x7856_3412u32.to_le_bytes());
+        let mut strings_outside = empty.clone();
+        strings_outside[0x38..0x40].copy_from_slice(&[1, 0, 0, 0, 0xff, 0xff, 0xff, 0x7f]);
+        let cases: [(&str, Vec<u8>); 6] = [
+            ("zeros", vec![0; LARGE]),
+            ("an empty file", empty),
+            ("version 041", version_41),
+            ("byte-swapped", swapped),
+            ("a table outside the file", strings_outside),
+            ("classes and strings", padded(tracker_dex())),
+        ];
+        for (case, dex) in &cases {
+            let whole = ZipBuilder::new()
+                .deflated(MANIFEST, &tracker_manifest())
+                .stored("classes.dex", dex)
+                .finish();
+            let windowed = ZipBuilder::new()
+                .deflated(MANIFEST, &tracker_manifest())
+                .deflated("classes.dex", dex)
+                .finish();
+            let (whole, windowed) = (scan(&whole, &pack), scan(&windowed, &pack));
+            assert_eq!(coverage(&windowed), coverage(&whole), "{case}");
+            assert_eq!(edges(&windowed), edges(&whole), "{case}");
+        }
+        // The stream decides first: one that inflates to more or to less
+        // than it declares is refused, whatever its header says.
+        let stream = miniz_dex(&cases[1].1);
+        for declared in [LARGE - 1, LARGE + 1] {
+            let apk = ZipBuilder::new()
+                .deflated(MANIFEST, &tracker_manifest())
+                .raw("classes.dex", 8, 0, &stream, declared as u32)
+                .finish();
+            assert_eq!(
+                coverage(&scan(&apk, &pack)),
+                ["Unrecognized ParseError classes.dex None 1"],
+                "declared {declared}"
+            );
+        }
     }
 
     /// Sets where the directory says the local header of `name` is.

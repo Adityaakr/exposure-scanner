@@ -29,7 +29,7 @@ use crate::le::{u32_at, usize_at};
 use crate::{Budget, FormatError, ReadError};
 
 /// Length of the header of versions 035 to 040.
-const HEADER_BYTES: usize = 0x70;
+pub const HEADER_BYTES: usize = 0x70;
 const ENDIAN_CONSTANT: u32 = 0x1234_5678;
 const REVERSE_ENDIAN_CONSTANT: u32 = 0x7856_3412;
 /// The versions this reader knows, as the three digits of the magic number.
@@ -58,21 +58,88 @@ struct Table<'a> {
     item_bytes: usize,
 }
 
-impl<'a> Table<'a> {
-    /// The table of `count` items at `offset`, where the header gives the
-    /// count at `header_at` and the offset in the four bytes after it.
-    fn read(data: &'a [u8], header_at: usize, item_bytes: usize) -> Result<Self, FormatError> {
-        let count = usize_at(data, header_at).ok_or(FormatError::Malformed)?;
-        let offset = usize_at(data, header_at.saturating_add(4)).ok_or(FormatError::Malformed)?;
-        if count == 0 {
-            // An empty table may give any offset, usually zero.
-            return Ok(Self { bytes: &[], item_bytes });
+/// Where a table lies in the file, in bytes.
+type Span = std::ops::Range<usize>;
+
+/// Where the table of `count` items at `offset` lies in a file of `len`
+/// bytes, where `header` gives the count at `header_at` and the offset in
+/// the four bytes after it.
+fn locate(
+    header: &[u8],
+    len: usize,
+    header_at: usize,
+    item_bytes: usize,
+) -> Result<Span, FormatError> {
+    let count = usize_at(header, header_at).ok_or(FormatError::Malformed)?;
+    let offset = usize_at(header, header_at.saturating_add(4)).ok_or(FormatError::Malformed)?;
+    if count == 0 {
+        // An empty table may give any offset, usually zero.
+        return Ok(0..0);
+    }
+    count
+        .checked_mul(item_bytes)
+        .and_then(|length| offset.checked_add(length))
+        .filter(|&end| end <= len)
+        .map(|end| offset..end)
+        .ok_or(FormatError::Malformed)
+}
+
+/// What the header of a DEX file says, checked against the file's length:
+/// everything [`Dex::parse`] checks before it reads a table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Layout {
+    string_ids: Span,
+    type_ids: Span,
+    class_defs: Span,
+}
+
+impl Layout {
+    /// Reads the header at the start of `header`, of a file `len` bytes
+    /// long. `header` need hold no more than [`HEADER_BYTES`]: what is after
+    /// the header is not looked at.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Dex::parse`], which this is the first half of: a file of
+    /// `len` bytes that starts with `header` fails to parse with this error,
+    /// whatever else it holds.
+    pub fn read(header: &[u8], len: usize) -> Result<Self, ReadError> {
+        let version = version(header).ok_or(FormatError::Malformed)?;
+        if !VERSIONS.contains(&version) {
+            return Err(ReadError::Unsupported);
         }
-        let bytes = count
-            .checked_mul(item_bytes)
-            .and_then(|length| data.get(offset..offset.checked_add(length)?))
-            .ok_or(FormatError::Malformed)?;
-        Ok(Self { bytes, item_bytes })
+        if len < HEADER_BYTES || header.len() < HEADER_BYTES {
+            return Err(FormatError::Malformed.into());
+        }
+        match u32_at(header, 0x28) {
+            Some(ENDIAN_CONSTANT) => {}
+            Some(REVERSE_ENDIAN_CONSTANT) => return Err(ReadError::Unsupported),
+            _ => return Err(FormatError::Malformed.into()),
+        }
+        if usize_at(header, 0x24) != Some(HEADER_BYTES) {
+            return Err(FormatError::Malformed.into());
+        }
+        Ok(Self {
+            string_ids: locate(header, len, 0x38, STRING_ID_BYTES)?,
+            type_ids: locate(header, len, 0x40, TYPE_ID_BYTES)?,
+            class_defs: locate(header, len, 0x60, CLASS_DEF_BYTES)?,
+        })
+    }
+
+    /// Whether the file defines no class and holds no string, so that what
+    /// a scan reads of it, its classes and its strings, is nothing whatever
+    /// its other bytes are.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.string_ids.is_empty() && self.class_defs.is_empty()
+    }
+}
+
+impl<'a> Table<'a> {
+    /// The table at `span` of `data`, which [`Layout::read`] checked lies
+    /// inside it.
+    fn at(data: &'a [u8], span: Span, item_bytes: usize) -> Self {
+        Self { bytes: data.get(span).unwrap_or_default(), item_bytes }
     }
 
     fn len(&self) -> usize {
@@ -103,26 +170,12 @@ impl<'a> Dex<'a> {
     /// byte-swapped file. [`FormatError::Malformed`] if `data` does not
     /// start with a DEX header or a table does not lie inside it.
     pub fn parse(data: &'a [u8]) -> Result<Self, ReadError> {
-        let version = version(data).ok_or(FormatError::Malformed)?;
-        if !VERSIONS.contains(&version) {
-            return Err(ReadError::Unsupported);
-        }
-        if data.len() < HEADER_BYTES {
-            return Err(FormatError::Malformed.into());
-        }
-        match u32_at(data, 0x28) {
-            Some(ENDIAN_CONSTANT) => {}
-            Some(REVERSE_ENDIAN_CONSTANT) => return Err(ReadError::Unsupported),
-            _ => return Err(FormatError::Malformed.into()),
-        }
-        if usize_at(data, 0x24) != Some(HEADER_BYTES) {
-            return Err(FormatError::Malformed.into());
-        }
+        let Layout { string_ids, type_ids, class_defs } = Layout::read(data, data.len())?;
         Ok(Self {
             data,
-            string_ids: Table::read(data, 0x38, STRING_ID_BYTES)?,
-            type_ids: Table::read(data, 0x40, TYPE_ID_BYTES)?,
-            class_defs: Table::read(data, 0x60, CLASS_DEF_BYTES)?,
+            string_ids: Table::at(data, string_ids, STRING_ID_BYTES),
+            type_ids: Table::at(data, type_ids, TYPE_ID_BYTES),
+            class_defs: Table::at(data, class_defs, CLASS_DEF_BYTES),
         })
     }
 
@@ -531,6 +584,46 @@ mod tests {
                 let strings: usize = dex.strings().flatten().map(|s| s.len() + 1).sum();
                 let classes: usize = dex.class_descriptors().flatten().map(|s| s.len() + 1).sum();
                 prop_assert!(strings <= bytes.len() && classes <= bytes.len());
+            }
+        }
+
+        /// The header alone decides what the whole file is refused for, and
+        /// an empty layout means nothing is read whatever follows it. The
+        /// files are valid ones with bytes changed, headers among them, and
+        /// header fields set to edge values.
+        #[test]
+        fn the_header_decides_as_the_whole_file_does(
+            edits in prop::collection::vec((any::<prop::sample::Index>(), any::<u8>()), 0..8),
+            field in prop::sample::select(&[0x24usize, 0x28, 0x38, 0x3c, 0x40, 0x44, 0x60, 0x64][..]),
+            value in prop::sample::select(&[0u32, 1, 0x70, 0x7856_3412, 0x1234_5678, u32::MAX][..]),
+            set in any::<bool>(),
+            cut in any::<prop::sample::Index>(),
+            truncate in any::<bool>(),
+            tail in prop::collection::vec(any::<u8>(), 0..64),
+        ) {
+            let mut bytes = sample();
+            for (at, byte) in edits {
+                let at = at.index(HEADER_BYTES.min(bytes.len()));
+                bytes[at] = byte;
+            }
+            if set {
+                bytes[field..field + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            bytes.extend_from_slice(&tail);
+            if truncate {
+                bytes.truncate(cut.index(bytes.len() + 1));
+            }
+            let head = &bytes[..bytes.len().min(HEADER_BYTES)];
+            let layout = Layout::read(head, bytes.len());
+            match Dex::parse(&bytes) {
+                Ok(dex) => {
+                    let layout = layout.expect("the header alone accepts what the file does");
+                    if layout.is_empty() {
+                        prop_assert_eq!(dex.strings().count(), 0);
+                        prop_assert_eq!(dex.class_descriptors().count(), 0);
+                    }
+                }
+                Err(error) => prop_assert_eq!(layout.err(), Some(error)),
             }
         }
 

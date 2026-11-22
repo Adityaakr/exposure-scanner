@@ -6,6 +6,7 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, reason = "a command-line tool for developers")]
 
 mod bench;
+mod difftest;
 mod fixtures;
 mod guard;
 mod key;
@@ -52,10 +53,18 @@ speed
                           results cache and with nothing changed since the last one,
                           and measure its peak memory; gates: under 60 s cold, 3x at
                           8 threads, under 200 MB, under 5 s when nothing changed,
-                          one report; and a folder of packages made to cost memory
-                          under 600 MB at 1 thread and 1.5 GB at one per core.
+                          one report; a folder of packages made to cost memory
+                          under 600 MB at 1 thread and 1.5 GB at one per core, and
+                          the same packages with DEX files of zeros under 150 MB.
                           Without a PATH: the apps installed on this machine.
                           --strict: no gate may be skipped
+  difftest [--base REV | --base-bin FILE] [--keep] [--expect-changes] [PATH...]
+                          build REV (default origin/main) and the working tree, scan
+                          the committed fixtures, a corpus made from the rule pack and
+                          each PATH with both, without the cache, on one thread and
+                          with the cache empty and full, and fail unless every report
+                          equals the base build's (scanner.version aside);
+                          --expect-changes: list the differences and succeed
 ";
 
 fn main() -> ExitCode {
@@ -79,6 +88,7 @@ fn main() -> ExitCode {
         ["audit-symbols", file] => symbols::report(Path::new(file)),
         ["netprobe"] => return net::probe(),
         ["bench", rest @ ..] => bench::run_all(rest),
+        ["difftest", rest @ ..] => difftest::run(rest),
         ["repro"] => repro::run("HEAD"),
         ["repro", rev] => repro::run(rev),
         _ => {

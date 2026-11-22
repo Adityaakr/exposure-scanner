@@ -27,10 +27,11 @@
 //! the scan is given a folder to keep it in.
 //!
 //! **One schedule for the whole scan** (design report, section 6.2). The
-//! files of every bundle and every package go into one list, largest first,
-//! and each is one task ([`schedule`]). The few files that hold most of the
-//! bytes therefore start at once on separate threads, whichever artifacts
-//! they belong to. A file is read once, in windows of 1 MiB ([`read`]), so
+//! files of every bundle and every package go into one queue, and each is
+//! one task ([`schedule`]): large files largest first, small files in a lane
+//! of their own beside them. The few files that hold most of the bytes
+//! therefore start at once on separate threads, whichever artifacts they
+//! belong to. A file is read once, in windows of 1 MiB ([`read`]), so
 //! what a scan holds in memory does not grow with the size of what it reads.
 //!
 //! **An artifact that has not changed is not read again** ([`cache`]). Its
@@ -269,12 +270,12 @@ fn collect<'c>(
     cache: Option<&'c Cache>,
 ) -> Result<(EvidenceSet, ScanStats), EvidenceError> {
     // Listing is stat-bound and independent per artifact.
-    let bundles: Vec<Listed<'c, macos::Plan>> = pool.map(&found.bundles, |root| {
+    let bundles: Vec<Listed<'c, macos::Plan>> = pool.map_io(&found.bundles, |root| {
         let plan = macos::plan(root);
         let slot = cache.map(|cache| cache.slot(Kind::Bundle, root, plan.state()));
         Listed::new(plan, slot)
     });
-    let packages: Vec<Listed<'c, u64>> = pool.map(&found.packages, |path| {
+    let packages: Vec<Listed<'c, u64>> = pool.map_io(&found.packages, |path| {
         // A package that cannot even be measured is found out when it is
         // read; where it stands in the queue until then does not matter.
         let metadata = fs::metadata(path).ok();
@@ -364,7 +365,9 @@ fn collect<'c>(
     }
     if cache.is_some() {
         // One small file per artifact that was read, each on its own.
-        pool.map(&artifacts, |(result, slot)| slot.as_ref().is_some_and(|slot| slot.store(result)));
+        pool.map_io(&artifacts, |(result, slot)| {
+            slot.as_ref().is_some_and(|slot| slot.store(result))
+        });
     }
 
     let mut evidence = EvidenceSet::new();

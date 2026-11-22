@@ -40,7 +40,18 @@ version can change commands, the report format or the evidence format.
   the readers a macOS app reaches first: Mach-O, code signatures, property
   lists and asar archives.
 - **A hostile-folder memory gate** in `cargo xtask bench`, on a folder of
-  crafted packages that inflate to gigabytes.
+  crafted packages that inflate to gigabytes, and a second one on the same
+  packages with DEX files of zeros, which hold nothing to read: under 150 MB
+  at one thread per core.
+- **`cargo xtask difftest`**: builds a base commit (by default
+  `origin/main`) and the working tree, scans the committed fixtures, a corpus
+  it writes from the rule pack's own tokens (bundles with files on both sides
+  of every read size, damaged and hostile packages) and any path given with
+  both, and fails unless every report of the new build is the base build's,
+  byte for byte: without the cache, on one thread, and with the cache empty
+  and full. CI runs it on every change against the commit the change goes
+  onto, with the pinned real apps and the negative-control apps, and on
+  macOS. A change meant to change what is reported passes `--expect-changes`.
 
 ### Changed
 
@@ -88,6 +99,27 @@ version can change commands, the report format or the evidence format.
   renamed into place, so a scan that stops leaves no half of a report. See
   [the threat model](docs/threat-model.md).
 - Rule pack version 8.
+- **Faster scans, with the same reports**, measured on an Apple M5 against
+  the build before, on the same day and apps. The 16 installed apps and 8
+  extensions (6.85 GB): 7.32 s on one thread against 9.04 s, 1.63 s on eight
+  against 1.96 s, and 1.63 s for the first scan against 2.10 s. Electron
+  apps, whose scripts are searched, gain most: three of them in 0.41 s
+  against 0.70 s. The search is built as a DFA instead of a contiguous NFA,
+  so it costs less than half as much. Files are started truly largest
+  first. Small files are read on at most four threads at once on macOS,
+  where more threads make them slower: a folder of 102,161 files, all but
+  80 of them small, reads in 1.1 s on four threads against 2.2 to 2.5 s on
+  ten, which spend several times the system time. They are read beside the
+  large files rather than after them. A script costs one read call fewer,
+  and a file one size query fewer. See
+  [the architecture](docs/architecture.md#scheduling).
+- **Less memory for Android packages**: a DEX file whose header alone
+  decides what it holds, such as one of zeros made to inflate to 255 MiB,
+  is checked to the end of its stream in a window of memory instead of
+  inflated whole (24 such packages: 22 MB at ten threads against 1,091 MB),
+  and a resource table that comes after its manifest is not kept for the
+  app's name: 30 real packages take 228 MB at ten threads against 264 MB,
+  and 27 MB at one against 35 MB.
 
 ### Fixed
 

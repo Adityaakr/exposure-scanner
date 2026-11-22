@@ -504,8 +504,8 @@ flowchart TD
 | `exposure` | The command-line binary | std |
 | `xtask` | Developer tooling; never shipped | anything |
 
-A scan of 16 installed apps and 8 browser extensions (11,669 files, 6.8 GB)
-takes 1.4 s on 8 threads of an Apple M5, with a peak of 40 MB of memory, and
+A scan of 16 installed apps and 8 browser extensions (10,760 files, 6.85 GB)
+takes 1.6 s on 8 threads of an Apple M5, with a peak of 41 MB of memory, and
 0.11 s when the cache finds that no app has changed.
 
 Details: [Architecture](docs/architecture.md): the pipeline, file reading,
@@ -544,7 +544,7 @@ benchmark on the fixtures for its memory and determinism gates.
 | **Does not cry wolf** | No channel to another company than the app's publisher, at any grade, in a negative control | `negative_corpus`: 30 real apps pinned by hash, 15 for Android and 15 for macOS, including hard negatives: a browser that embeds Chromium (Cromite), two ad blockers (RethinkDNS, personalDNSfilter), Electron apps (VSCodium, Bitwarden desktop), an app whose bundled data names dozens of SDKs (TrackerControl), and one whose bundled documentation holds an analytics snippet (Bitwarden desktop). An app's own update feed is allowed even when another company, such as GitHub, hosts it | A subset of 8 on every change; all 30 nightly |
 | **Deterministic** | Same evidence and rule pack give a byte-identical report | Input order (sorted, reversed, shuffled), thread count, install location and cache state (off, empty, full, damaged); committed fixture reports reproduce on Linux and macOS | Every change |
 | **Private** | No socket opened during a scan | Dependency bans, symbol audit, network namespace, `strace`, macOS sandbox, each with a control that must be caught | Every change |
-| **Fast** | Cold scan under 60 s, warm scan under 5 s, memory under 200 MB, 3x at 8 threads | `cargo xtask bench --strict` on the apps installed on the reference laptop (an Apple M5): 16 apps and 8 extensions, 6.8 GB, read in 1.44 s with an empty results cache and in 0.11 s with nothing changed, 40 MB at most, 4.25x at 8 threads, one report across 17 runs (measured 2026-11-18 with the page cache warm: dropping it needs `sudo`). CI runs the benchmark on the fixtures for its memory and determinism gates | Memory and determinism every change; timing gates on the reference laptop before a release |
+| **Fast** | Cold scan under 60 s, warm scan under 5 s, memory under 200 MB, 3x at 8 threads | `cargo xtask bench --strict` on the apps installed on the reference laptop (an Apple M5): 16 apps and 8 extensions, 6.85 GB, read in 1.63 s with an empty results cache and in 0.11 s with nothing changed, 41 MB at most, 4.48x at 8 threads, one report across 17 runs (measured 2026-11-22; the page cache was not dropped, which needs `sudo`, and does not hold all of the apps). CI runs the benchmark on the fixtures for its memory and determinism gates | Memory and determinism every change; timing gates on the reference laptop before a release |
 | **Honest** | Every finding shows its grade and the raw record behind it | A report that cites a missing record fails to render; the HTML page is read back to find every claim's grade, confidence and records | Every change |
 
 Parsers also run under property tests with arbitrary and damaged input. The

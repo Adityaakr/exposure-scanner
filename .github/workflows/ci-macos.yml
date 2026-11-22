@@ -34,6 +34,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The differential test builds the commit before this one.
+          fetch-depth: 0
 
       - name: Install the pinned toolchain
         run: rustup toolchain install || rustup show
@@ -55,3 +57,18 @@ jobs:
 
       - name: A scan opens no socket
         run: cargo xtask no-network --strict
+
+      # macOS schedules small files on fewer threads than other systems
+      # (xs-collect/src/schedule.rs), so the reports of the two builds are
+      # compared here too, over the committed fixtures and the corpus made
+      # from the rule pack. See ci.yml.
+      - name: Every report is the base commit's
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: |
+          trap 'rm -rf target/difftest' EXIT
+          expect=""
+          if ! git diff --quiet "$BASE" HEAD -- rules ':(glob)tests/fixtures/**/*.report.*'; then
+            expect="--expect-changes"
+          fi
+          cargo xtask difftest --base "$BASE" $expect
