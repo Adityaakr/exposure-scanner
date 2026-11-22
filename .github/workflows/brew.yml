@@ -58,7 +58,7 @@ jobs:
           else
             echo "::notice::$tag is not tagged yet: building this commit under that tag"
             git tag "$tag" HEAD
-            sed -i '' "s|^  url \"https://github.com/Adityaakr/exposure-scanner.git\"|  url \"file://$GITHUB_WORKSPACE\"|" "$tap/Formula/exposure.rb"
+            sed -i '' "s|^  url \"https://github.com/Adityaakr/exposure-scanner.git\"|  url \"file://$GITHUB_WORKSPACE\", using: :git|" "$tap/Formula/exposure.rb"
             grep -n '^  url' "$tap/Formula/exposure.rb"
           fi
           brew install --build-from-source "$formula"
