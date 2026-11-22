@@ -24,6 +24,8 @@ const FULL_DISK_ACCESS: &str = "allow your terminal app under System Settings > 
 /// One thing the scan could not look at at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotChecked {
+    /// What kind of thing was not checked.
+    pub kind: SubjectKind,
     /// The browser whose extensions were not checked, if it is one.
     pub browser: Option<Browser>,
     /// What was not checked, such as `Google Chrome's extensions`, or the
@@ -51,12 +53,14 @@ impl NotChecked {
 
 /// The subjects of `evidence` the scan could not look at at all: those with
 /// a coverage record about the whole of them, for want of a privilege or
-/// because the read was refused. A browser some of whose extensions were
-/// read says so. In the order of the subjects.
+/// because the read was refused, and no artifact record, which a subject
+/// the scan did read has. A browser some of whose extensions were read says
+/// so. In the order of the subjects.
 #[must_use]
 pub fn not_checked(evidence: &EvidenceSet) -> Vec<NotChecked> {
     let mut refused: BTreeMap<(SubjectKind, Platform, &str), CoverageReason> = BTreeMap::new();
     let mut read: BTreeSet<Browser> = BTreeSet::new();
+    let mut artifacts: BTreeSet<(SubjectKind, Platform, &str)> = BTreeSet::new();
     for (_, record) in evidence.iter() {
         match record {
             Record::Coverage(note)
@@ -75,6 +79,8 @@ pub fn not_checked(evidence: &EvidenceSet) -> Vec<NotChecked> {
                 }
             }
             Record::Artifact(artifact) => {
+                let subject = &artifact.subject;
+                artifacts.insert((subject.kind, subject.platform, subject.id.as_str()));
                 if let Some(browser) = artifact.facts.browser {
                     read.insert(browser);
                 }
@@ -84,10 +90,12 @@ pub fn not_checked(evidence: &EvidenceSet) -> Vec<NotChecked> {
     }
     refused
         .into_iter()
+        .filter(|(key, _)| !artifacts.contains(key))
         .map(|((kind, _, id), reason)| {
             let privilege = reason == CoverageReason::NoPrivilege;
             match (kind, Browser::from_id(id)) {
                 (SubjectKind::Browser, Some(browser)) => NotChecked {
+                    kind,
                     browser: Some(browser),
                     what: if read.contains(&browser) {
                         format!("some of {}'s extensions", browser.name())
@@ -101,7 +109,19 @@ pub fn not_checked(evidence: &EvidenceSet) -> Vec<NotChecked> {
                     },
                     step: privilege.then(|| format!("To include them, {FULL_DISK_ACCESS}.")),
                 },
+                (SubjectKind::Extension, _) => NotChecked {
+                    kind,
+                    browser: None,
+                    what: format!("the extension {id}"),
+                    why: if privilege {
+                        "macOS did not let the scan read it."
+                    } else {
+                        "Its files are missing or could not be read."
+                    },
+                    step: privilege.then(|| format!("To include it, {FULL_DISK_ACCESS}.")),
+                },
                 _ => NotChecked {
+                    kind,
                     browser: None,
                     what: String::from(id),
                     why: if privilege {
@@ -206,6 +226,58 @@ mod tests {
         assert_eq!(found[0].why, "Its profile folder could not be read.");
         assert_eq!(found[0].step, None);
         assert_eq!(unread_browsers(&found), []);
+    }
+
+    fn subject(kind: SubjectKind, platform: Platform, id: &str, digest: SubjectDigest) -> Subject {
+        Subject { kind, platform, id: id.to_string(), version: None, digest }
+    }
+
+    fn refused(subject: Subject, collector: Collector) -> Record {
+        Record::Coverage(CoverageRecord {
+            v: V1,
+            collector,
+            subject,
+            status: CoverageStatus::Skipped,
+            reason: CoverageReason::Unreadable,
+            location: None,
+            bytes: None,
+            count: 1,
+        })
+    }
+
+    #[test]
+    fn an_app_that_was_read_is_not_named_for_a_name_it_could_not_store() {
+        let app = subject(
+            SubjectKind::App,
+            Platform::Macos,
+            "com.example.App",
+            SubjectDigest::Bundle(Sha256Digest::of(b"app")),
+        );
+        let found = not_checked(&set([
+            Record::Artifact(ArtifactRecord {
+                v: V1,
+                collector: Collector::MacosBundle,
+                subject: app.clone(),
+                facts: Facts { name: Some("Example".into()), ..Facts::default() },
+            }),
+            refused(app, Collector::MacosBundle),
+        ]));
+        assert_eq!(found, []);
+    }
+
+    #[test]
+    fn an_extension_none_of_which_was_read_is_named_as_an_extension() {
+        let id = "abcdefghijklmnopabcdefghijklmnop";
+        let unread = subject(SubjectKind::Extension, Platform::Chromium, id, SubjectDigest::Unread);
+        let found = not_checked(&set([refused(unread, Collector::BrowserExtension)]));
+        assert_eq!(
+            found.iter().map(NotChecked::sentence).collect::<Vec<_>>(),
+            vec![
+                "the extension abcdefghijklmnopabcdefghijklmnop. Its files are missing or \
+                 could not be read."
+            ]
+        );
+        assert_eq!(found[0].kind, SubjectKind::Extension);
     }
 
     #[test]

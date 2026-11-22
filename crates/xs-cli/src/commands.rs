@@ -5,7 +5,7 @@ use std::io::{IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use xs_match::Matchers;
-use xs_model::record::Record;
+use xs_model::record::{Record, SubjectKind};
 use xs_model::report::{ScanScope, Scanner};
 use xs_model::{EvidenceSet, Headline, Pack, Report};
 use xs_render::{ReportMeta, Todo};
@@ -280,20 +280,26 @@ pub(crate) fn scan(args: &args::Scan) -> Result<Gate> {
 
 /// The lines of the terminal summary on standard error about what the scan
 /// could not look at at all, so that it is not read as clean (security
-/// review, M7). A browser is named; an app is not, and is counted, since
-/// these lines name no app.
+/// review, M7). A browser is named; an extension or an app is not, and is
+/// counted, since these lines name no extension or app.
 fn not_checked_lines(unchecked: &[xs_render::NotChecked]) -> Vec<String> {
     let mut lines: Vec<String> = unchecked
         .iter()
         .filter(|item| item.browser.is_some())
         .map(|item| format!("exposure: not checked: {}", item.sentence()))
         .collect();
-    let apps = unchecked.iter().filter(|item| item.browser.is_none()).count() as u64;
-    if apps > 0 {
-        lines.push(format!(
-            "exposure: not checked: {} that could not be read; the report names them",
-            plural(apps, "app"),
-        ));
+    for (extension, noun) in [(true, "extension"), (false, "app")] {
+        let count = unchecked
+            .iter()
+            .filter(|item| item.browser.is_none())
+            .filter(|item| (item.kind == SubjectKind::Extension) == extension)
+            .count() as u64;
+        if count > 0 {
+            lines.push(format!(
+                "exposure: not checked: {} that could not be read; the report names them",
+                plural(count, noun),
+            ));
+        }
     }
     lines
 }
@@ -683,6 +689,26 @@ mod tests {
         assert!(!report.html.as_deref().unwrap().contains("Not checked"));
         assert!(!summary(&report, "0 apps", page, false).contains("Not checked"));
         assert!(not_checked_lines(&report.unchecked).is_empty());
+    }
+
+    #[test]
+    fn extensions_and_apps_not_checked_are_counted_apart() {
+        let item = |kind| xs_render::NotChecked {
+            kind,
+            browser: None,
+            what: String::from("x"),
+            why: "y",
+            step: None,
+        };
+        let unchecked =
+            [item(SubjectKind::Extension), item(SubjectKind::Extension), item(SubjectKind::App)];
+        assert_eq!(
+            not_checked_lines(&unchecked),
+            [
+                "exposure: not checked: 2 extensions that could not be read; the report names them",
+                "exposure: not checked: 1 app that could not be read; the report names them",
+            ]
+        );
     }
 
     #[test]

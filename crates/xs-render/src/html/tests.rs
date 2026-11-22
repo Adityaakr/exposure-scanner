@@ -1992,6 +1992,9 @@ fn an_entry_says_when_it_rests_on_text_alone() {
 /// says so, on the page and in the terminal.
 #[test]
 fn every_step_that_removes_an_extension_warns_of_what_it_deletes() {
+    const WARNING: &str = "Removing an extension deletes what it keeps in this browser. For a \
+                           wallet or a password manager, make sure you have its recovery phrase \
+                           or an export first.";
     let (pack, evidence) = (advised_pack(), evidence_with_access());
     let claims = claims(&evidence, &pack);
     let root = render(&claims, &evidence, &meta(&pack), &pack);
@@ -2007,7 +2010,7 @@ fn every_step_that_removes_an_extension_warns_of_what_it_deletes() {
     for text in &removes {
         let (step, warning) = text.split_once(". Removing").unwrap_or_else(|| panic!("{text}"));
         assert!(step.contains("choose Remove"), "{text}");
-        assert_eq!(format!("Removing{warning}"), super::advice::REMOVE_WARNING, "{text}");
+        assert_eq!(format!("Removing{warning}"), WARNING, "{text}");
     }
 
     let todos = super::checklist(&claims, &evidence, &meta(&pack), &pack).unwrap();
@@ -2019,7 +2022,7 @@ fn every_step_that_removes_an_extension_warns_of_what_it_deletes() {
     assert_eq!(steps.len(), 2, "{todos:?}");
     for step in steps {
         assert!(step.contains("remove it") || step.starts_with("Remove it"), "{step}");
-        assert!(step.ends_with(super::advice::REMOVE_WARNING), "{step}");
+        assert!(step.ends_with(WARNING), "{step}");
     }
 }
 
