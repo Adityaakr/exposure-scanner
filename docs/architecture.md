@@ -79,7 +79,7 @@ flowchart TD
 | `xs-render` | Claims and evidence in, report out: the JSON document and the HTML page | `no_std` |
 | `xs-collect` | Discovery, scheduling, reading and the results cache, one module per collector | std |
 | `exposure` (`crates/xs-cli`) | The `exposure` binary | std |
-| `xtask` | Developer tooling: pack compile and sign, guardrails, no-network checks, benchmark, fixtures. Never shipped | anything |
+| `xtask` | Developer tooling: pack compile and sign, guardrails, no-network checks, benchmark, differential test, fixtures. Never shipped | anything |
 
 `fuzz/` holds the fuzz targets. It is a workspace of its own, because it
 needs a nightly toolchain and the libFuzzer runtime.

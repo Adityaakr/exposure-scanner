@@ -27,10 +27,11 @@
 //! the scan is given a folder to keep it in.
 //!
 //! **One schedule for the whole scan** (design report, section 6.2). The
-//! files of every bundle and every package go into one list, largest first,
-//! and each is one task ([`schedule`]). The few files that hold most of the
-//! bytes therefore start at once on separate threads, whichever artifacts
-//! they belong to. A file is read once, in windows of 1 MiB ([`read`]), so
+//! files of every bundle and every package go into one queue, and each is
+//! one task ([`schedule`]): large files largest first, small files in a lane
+//! of their own beside them. The few files that hold most of the bytes
+//! therefore start at once on separate threads, whichever artifacts they
+//! belong to. A file is read once, in windows of 1 MiB ([`read`]), so
 //! what a scan holds in memory does not grow with the size of what it reads.
 //!
 //! **An artifact that has not changed is not read again** ([`cache`]). Its
