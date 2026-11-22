@@ -5,8 +5,9 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#020403">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#020403" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef2ef" media="(prefers-color-scheme: light)">
 <title>exposure: see whose code is inside your apps</title>
 <meta name="description" content="exposure is a free, open-source scanner that reads the apps on your Mac and the Android packages you give it, finds the analytics, advertising and crash-reporting SDKs they ship, and names the company behind each one, with the evidence. It runs on your machine and has no network code.">
 <meta property="og:type" content="website">
@@ -37,7 +38,9 @@
     </a>
     <nav aria-label="Main">
       <ul class="nav">
+        <li class="wider"><a href="#start">Start here</a></li>
         <li><a href="#install">Steps</a></li>
+        <li class="wider"><a href="#developers">Developers</a></li>
         <li class="wide"><a href="#how">How it works</a></li>
         <li class="wide"><a href="#trust">Privacy</a></li>
         <li class="mid"><a href="sample/">Sample</a></li>
@@ -45,6 +48,7 @@
         <li><a class="gh" href="https://github.com/Adityaakr/exposure-scanner" aria-label="exposure on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
       </ul>
     </nav>
+    <button class="theme-toggle" type="button" aria-label="Switch to the light theme" title="Switch to the light theme"><svg class="to-light" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="2.75"/><path d="M8 1.25v1.5M8 13.25v1.5M1.25 8h1.5M13.25 8h1.5M3.23 3.23l1.06 1.06M11.71 11.71l1.06 1.06M3.23 12.77l1.06-1.06M11.71 4.29l1.06-1.06"/></svg><svg class="to-dark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M13.6 9.9A5.9 5.9 0 0 1 6.1 2.4a5.9 5.9 0 1 0 7.5 7.5z"/></svg></button>
   </div>
 </header>
 
@@ -52,29 +56,77 @@
 
 <!-- The hero: the claim, what the tests show, and a real scan -->
 <section class="hero" aria-labelledby="hero-title">
-  <p class="kicker"><span class="blip" aria-hidden="true"></span><a href="https://github.com/Adityaakr/exposure-scanner/blob/main/CHANGELOG.md">v0.2.0</a><span class="sep" aria-hidden="true">//</span><span>Free, open source, offline</span></p>
-  <h1 id="hero-title" data-type>See whose code is inside your apps.</h1>
-  <p class="lede">Every SDK an app ships, the company behind it, and the file that proves it. exposure runs on your machine, and it has no network code at all.</p>
-  <div class="actions">
-    <a class="btn btn-primary" href="#install">Install and scan</a>
-    <a class="btn btn-secondary" href="sample/">See a real report</a>
-  </div>
+  <div class="hero-grid">
+    <div class="hero-copy">
+      <p class="kicker"><span class="blip" aria-hidden="true"></span><a href="https://github.com/Adityaakr/exposure-scanner/blob/main/CHANGELOG.md">v0.2.0</a><span class="sep" aria-hidden="true">//</span><span>Free, open source, offline</span></p>
+      <h1 id="hero-title" data-type>See whose code is inside your apps.</h1>
+      <p class="lede">Every SDK an app ships, the company behind it, and the file that proves it. exposure runs on your machine, and it has no network code at all.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="#install">Install and scan</a>
+        <a class="btn btn-secondary" href="sample/">See a real report</a>
+      </div>
 
-  <div class="trace" role="group" aria-label="What the tests show">
-    <p class="trace-head"><span>What the tests show</span><span class="live">offline</span></p>
-    <dl>
-      <div><dt>SDK rules, signed, each marker citing the vendor's own code or docs</dt><dd>48</dd></div>
-      <div><dt>planted markers found by the canary test</dt><dd>231<small> / 231</small></dd></div>
-      <div><dt>real apps with no third-party SDK come back clean</dt><dd>30<small> / 30</small></dd></div>
-      <div><dt>sockets opened, because there is no network code</dt><dd>0</dd></div>
-    </dl>
-  </div>
+      <div class="trace" role="group" aria-label="What the tests show">
+        <p class="trace-head"><span>What the tests show</span><span class="live">offline</span></p>
+        <dl>
+          <div><dt>SDK rules, signed, each marker citing the vendor's own code or docs</dt><dd>48</dd></div>
+          <div><dt>planted markers found by the canary test</dt><dd>231<small> / 231</small></dd></div>
+          <div><dt>real apps with no third-party SDK come back clean</dt><dd>30<small> / 30</small></dd></div>
+          <div><dt>sockets opened, because there is no network code</dt><dd>0</dd></div>
+        </dl>
+      </div>
+    </div>
 
-  <div class="term" data-play role="group" aria-label="Terminal: exposure scanning two test apps">
-    <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
+    <div class="hero-run">
+      <div class="term" data-play role="group" aria-label="Terminal: exposure scanning two test apps">
+        <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
 <pre class="lines"><span class="ln"><span class="c"># two synthetic test apps from the repository</span></span><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk macos/ElectronSkeleton.app</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 2 apps.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (1 of 2 things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics by PostHog Inc., in ElectronSkeleton and Skeleton. In</span><span class="ln i7">ElectronSkeleton: found as text in the app's code (one kind of evidence),</span><span class="ln i7">not as a name read from a table the app declares.</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with an outbound firewall such as LuLu (free) or Little</span><span class="ln i7">Snitch.</span><span class="ln"> </span><span class="ln">1 more entry in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">2</span> apps with code or an endpoint of a company other than their publisher</span><span class="ln i2">and beside these: 1 SDK of 1 company in the Android apps, in categories the</span><span class="ln i2">headline does not count</span></pre>
+      </div>
+      <p class="note">Real output of exposure 0.2.0 on two synthetic test apps from the repository. <a href="sample/">Open the report it is from</a>.</p>
+    </div>
   </div>
-  <p class="note">Real output of exposure 0.2.0 on two synthetic test apps from the repository. <a href="sample/">Open the report it is from</a>.</p>
+</section>
+
+<!-- In plain words, for anyone who uses a Mac -->
+<section class="sec story plain" id="start" aria-labelledby="start-title">
+  <div class="sec-head"><span class="idx">00</span>Start here</div>
+  <h2 id="start-title" data-type>What it does, <span class="em">in plain words</span>.</h2>
+  <p>You do not need to be a developer to use exposure. If you can copy a line of text into the Terminal app on your Mac, you can run it and read what it finds.</p>
+  <div class="plain-points">
+    <div>
+      <h3>What it tells you</h3>
+      <p>Most apps are built partly from code made by other companies: to show ads, to measure how people use the app, or to report crashes. exposure looks inside the apps on your Mac and lists the companies whose code each one carries, with where it found it. It also points out browser extensions that may read the websites you visit.</p>
+    </div>
+    <div>
+      <h3>Why it matters</h3>
+      <p>Each piece of that code is a way for an app to pass information to a company you may never have heard of, and nothing on your Mac lists them. An app's privacy label is written by the app's maker; exposure checks the app itself. Finding the code does not prove it sends anything, but it shows you where to look and what you can do.</p>
+    </div>
+  </div>
+  <ul class="promises" aria-label="In short">
+    <li>Runs on your Mac</li>
+    <li>Sends nothing anywhere</li>
+    <li>Changes nothing</li>
+    <li>Free and open source</li>
+  </ul>
+
+  <ol class="plain-steps" aria-label="Three steps">
+    <li>
+      <h3>Install it, once</h3>
+      <p>Open Terminal: it is in Applications, in the Utilities folder. Copy the install commands for macOS from the steps below, paste them in and press Return. It is built on your Mac, and you only do this once.</p>
+      <a class="link-more" href="#install"><span>The install commands</span></a>
+    </li>
+    <li>
+      <h3>Run one command</h3>
+      <p>Type this in Terminal and press Return. It reads the apps in your Applications folders and the extensions in your browsers.</p>
+      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan</pre></div>
+    </li>
+    <li>
+      <h3>Open the report</h3>
+      <p>It opens in your browser by itself. Start at the top, with <strong>What needs your attention</strong>: each entry says what was found, in which app, and the first thing you can do, such as a setting to turn off, an address to block or an app you can do without.</p>
+      <a class="link-more" href="sample/"><span>See a sample report</span></a>
+    </li>
+  </ol>
+  <p class="fine">It runs on macOS, and on Linux, where you name what to scan. It does not run on Windows or on a phone. The report lists the apps you use, so it is kept in a folder only you can read; you decide what to do about each entry.</p>
 </section>
 
 <!-- What it does -->
@@ -83,40 +135,42 @@
   <h2 id="what-title" data-type>It names the company, and shows <span class="em">the bytes that prove it</span>.</h2>
   <p>Analytics, advertising, attribution, session-replay and crash-reporting SDKs sit inside the apps you use. Each one is a channel from an app to a company you may never have heard of, and nothing on your computer lists them.</p>
   <p><strong>exposure</strong> reads the apps on your Mac and the Android packages you give it, finds the SDKs they ship, and names the company behind each one. Every finding has a grade and cites its raw records: the marker, the file, how many times.</p>
-  <figure class="scene">
-    <ol class="tree reveal" aria-label="One marker traced from an app bundle to a company">
-      <li><code>ElectronSkeleton.app</code><span>the app bundle</span></li>
-      <li><code>Contents/Resources/app.asar</code><span>its archive, read without unpacking it to disk</span></li>
-      <li><code>main.js</code><span>the app's own script</span></li>
-      <li class="hit"><code>app.posthog.com</code><span>a marker the SDK cannot avoid leaving</span><p class="to"><span class="grade g-contains">contains</span><strong>PostHog</strong>, analytics, by PostHog Inc.</p></li>
-    </ol>
-    <figcaption class="cap">one marker, from the bundle down to the company, in a test app from the repository</figcaption>
-  </figure>
-  <figure class="scene">
-    <article class="finding-card" aria-label="A finding from the sample report">
-      <div class="fc-company"><strong>PostHog Inc.</strong> <span class="tag counted">counted in the summary</span></div>
-      <p class="fc-app">ElectronSkeleton · <code>org.example.exposure.electron-skeleton</code> · macOS</p>
-      <div class="fc-sdk"><strong>PostHog</strong> <span class="tag">Analytics</span></div>
-      <p class="fc-graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
-      <dl class="fc-facts">
-        <dt>Confidence</dt><dd>medium: text found in the app's own code</dd>
-        <dt>Party</dt><dd>Third party: not this app's publisher</dd>
-      </dl>
-      <p class="fc-ev-head">Evidence: 1 record</p>
-      <ul class="fc-ev">
-        <li>
-          <p class="what">Text in a script</p>
-          <dl class="fc-facts">
-            <dt>Marker</dt><dd><code>app.posthog.com</code></dd>
-            <dt>Found in</dt><dd><code>Contents/Resources/app.asar</code>, in the contents of its files</dd>
-            <dt>Example</dt><dd><code>main.js</code></dd>
-            <dt>Record</dt><dd><a href="sample/report.html#r-19326b8ab37f26675dbddb06366e72f901cbf62bd6ddbe840a7333b47b57857c">sha256:19326b8ab37f…</a></dd>
-          </dl>
-        </li>
-      </ul>
-    </article>
-    <figcaption class="cap">the same finding, as the report writes it</figcaption>
-  </figure>
+  <div class="duo">
+    <figure class="scene">
+      <ol class="tree reveal" aria-label="One marker traced from an app bundle to a company">
+        <li><code>ElectronSkeleton.app</code><span>the app bundle</span></li>
+        <li><code>Contents/Resources/app.asar</code><span>its archive, read without unpacking it to disk</span></li>
+        <li><code>main.js</code><span>the app's own script</span></li>
+        <li class="hit"><code>app.posthog.com</code><span>a marker the SDK cannot avoid leaving</span><p class="to"><span class="grade g-contains">contains</span><strong>PostHog</strong>, analytics, by PostHog Inc.</p></li>
+      </ol>
+      <figcaption class="cap">one marker, from the bundle down to the company, in a test app from the repository</figcaption>
+    </figure>
+    <figure class="scene">
+      <article class="finding-card" aria-label="A finding from the sample report">
+        <div class="fc-company"><strong>PostHog Inc.</strong> <span class="tag counted">counted in the summary</span></div>
+        <p class="fc-app">ElectronSkeleton · <code>org.example.exposure.electron-skeleton</code> · macOS</p>
+        <div class="fc-sdk"><strong>PostHog</strong> <span class="tag">Analytics</span></div>
+        <p class="fc-graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+        <dl class="fc-facts">
+          <dt>Confidence</dt><dd>medium: text found in the app's own code</dd>
+          <dt>Party</dt><dd>Third party: not this app's publisher</dd>
+        </dl>
+        <p class="fc-ev-head">Evidence: 1 record</p>
+        <ul class="fc-ev">
+          <li>
+            <p class="what">Text in a script</p>
+            <dl class="fc-facts">
+              <dt>Marker</dt><dd><code>app.posthog.com</code></dd>
+              <dt>Found in</dt><dd><code>Contents/Resources/app.asar</code>, in the contents of its files</dd>
+              <dt>Example</dt><dd><code>main.js</code></dd>
+              <dt>Record</dt><dd><a href="sample/report.html#r-19326b8ab37f26675dbddb06366e72f901cbf62bd6ddbe840a7333b47b57857c">sha256:19326b8ab37f…</a></dd>
+            </dl>
+          </li>
+        </ul>
+      </article>
+      <figcaption class="cap">the same finding, as the report writes it</figcaption>
+    </figure>
+  </div>
   <p>Privacy labels are written by the publisher. Online scanners want the app uploaded. exposure reads the app itself, on your machine, and shows you where it looked.</p>
   <p class="fine"><span class="grade g-contains">contains</span> means the code is present, not that it runs or sends anything. A clean report does not mean a clean app: an SDK with no rule is not reported.</p>
 </section>
@@ -151,49 +205,57 @@
   <ol class="steps">
     <li class="step" id="step-install" data-os="mac linux android">
       <h3>Install exposure</h3>
-      <div data-os="mac">
-        <p class="os-only">macOS</p>
-        <p>Apple's command-line tools, Rust 1.97 or later, then one <code>cargo install</code>. exposure is built from source on your machine, so you can read the code it runs.</p>
-        <div class="code" data-copy><pre><span class="p">$ </span>xcode-select --install
+      <div class="step-body">
+        <div data-os="mac">
+          <p class="os-only">macOS</p>
+          <p>Apple's command-line tools, Rust 1.97 or later, then one <code>cargo install</code>. exposure is built from source on your machine, so you can read the code it runs.</p>
+          <div class="code" data-copy><pre><span class="p">$ </span>xcode-select --install
 <span class="p">$ </span>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 <span class="p">$ </span>source "$HOME/.cargo/env"
 <span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.2.0 exposure</pre></div>
-      </div>
-      <div data-os="linux android">
-        <p class="os-only">Linux, or a computer for Android packages</p>
-        <p data-os="linux">Rust 1.97 or later, then one <code>cargo install</code>. Rust needs a C linker, which your distribution's compiler package provides. exposure is built from source on your machine, so you can read the code it runs.</p>
-        <p data-os="android">On the Mac or Linux machine: Rust 1.97 or later, then one <code>cargo install</code>. On a Mac, run <code>xcode-select --install</code> first.</p>
-        <div class="code" data-copy><pre><span class="p">$ </span>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+        </div>
+        <div data-os="linux android">
+          <p class="os-only">Linux, or a computer for Android packages</p>
+          <p data-os="linux">Rust 1.97 or later, then one <code>cargo install</code>. Rust needs a C linker, which your distribution's compiler package provides. exposure is built from source on your machine, so you can read the code it runs.</p>
+          <p data-os="android">On the Mac or Linux machine: Rust 1.97 or later, then one <code>cargo install</code>. On a Mac, run <code>xcode-select --install</code> first.</p>
+          <div class="code" data-copy><pre><span class="p">$ </span>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 <span class="p">$ </span>source "$HOME/.cargo/env"
 <span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.2.0 exposure</pre></div>
-      </div>
-      <p class="shows">What it prints</p>
-      <div class="term" data-play role="group" aria-label="Terminal: checking the installed version">
-        <div class="term-bar"><span class="term-title">the build takes a minute or two, then exposure is in ~/.cargo/bin</span></div>
+        </div>
+        <p class="shows">What it prints</p>
+        <div class="term" data-play role="group" aria-label="Terminal: checking the installed version">
+          <div class="term-bar"><span class="term-title">the build takes a minute or two, then exposure is in ~/.cargo/bin</span></div>
 <pre class="lines"><span class="ln"><span class="p">$ </span><span class="cmd">exposure --version</span></span><span class="ln">exposure 0.2.0</span></pre>
-      </div>
-      <p>Or, on macOS or Linux, with Homebrew, from the repository's own tap. It builds the release from source too, and brings the Rust compiler for it:</p>
-      <div class="code" data-copy><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+        </div>
+        <p>Or, on macOS or Linux, with Homebrew, from the repository's own tap. It builds the release from source too, and brings the Rust compiler for it:</p>
+        <div class="code" data-copy><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
 <span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
-      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span><code>brew upgrade</code> installs the next release once the formula names it.</span></p>
+        <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span><code>brew upgrade</code> installs the next release once the formula names it.</span></p>
+      </div>
     </li>
 
     <li class="step" data-os="mac linux">
       <div data-os="mac">
         <p class="os-only">macOS</p>
         <h3>Scan every app on your Mac</h3>
-        <p>One command, nothing else. It reads the apps in <code>/Applications</code> and <code>~/Applications</code> and the extensions in your browser profiles, writes the report to a folder only you can read, prints what to do first, and opens the report in your browser. Apple's own apps in <code>/System/Applications</code> are left out unless you name that folder.</p>
-        <div class="code" data-copy><pre><span class="p">$ </span>exposure scan</pre></div>
-        <p class="shows">What it prints</p>
-        <div class="term" data-play role="group" aria-label="Terminal: the shape of what exposure scan prints">
-          <div class="term-bar"><span class="term-title">the shape of it: the numbers and names are your Mac's, and stay on it</span><span class="term-tag">exposure 0.2.0</span></div>
+        <div class="split">
+          <div class="split-main">
+            <p>One command, nothing else. It reads the apps in <code>/Applications</code> and <code>~/Applications</code> and the extensions in your browser profiles, writes the report to a folder only you can read, prints what to do first, and opens the report in your browser. Apple's own apps in <code>/System/Applications</code> are left out unless you name that folder.</p>
+            <div class="code" data-copy><pre><span class="p">$ </span>exposure scan</pre></div>
+            <ul class="points">
+              <li><strong>The counts</strong> are of companies and apps, never a score. Crash reporting and other services are listed in the report, not counted.</li>
+              <li><strong>What needs your attention first</strong> ranks steps by how much they matter: an app's own opt-out where one is documented, the hosts to block with a firewall, the System Settings pane for a permission. exposure applies none of them.</li>
+              <li><strong>The report</strong> replaces the one before at each scan. An app that has not changed since is not read again.</li>
+            </ul>
+          </div>
+          <div class="split-side">
+            <p class="shows">What it prints</p>
+            <div class="term" data-play role="group" aria-label="Terminal: the shape of what exposure scan prints">
+              <div class="term-bar"><span class="term-title">the shape of it: the numbers and names are your Mac's, and stay on it</span><span class="term-tag">exposure 0.2.0</span></div>
 <pre class="lines"><span class="ln"><span class="p">$ </span><span class="cmd">exposure scan</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned <span class="ph">n</span> apps.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (<span class="ph">n</span> of <span class="ph">n</span> things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="ph">the SDK</span></span><span class="ln i7"><span class="ph">its category</span> by <span class="ph">its company</span>, in <span class="ph">their names</span>.</span><span class="ln i7"><span class="ph">the first step to take</span></span><span class="ln"> </span><span class="ln"><span class="ph">n</span> more entries in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="ph">n</span> companies whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="ph">n</span> apps with code or an endpoint of a company other than their publisher</span><span class="ln"> </span><span class="ln">The report has every step and the evidence behind each finding. It lists apps</span><span class="ln">you use, so keep it private.</span></pre>
+            </div>
+          </div>
         </div>
-        <ul class="points">
-          <li><strong>The counts</strong> are of companies and apps, never a score. Crash reporting and other services are listed in the report, not counted.</li>
-          <li><strong>What needs your attention first</strong> ranks steps by how much they matter: an app's own opt-out where one is documented, the hosts to block with a firewall, the System Settings pane for a permission. exposure applies none of them.</li>
-          <li><strong>The report</strong> replaces the one before at each scan. An app that has not changed since is not read again.</li>
-        </ul>
       </div>
       <div data-os="linux">
         <p class="os-only">Linux</p>
@@ -206,39 +268,37 @@
 
     <li class="step" data-os="mac">
       <h3>Scan one app by its path</h3>
-      <p>Name an app, and only that app is scanned. Drag it from Finder into the terminal to paste its path. You can name several apps, or a folder, at once.</p>
-      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan /Applications/<span class="ph">YourApp</span>.app</pre></div>
-      <p class="shows">What it prints, for a test app from the repository</p>
-      <div class="term" data-play role="group" aria-label="Terminal: exposure scanning one test app">
-        <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
+      <div class="split">
+        <div class="split-main">
+          <p>Name an app, and only that app is scanned. Drag it from Finder into the terminal to paste its path. You can name several apps, or a folder, at once.</p>
+          <div class="code" data-copy><pre><span class="p">$ </span>exposure scan /Applications/<span class="ph">YourApp</span>.app</pre></div>
+        </div>
+        <div class="split-side">
+          <p class="shows">What it prints, for a test app from the repository</p>
+          <div class="term" data-play role="group" aria-label="Terminal: exposure scanning one test app">
+            <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
 <pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan macos/ElectronSkeleton.app</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 1 app.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (1 of 2 things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics by PostHog Inc., in ElectronSkeleton. Found as text in the</span><span class="ln i7">app's code (one kind of evidence), not as a name read from a table the</span><span class="ln i7">app declares.</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with an outbound firewall such as LuLu (free) or Little</span><span class="ln i7">Snitch.</span><span class="ln"> </span><span class="ln">1 more entry in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">1</span> app with code or an endpoint of a company other than their publisher</span></pre>
+          </div>
+        </div>
       </div>
     </li>
 
     <li class="step" data-os="mac linux android">
       <h3>Scan an Android app</h3>
-      <p>Name the package file: your own release build, or any <code>.apk</code> or Android App Bundle (<code>.aab</code>, the file uploaded to Google Play) you have. It is read where it is, on your computer: nothing is extracted to disk, nothing in it runs, and nothing is uploaded.</p>
-      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan ~/Downloads/<span class="ph">app-release</span>.apk</pre></div>
-      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan ~/Downloads/<span class="ph">app-release</span>.aab</pre></div>
-      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span>A bundle is scanned like the APKs it stands for: its manifest, its resources and the code of every module.</span></p>
-      <p class="shows">What it prints on a Mac, for a test package from the repository</p>
-      <div class="term" data-play role="group" aria-label="Terminal: exposure scanning a test Android package">
-        <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
+      <div class="split">
+        <div class="split-main">
+          <p>Name the package file: your own release build, or any <code>.apk</code> or Android App Bundle (<code>.aab</code>, the file uploaded to Google Play) you have. It is read where it is, on your computer: nothing is extracted to disk, nothing in it runs, and nothing is uploaded.</p>
+          <div class="code" data-copy><pre><span class="p">$ </span>exposure scan ~/Downloads/<span class="ph">app-release</span>.apk</pre></div>
+          <div class="code" data-copy><pre><span class="p">$ </span>exposure scan ~/Downloads/<span class="ph">app-release</span>.aab</pre></div>
+          <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span>A bundle is scanned like the APKs it stands for: its manifest, its resources and the code of every module.</span></p>
+        </div>
+        <div class="split-side">
+          <p class="shows">What it prints on a Mac, for a test package from the repository</p>
+          <div class="term" data-play role="group" aria-label="Terminal: exposure scanning a test Android package">
+            <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
 <pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 1 app.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (1 of 2 things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics by PostHog Inc., in Skeleton.</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with a firewall app that works without root, such as</span><span class="ln i7">NetGuard.</span><span class="ln"> </span><span class="ln">1 more entry in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">1</span> app with code or an endpoint of a company other than their publisher</span><span class="ln i2">and beside these: 1 SDK of 1 company in the Android apps, in categories the</span><span class="ln i2">headline does not count</span></pre>
-      </div>
-    </li>
-
-    <li class="step" data-os="mac linux android">
-      <h3>Compare two scans</h3>
-      <p>Save each scan as a JSON report. Then compare the two: which findings the new build adds, which it no longer has, and which changed grade, app by app. An app is followed from one build to the next by its platform and app id.</p>
-      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan --json old.json <span class="ph">app-1.0</span>.apk
-<span class="p">$ </span>exposure scan --json new.json <span class="ph">app-1.1</span>.apk</pre></div>
-      <div class="code" data-copy><pre><span class="p">$ </span>exposure diff old.json new.json</pre></div>
-      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span>With <code>--fail-on headline</code>, <code>exposure diff</code> exits with status 3 when the new build adds an SDK that counts in the headline: a release gate for CI.</span></p>
-      <p class="shows">What it prints: two scans of the test apps, the second with one app more</p>
-      <div class="term" data-play role="group" aria-label="Terminal: exposure diff comparing two scans">
-        <div class="term-bar"><span class="term-title">~/exposure-scanner</span><span class="term-tag">exposure 0.2.0</span></div>
-<pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure diff old.json new.json</span></span><span class="ln h2">ElectronSkeleton (macOS, org.example.exposure.electron-skeleton), 1.0.0: only in the new report</span><span class="ln i2 h2"><span class="add">+</span> PostHog (Analytics, PostHog Inc., counted in the headline): contains</span><span class="ln i2 h2"><span class="add">+</span> Sentry (Crash reporting, Functional Software, Inc. (Sentry)): contains</span><span class="ln"> </span><span class="ln">2 findings added, 0 findings removed, 0 findings changed grade, in 1 of 2 apps.</span></pre>
+          </div>
+        </div>
       </div>
     </li>
 
@@ -249,8 +309,7 @@
         <a class="btn btn-primary btn-sm" href="sample/">Open a sample report</a>
         <a class="link-more" href="docs/#reading">How to read a finding</a>
       </div>
-      <p>For a program, <code>--json -</code> prints the JSON report on standard output:</p>
-      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan ~/Downloads/<span class="ph">app-release</span>.apk --json -</pre></div>
+      <p>To compare two builds, gate a release in CI or read the report from a program, see <a href="#developers">For developers</a>.</p>
     </li>
   </ol>
 </section>
@@ -324,7 +383,7 @@
   <div class="sec-head"><span class="idx">04</span>A real scan</div>
   <h2 id="real-title" data-type>One Mac, sixteen apps, <span class="em">2.2 seconds</span>.</h2>
   <p>The maintainer's Mac, scanned on 22 November 2026 with exposure 0.1.0: 16 apps and 8 browser extensions, 10,756 files and 6.8 GB, with the cache off. Nothing left the machine. These are the companies it named, and in how many apps.</p>
-  <figure class="scene">
+  <figure class="scene scan">
     <ul class="bars reveal">
       <li class="bar-row">
         <div class="bar-top"><div class="bar-name"><strong>Sentry</strong><span class="soft">Functional Software, Inc.</span></div><span class="bar-n">10 <span class="soft">of 16</span></span></div>
@@ -360,9 +419,65 @@
   <p class="fine">App names are left out on purpose: the list of apps a person uses is sensitive in itself, which is why a report stays on your machine. The same scan also listed updater components (Squirrel in 6 apps, Sparkle in 5), which name no company, and 117 claims about what the apps and extensions may access.</p>
 </section>
 
+<!-- For developers: builds, CI and programs -->
+<section class="sec story dev" id="developers" aria-labelledby="dev-title">
+  <div class="sec-head"><span class="idx">05</span>For developers</div>
+  <h2 id="dev-title" data-type>Compare two builds, and <span class="em">gate a release</span>.</h2>
+  <p>For teams that ship apps: scan each build on a machine you control, keep the JSON report with your privacy review, compare it with the last release, and stop a release that adds an SDK your policy does not allow. Every command here works in exposure 0.2.0.</p>
+
+  <ol class="steps">
+    <li class="step">
+      <h3>Compare two scans</h3>
+      <div class="split">
+        <div class="split-main">
+          <p>Save each scan as a JSON report. Then compare the two: which findings the new build adds, which it no longer has, and which changed grade, app by app. An app is followed from one build to the next by its platform and app id.</p>
+          <div class="code" data-copy><pre><span class="p">$ </span>exposure scan --json old.json <span class="ph">app-1.0</span>.apk
+<span class="p">$ </span>exposure scan --json new.json <span class="ph">app-1.1</span>.apk</pre></div>
+          <div class="code" data-copy><pre><span class="p">$ </span>exposure diff old.json new.json</pre></div>
+        </div>
+        <div class="split-side">
+          <p class="shows">What it prints: two scans of the test apps, the second with one app more</p>
+          <div class="term" data-play role="group" aria-label="Terminal: exposure diff comparing two scans">
+            <div class="term-bar"><span class="term-title">~/exposure-scanner</span><span class="term-tag">exposure 0.2.0</span></div>
+<pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure diff old.json new.json</span></span><span class="ln h2">ElectronSkeleton (macOS, org.example.exposure.electron-skeleton), 1.0.0: only in the new report</span><span class="ln i2 h2"><span class="add">+</span> PostHog (Analytics, PostHog Inc., counted in the headline): contains</span><span class="ln i2 h2"><span class="add">+</span> Sentry (Crash reporting, Functional Software, Inc. (Sentry)): contains</span><span class="ln"> </span><span class="ln">2 findings added, 0 findings removed, 0 findings changed grade, in 1 of 2 apps.</span></pre>
+          </div>
+        </div>
+      </div>
+    </li>
+
+    <li class="step">
+      <h3>Fail the build on a new SDK</h3>
+      <div class="split">
+        <div class="split-main">
+          <p>With <code>--fail-on</code>, a scan or a diff exits with status 3 when a finding meets a condition, after the reports are written: a finding that counts in the headline (<code>headline</code>), one in a category (<code>category:analytics</code>), or one that names a company (<code>company:google</code>). <code>exposure rules show</code> lists the ids, and the option can be given more than once.</p>
+          <div class="code" data-copy><pre><span class="p">$ </span>exposure diff old.json new.json --fail-on headline</pre></div>
+          <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span>For <code>diff</code>, only what the new build adds, or what newly meets the condition, is checked, and each one is named.</span></p>
+        </div>
+        <div class="split-side">
+          <p class="shows">What it prints, for the same two scans</p>
+          <div class="term" data-play role="group" aria-label="Terminal: exposure diff failing on a new headline finding">
+            <div class="term-bar"><span class="term-title">~/exposure-scanner</span><span class="term-tag">exposure 0.2.0</span></div>
+<pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure diff old.json new.json --fail-on headline</span></span><span class="ln h2">ElectronSkeleton (macOS, org.example.exposure.electron-skeleton), 1.0.0: only in the new report</span><span class="ln i2 h2"><span class="add">+</span> PostHog (Analytics, PostHog Inc., counted in the headline): contains</span><span class="ln i2 h2"><span class="add">+</span> Sentry (Crash reporting, Functional Software, Inc. (Sentry)): contains</span><span class="ln"> </span><span class="ln">2 findings added, 0 findings removed, 0 findings changed grade, in 1 of 2 apps.</span><span class="ln">exposure: fail-on headline: met by 1 new finding in 1 app</span><span class="ln h2">exposure: fail-on headline:   PostHog (Analytics, PostHog Inc.) in ElectronSkeleton (macOS, org.example.exposure.electron-skeleton): added</span><span class="ln">exposure: fail-on: a condition was met, so the exit status is 3</span><span class="ln"><span class="p">$ </span>echo $?</span><span class="ln"><span class="hi">3</span></span></pre>
+          </div>
+        </div>
+      </div>
+    </li>
+
+    <li class="step">
+      <h3>Read it from a program</h3>
+      <p>A <code>--json</code> file of <code>-</code> prints the JSON report on standard output. A summary goes to standard error, ending with a scope line that says where the scan looked; it names no app and no path. <code>exposure report</code> derives the report again from a saved JSON report.</p>
+      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan ~/Downloads/<span class="ph">app-release</span>.apk --json -</pre></div>
+      <div class="code" data-copy><pre><span class="p">$ </span>exposure report old.json --html old.html</pre></div>
+      <div class="try">
+        <a class="link-more" href="docs/#commands">Every command and option</a>
+      </div>
+    </li>
+  </ol>
+</section>
+
 <!-- How it works -->
 <section class="sec story" id="how" aria-labelledby="how-title">
-  <div class="sec-head"><span class="idx">05</span>How it works</div>
+  <div class="sec-head"><span class="idx">06</span>How it works</div>
   <h2 id="how-title" data-type>Three steps, and <span class="em">none of them runs the app</span>.</h2>
   <p>No guessing from names, and no lookup in anyone's cloud. A finding exists only when the app's own files hold a marker that an SDK cannot avoid leaving.</p>
   <figure class="scene">
@@ -393,7 +508,7 @@
 
 <!-- Grades -->
 <section class="sec story" aria-labelledby="grades-title">
-  <div class="sec-head"><span class="idx">06</span>Every finding is graded</div>
+  <div class="sec-head"><span class="idx">07</span>Every finding is graded</div>
   <h2 id="grades-title" data-type>Graded facts, and <span class="em">never a score</span>.</h2>
   <p>The grade says what kind of evidence there is, and a finding takes the highest grade its evidence reaches. No finding says what an app or a company intends.</p>
   <figure class="scene">
@@ -409,7 +524,7 @@
 
 <!-- Trust and privacy -->
 <section class="sec story" id="trust" aria-labelledby="trust-title">
-  <div class="sec-head"><span class="idx">07</span>Trust and privacy</div>
+  <div class="sec-head"><span class="idx">08</span>Trust and privacy</div>
   <h2 id="trust-title" data-type>Safer than <span class="em">the apps it reports on</span>.</h2>
   <p>A tool that reads the list of apps you use has to be. These are mechanisms, checked in CI, not promises.</p>
   <ul class="uses">
@@ -444,7 +559,7 @@
 
 <!-- Who it is for -->
 <section class="sec story" aria-labelledby="who-title">
-  <div class="sec-head"><span class="idx">08</span>Who it is for</div>
+  <div class="sec-head"><span class="idx">09</span>Who it is for</div>
   <h2 id="who-title" data-type>For people who ship apps, use them, <span class="em">and write about them</span>.</h2>
   <ul class="uses">
     <li>
@@ -466,7 +581,7 @@
 
 <!-- What's next -->
 <section class="sec story" id="next" aria-labelledby="next-title">
-  <div class="sec-head"><span class="idx">09</span>What's next</div>
+  <div class="sec-head"><span class="idx">10</span>What's next</div>
   <h2 id="next-title" data-type>From a scan to <span class="em">a release gate</span>.</h2>
   <p>Homebrew and the first three of these shipped in 0.2.0. The rest is planned.</p>
   <ul class="uses">
@@ -481,7 +596,7 @@
 
 <!-- Questions -->
 <section class="sec story" id="faq" aria-labelledby="faq-title">
-  <div class="sec-head"><span class="idx">10</span>Questions</div>
+  <div class="sec-head"><span class="idx">11</span>Questions</div>
   <h2 id="faq-title" data-type>The things people <span class="em">ask first</span>.</h2>
   <div class="faq">
     <details>

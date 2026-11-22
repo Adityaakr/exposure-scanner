@@ -5,29 +5,37 @@ scripts and self-hosted fonts. There is no build framework, no tracker, no
 analytics, and nothing is loaded from another server. A content security
 policy on every page holds it to that.
 
-The look is a terminal's: black and green, the content in one centred
-column, headings in a pixel typeface, and a wireframe terrain drawn behind
-the column. Headings and terminal output type themselves out as they come
-into view. A visitor who asks for reduced motion gets none of that motion:
-every word is there from the start, and the terrain is one still frame.
+The look is a terminal's, in two themes: black and green, and a light one
+with the same green darkened to read on white. The theme follows the
+visitor's system until they pick one with the switch in the header; terminals
+and commands stay dark in both. The content sits in one wide centred column,
+with long text kept to a reading width and cards, steps and figures laid out
+in grids beside each other on a wide screen. Headings are in a pixel
+typeface, and a wireframe terrain is drawn behind the column. Headings and
+terminal output type themselves out as they come into view. A visitor who
+asks for reduced motion gets none of that motion: every word is there from
+the start, and the terrain is one still frame.
 
 | Path | What it is |
 |---|---|
-| `index.html` | The landing page. Its "How to use it" steps show the commands for the system picked above them: macOS, Linux, Windows (not supported, and it says so) or Android packages |
+| `index.html` | The landing page. It opens with the claim and a real scan, then "Start here", the same in plain words for anyone who uses a Mac, with three steps. Developer and CI use (`diff`, `--fail-on`, JSON) has its own section further down. Its "How to use it" steps show the commands for the system picked above them: macOS, Linux, Windows (not supported, and it says so) or Android packages |
 | `sample/index.html` | The sample report page, which frames the report below |
 | `sample/report.html`, `sample/report.json` | The report `exposure` writes for the synthetic fixtures in `tests/fixtures`. Generated, never edited by hand |
 | `docs/index.html` | Install and docs |
-| `assets/site.css` | The one stylesheet. Black and green only: a grade is told apart by fill and outline, `contains` filled and `declares` outlined |
-| `assets/boot.js` | Runs before the page paints, to mark that script runs and whether motion is welcome |
-| `assets/site.js` | Copy buttons on commands, a guess at the visitor's system for the steps, the typing, and figures that settle in as they scroll into view |
-| `assets/terrain.js` | Draws the wireframe terrain on a canvas behind the column |
+| `assets/site.css` | The one stylesheet, with both themes. Green only, in either: a grade is told apart by fill and outline, `contains` filled and `declares` outlined |
+| `assets/boot.js` | Runs before the page paints, to mark that script runs and whether motion is welcome, and to apply the theme the visitor picked |
+| `assets/site.js` | The theme switch, copy buttons on commands, a guess at the visitor's system for the steps, the typing, and figures that settle in as they scroll into view |
+| `assets/terrain.js` | Draws the wireframe terrain on a canvas behind the column, in the theme's colour |
 | `assets/fonts/` | Geist and Geist Mono (`Geist-OFL.txt`) and Departure Mono (`DepartureMono-OFL.txt`), all under the SIL Open Font License |
 | `assets/og.png` | The image shown when a link to the site is shared |
 | `build.sh` | Builds the site into a folder, writing the sample report afresh |
 | `check.py` | Checks a built site before it is published |
 
-The scripts make no request and store nothing, and every page is complete
-without them. The system picker is plain CSS: without script it opens on
+The scripts make no request. The one thing they store is the theme a
+visitor picks with the switch, under `exposure-theme` in that browser's
+local storage; a browser that refuses storage still switches, for that page.
+Every page is complete without script: it then follows the system's theme,
+and the switch is not shown. The system picker is plain CSS: without script it opens on
 macOS, and a browser without `:has()` shows the commands for every system,
 each labelled.
 
