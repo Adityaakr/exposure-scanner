@@ -8,13 +8,12 @@ policy on every page holds it to that.
 The look is a terminal's, in two themes: black and green, and a light one
 with the same green darkened to read on white. The theme follows the
 visitor's system until they pick one with the switch in the header; terminals
-and commands stay dark in both. The content sits in one wide centred column,
-with long text kept to a reading width and cards, steps and figures laid out
-in grids beside each other on a wide screen. Headings are in a pixel
-typeface, and a wireframe terrain is drawn behind the column. Headings and
-terminal output type themselves out as they come into view. A visitor who
-asks for reduced motion gets none of that motion: every word is there from
-the start, and the terrain is one still frame.
+and commands stay dark in both. The content sits in one narrow centred column,
+read from top to bottom, with cards, steps and figures one above the other.
+Headings are in a pixel typeface, and a wireframe terrain is drawn behind the
+column. Headings and terminal output type themselves out as they come into
+view. A visitor who asks for reduced motion gets none of that motion: every
+word is there from the start, and the terrain is one still frame.
 
 | Path | What it is |
 |---|---|
