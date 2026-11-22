@@ -3,9 +3,9 @@
 //! A scan, a saved report or a diff is checked against each condition once
 //! its reports are written. Of a diff, the findings that newly meet a
 //! condition are checked: those the new report adds, and those that meet it
-//! there but did not in the old report. A condition that a finding meets makes the
-//! command exit with [`EXIT_MATCHED`](crate::EXIT_MATCHED), which a CI job
-//! can stop a release on; what was written is written either way.
+//! there but did not in the old report. A condition that a finding meets
+//! makes the command exit with [`EXIT_MATCHED`](crate::EXIT_MATCHED), which a
+//! CI job can stop a release on; what was written is written either way.
 
 use std::collections::BTreeSet;
 
