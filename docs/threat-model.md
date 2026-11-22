@@ -61,14 +61,36 @@ own report, cache and files, and nothing here tries to stop them.
   to at most its budget and its declared size, at most 1 MiB of Mach-O load
   commands per architecture, no file over 2 GiB read for evidence. Limits are
   counts, never times, so a scan cannot be made to give a different answer by
-  being slowed down.
+  being slowed down. A budget bounds work, not time: a sparse file of 2 GiB
+  takes 8 KB of disk and about a second to hash.
+- **Memory is bounded by the scan's threads, not by what it reads.** The
+  entries of a package are read into buffers each thread keeps and uses
+  again, up to 32 MiB each; an entry larger than that, up to the 256 MiB
+  budget, takes one of four buffers the whole scan shares, and waits while
+  all four are in use. So a folder of crafted packages, each a megabyte that
+  inflates to a gigabyte, costs a scan about 270 MB at one thread and about
+  1.1 GB at ten, however many there are; before this bound, 25 MB of them
+  took a scan at one thread to 15.7 GB on macOS, whose allocator keeps freed
+  blocks. `cargo xtask bench` checks it on such a folder.
+- **The zip reader is no stricter than Android.** A package that Android
+  reads and the scanner does not is a package that hides from the scan, and
+  malware does exactly that (BadPack, SoumniBot, Konfety). So the
+  "encrypted" flag, which Android ignores, is ignored, and the manifest and
+  resource table are read the way Android's resource loader reads them,
+  which takes any compression method but DEFLATE for stored. Where Android
+  refuses an archive (a repeated name, a local header that names another
+  entry, a DEX file under a method it does not know), so does the scanner.
 - **Failures stay local.** An app that cannot be read is reported as a
   coverage note, and the scan goes on. A damaged file is never "nothing
   found".
-- **Inputs are fuzzed.** The zip, DEX, Android manifest and extension
-  manifest parsers and the Android collector run under libFuzzer with the
+- **Inputs are fuzzed.** The zip, DEX, Android manifest, Android resource
+  table (binary and protocol buffer) and extension manifest parsers, the
+  readers a macOS app reaches first (Mach-O, code signature, property lists,
+  asar), and the Android collector as a whole run under libFuzzer with the
   address sanitizer in CI, and every parser runs under property tests with
-  arbitrary and damaged input.
+  arbitrary and damaged input. The macOS collector as a whole has no fuzz
+  target yet: it reads files from disk, and has no entry point for bytes in
+  memory.
 
 ### What an app writes cannot reach the reader as code
 
@@ -115,6 +137,13 @@ own report, cache and files, and nothing here tries to stop them.
   results cache (`~/Library/Caches/exposure`). Report files are created
   readable by their owner only, and the two folders are made, or tightened,
   so that only the owner can open them.
+- A report is never written through a link. A report file named by a
+  symbolic link that does not lead to a device or stream is refused, and a
+  report is written to a new file beside its name and renamed into place, so a link that another user leaves in a
+  shared folder such as `/tmp` cannot make the scan truncate or change the
+  mode of a file of the user's, and a scan that stops leaves no half of a
+  report. A device or stream such as `/dev/null`, or a link to one such as
+  `/dev/stdout`, is written to as it is.
 - The cache holds the records a report shows and two hashes per app: no
   path, no file list. An entry is used only if it is a regular file of the
   user who runs the scan that nobody else may write, and only when its own
@@ -157,6 +186,13 @@ guardrails check that it bites.
 - **A report someone passes on.** It lists apps the person uses. The page
   says so at its top; share a single finding (the dispute form asks for one
   claim and its records) rather than a whole report.
+- **Who made a report.** A record's id is the SHA-256 of its text, so a
+  record that was edited no longer matches its id, and `exposure report`
+  refuses it. That catches edits, not forgery: anyone can write a report of
+  records that all match their ids, and nothing in a report shows who made
+  it or that a scan did. To check a claim, scan the artifact it is about:
+  its SHA-256 is in the claim's records, so anyone holding the same file
+  gets the same evidence.
 - **What a device cannot show.** What is sent, what servers share with each
   other, and data proxied through an app's own domain are out of reach of any
   scan of files; the report states these limits on every page.

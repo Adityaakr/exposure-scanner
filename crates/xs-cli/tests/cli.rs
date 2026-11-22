@@ -258,6 +258,87 @@ fn the_json_option_writes_an_owner_only_file() {
     assert!(fs::read_to_string(&file).unwrap() == scan(&[Path::new(FIXTURE)], 1));
 }
 
+/// Security review S4: in a folder others can write to, someone can leave a
+/// symbolic link where a report is about to be written, so that writing it
+/// truncates the file the link leads to. A link is refused, and what it
+/// leads to is left as it was.
+#[test]
+fn a_report_is_never_written_through_a_symbolic_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let victim = dir.path().join("victim.txt");
+    fs::write(&victim, "the user's own file").unwrap();
+    fs::set_permissions(&victim, fs::Permissions::from_mode(0o644)).unwrap();
+    for option in ["--json", "--html"] {
+        let planted = dir.path().join(format!("report{option}"));
+        std::os::unix::fs::symlink(&victim, &planted).unwrap();
+        let output = exposure(&["scan", FIXTURE, option, text(&planted)]);
+        assert!(!output.status.success(), "{option}");
+        assert!(stderr(&output).contains("symbolic link"), "{}", stderr(&output));
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "the user's own file", "{option}");
+        assert_eq!(fs::metadata(&victim).unwrap().permissions().mode() & 0o777, 0o644);
+        assert!(fs::symlink_metadata(&planted).unwrap().file_type().is_symlink());
+    }
+}
+
+/// A hard link is the other way to make two names lead to one file. The
+/// report replaces the name it was given, so the file behind the other name
+/// keeps what it held; and no temporary file is left behind.
+#[test]
+fn a_report_replaces_its_name_and_never_writes_into_a_linked_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let victim = dir.path().join("victim.txt");
+    fs::write(&victim, "the user's own file").unwrap();
+    let linked = dir.path().join("report.json");
+    fs::hard_link(&victim, &linked).unwrap();
+    let output = exposure(&["scan", FIXTURE, "--json", text(&linked)]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "the user's own file");
+    assert!(fs::read_to_string(&linked).unwrap() == scan(&[Path::new(FIXTURE)], 1));
+    assert_eq!(fs::metadata(&linked).unwrap().permissions().mode() & 0o777, 0o600);
+    let mut names: Vec<String> = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["report.json", "victim.txt"]);
+}
+
+/// `/dev/stdout` is a symbolic link on macOS and Linux, and so is the
+/// `/dev/fd/N` a shell's process substitution passes. Writing to it is
+/// writing to the stream, so the report arrives on standard output.
+#[test]
+fn the_json_option_writes_through_a_link_to_standard_output() {
+    let output = exposure(&["scan", FIXTURE, "--json", "/dev/stdout"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8(output.stdout).unwrap() == scan(&[Path::new(FIXTURE)], 1));
+}
+
+/// A shell's process substitution, `--json >(jq .)`, passes `/dev/fd/N`.
+/// On macOS that is not a link but a node of its own, which the system
+/// reports under another device and inode once opened: it is the pipe
+/// that is opened. `/dev/fd/1` is that node for standard output, a pipe
+/// here, so the report has to arrive on standard output, as it did before
+/// reports were written without following links.
+#[test]
+fn the_json_option_writes_to_the_dev_fd_node_of_a_pipe() {
+    let output = exposure(&["scan", FIXTURE, "--json", "/dev/fd/1"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8(output.stdout).unwrap() == scan(&[Path::new(FIXTURE)], 1));
+}
+
+/// A link to a device is written to as the device is; the link and the
+/// device stay as they were.
+#[test]
+fn a_report_is_written_through_a_symbolic_link_to_a_device() {
+    let dir = tempfile::tempdir().unwrap();
+    let planted = dir.path().join("report.json");
+    std::os::unix::fs::symlink("/dev/null", &planted).unwrap();
+    let output = exposure(&["scan", FIXTURE, "--json", text(&planted)]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(fs::symlink_metadata(&planted).unwrap().file_type().is_symlink());
+    assert!(!fs::metadata(&planted).unwrap().is_file());
+}
+
 /// `--json /dev/null` is the ordinary way to discard a report and keep the
 /// summary. A device is not the scanner's file to change the mode of, and a
 /// normal user may not change it at all.

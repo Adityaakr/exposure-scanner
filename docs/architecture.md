@@ -135,8 +135,20 @@ measures 1.19x and fails. A cold disk was not measured.
 Memory does not grow with the bytes read. It grows with the number of files
 listed: a bundle of 300,000 small files took 84 MB. And it grows with the
 largest entry of a package that is read whole to be parsed, a DEX file or a
-manifest: up to the 256 MiB budget, stored and inflated, per worker thread.
-DEX files of real apps are a few megabytes.
+manifest, but not with the number of packages. Each worker thread keeps
+three buffers that it reads every entry into, the stored bytes, the
+inflated bytes and a resource table, and never frees: up to 32 MiB each
+(the table up to its 64 MiB budget), which is room for the DEX files of
+real apps, a few megabytes each. An entry larger than that, up to the
+256 MiB budget, takes one of four buffers the whole scan shares, and a
+thread waits while all four are in use: 1 GiB at most, whatever the number
+of threads. On a folder of 24 crafted packages, each 1 MB holding four DEX
+files that inflate to 255 MiB, a scan peaks at 272 MB at one thread and at
+1.1 GB at ten; 30 real packages (2.5 GB) take 35 MB at one thread. Before
+these buffers, every entry had allocations of its own, and macOS's
+allocator, which keeps large freed blocks for the process, took the
+crafted folder to 15.7 GB at one thread. `cargo xtask bench` gates the
+crafted folder at 600 MB at one thread and 1.5 GB at one per core.
 
 ## How each property is enforced
 
@@ -149,7 +161,7 @@ left to discipline.
 | **Private.** A scan opens no socket. | No crate that can open one is allowed into the dependency graph. The lint lists ban the socket, process, clock and environment APIs; the one exception, handing the finished report to the system's opener, is described in the [threat model](threat-model.md#the-one-process-the-scanner-starts). | `cargo deny check`; `cargo xtask no-network`: the binary imports no socket function, and the scan runs in a network namespace with no interfaces, under `strace`, and under a macOS sandbox that denies the network, each time without the cache, with an empty one and with a full one. Each check is paired with a control program that must be caught. |
 | **Deterministic.** Same evidence, rule pack and scan scope, same bytes. | Derivation and rendering live in `no_std` crates that cannot read a clock, a file or the environment and have no randomly seeded map. Records hold paths inside the artifact only. Evidence is a set keyed by content hash. | One report across input orders, thread counts, install locations and cache states (off, empty, full, damaged); the committed fixture reports must be reproduced byte for byte on Linux and macOS. |
 | **Honest.** Every finding shows its grade and the raw record behind it. | The renderers refuse a claim that cites a record the report does not carry. The HTML report carries every record, and each finding links to its own. | A test deletes a cited record and expects the render to fail. Another reads the page back and finds, for every claim, its grade, its confidence and each cited record as stored. |
-| **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary or archive that large is reported with its size instead. Of a Mach-O file only the headers and at most 1 MiB of load commands per architecture are held in memory, whatever its size. Symbolic links are never followed. The file table of an asar archive is not trusted. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. The zip, DEX, Android manifest and browser extension manifest parsers and the Android collector also run under libFuzzer, 60 s each (`fuzz/run.sh`). |
+| **Hostile inputs.** A malicious app cannot crash or mislead the scanner. | Parsers take a byte slice, are written in safe Rust (`unsafe` is forbidden), and stop at budgets of bytes, items and depth. No file over 2 GiB is read for evidence; a binary or archive that large is reported with its size instead. Of a Mach-O file only the headers and at most 1 MiB of load commands per architecture are held in memory, whatever its size. Symbolic links are never followed. The file table of an asar archive is not trusted. Text from files is cut and cleaned before it is stored. | Property tests feed the parsers arbitrary and damaged input. The parsers and the Android collector also run under libFuzzer, 60 s each (`fuzz/run.sh`); the [threat model](threat-model.md#a-hostile-app-cannot-take-over-the-scan) lists what is fuzzed. |
 | **Rules are data.** A rule pack cannot run code. | A rule is a literal plus one boundary from a fixed list. The scanner only loads a compiled pack whose signature verifies against a key built into the binary; it contains no parser for rule sources. | A tampered pack is refused; the pack compiler's lints are tested. |
 | **Finds what is there, does not cry wolf.** | Several independent witnesses per SDK, with controls against coincidental hits (below). | Each control has its own tests, and a property test checks that cutting a file into windows never changes what is found. The canary test plants every token of every rule in synthetic apps and requires 95% of them found (all are). A corpus of real apps pinned by hash, with hard negatives such as a browser and an ad blocker, must show no channel to another company: a subset on every change, all of it nightly. |
 | **Reproducible.** Two clean builds of one commit give the same binary. | Workspace files are named relative to the workspace; the release build strips debug information, and on macOS the linker is told to write no debug map, whose paths would otherwise reach the binary's UUID (`crates/xs-cli/build.rs`). | `cargo xtask repro` builds a commit twice from copies at different paths and compares the binaries, nightly on macOS and Linux. |

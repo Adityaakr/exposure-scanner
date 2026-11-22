@@ -10,7 +10,9 @@ publish.workspace = true
 
 [dependencies]
 xs-model.workspace = true
+xs-formats = { workspace = true, features = ["testkit"] }
 xs-rules = { workspace = true, features = ["compile"] }
+miniz_oxide.workspace = true
 minisign.workspace = true
 serde_json.workspace = true
 object.workspace = true

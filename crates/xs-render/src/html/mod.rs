@@ -1260,7 +1260,8 @@ fn records(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
     page.raw(
         "<p>Every record the scan produced, exactly as it is stored. The findings above link \
          to the records they rest on. The id of a record is the SHA-256 of its text as shown \
-         here, so a record that was changed no longer matches its id.</p>\n",
+         here, so a record that was changed no longer matches its id. That catches edits, not \
+         who made the report: to check a finding, scan the app it is about.</p>\n",
     );
     if view.records == 0 {
         page.raw("<p class=\"none\">The scan produced no record.</p>\n");

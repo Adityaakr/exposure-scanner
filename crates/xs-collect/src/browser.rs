@@ -765,7 +765,8 @@ impl<'a> Directory<'a> {
             let offset = usize::try_from(entry.offset).map_err(|_| malformed)?;
             let local = self.archive.get(offset..).ok_or(malformed)?;
             let data = zip::data(entry, local)?;
-            Ok(zip::content(entry, data, budget)?.into_owned())
+            let mut inflated = Vec::new();
+            Ok(zip::content(entry, data, budget, &mut inflated)?.to_vec())
         };
         Some(read())
     }

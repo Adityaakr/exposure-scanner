@@ -24,14 +24,34 @@
 //! local header must carry the name the directory gives. An archive Android
 //! refuses to install is refused here too, for the same reason.
 //!
+//! The reader is never stricter than Android either, because a package that
+//! Android reads and the scanner does not is a package that hides from the
+//! scan. Malware does exactly this (BadPack, SoumniBot, Konfety): it marks
+//! the manifest encrypted, or gives it a compression method no tool knows,
+//! and Android installs it all the same. So:
+//!
+//! - The "encrypted" flag (general purpose bit 0) is ignored, as Android
+//!   ignores it: neither `libziparchive` nor the resource loader reads it.
+//!   An entry that really is encrypted fails to inflate or to parse, and is
+//!   reported as such.
+//! - Android reads the manifest and the resource table through its resource
+//!   loader (`ZipAssetsProvider::OpenInternal` in
+//!   `frameworks/base/libs/androidfw/AssetsProvider.cpp`), which inflates
+//!   DEFLATE and takes every other method for stored, at the length the
+//!   directory gives for the content. [`Entry::read_by`] with
+//!   [`Reader::Resources`] gives an entry the same reading. Code is loaded
+//!   through `libziparchive`, which refuses methods it does not know, and
+//!   [`Reader::Code`] keeps that.
+//!
 //! Budgets: the directory is at most [`MAX_DIRECTORY_BYTES`] long (an
 //! archive without the 64-bit extension has at most 65 534 entries), and an
 //! entry inflates to at most the budget the caller passes to [`content`],
-//! never to more than its directory entry declares.
+//! never to more than its directory entry declares, into a buffer the
+//! caller owns and may use again for the next entry.
 
-use std::borrow::Cow;
-
-use miniz_oxide::inflate::decompress_to_vec_with_limit;
+use miniz_oxide::inflate::TINFLStatus;
+use miniz_oxide::inflate::core::inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF;
+use miniz_oxide::inflate::core::{DecompressorOxide, decompress};
 
 use crate::le::{u16_at, u32_at};
 use crate::{Budget, FormatError, ReadError};
@@ -48,12 +68,17 @@ pub const MAX_DIRECTORY_BYTES: usize = 64 << 20;
 /// Length of the fixed part of a local file header.
 pub const LOCAL_HEADER_BYTES: usize = 30;
 
+/// How much of its output an inflate starts with: the output then grows by
+/// doubling as the stream fills it, so a stream that declares far more than
+/// it holds costs no more than what it does hold.
+const FIRST_OUTPUT_BYTES: usize = 64 << 10;
+
 /// Length of the fixed part of a central directory entry.
 const DIRECTORY_ENTRY_BYTES: usize = 46;
 const END_SIGNATURE: [u8; 4] = *b"PK\x05\x06";
 const DIRECTORY_SIGNATURE: [u8; 4] = *b"PK\x01\x02";
 const LOCAL_SIGNATURE: [u8; 4] = *b"PK\x03\x04";
-/// General purpose bit 0: the entry is encrypted.
+/// General purpose bit 0: the entry is marked as encrypted.
 const FLAG_ENCRYPTED: u16 = 1;
 const METHOD_STORED: u16 = 0;
 const METHOD_DEFLATED: u16 = 8;
@@ -145,8 +170,21 @@ pub enum Method {
     /// Compressed with DEFLATE.
     Deflated,
     /// Any other method, by its number. The scanner has no reader for these;
-    /// Android has none either.
+    /// Android has none either, and what it does with one depends on which
+    /// of its readers reads the entry: see [`Reader`].
     Other(u16),
+}
+
+/// Which of Android's readers an entry is read the way of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reader {
+    /// The reader that loads code (`libziparchive`): an entry is stored or
+    /// DEFLATE, and any other method is refused.
+    Code,
+    /// The resource loader, which reads the manifest and the resource table:
+    /// DEFLATE is inflated, and any other method is taken for stored, at the
+    /// length the directory gives for the content.
+    Resources,
 }
 
 /// One entry of the central directory.
@@ -157,7 +195,8 @@ pub struct Entry<'a> {
     pub name: &'a [u8],
     /// How the entry's bytes are stored.
     pub method: Method,
-    /// Whether the entry is marked as encrypted.
+    /// Whether the entry is marked as encrypted. Android does not read the
+    /// mark, and neither does [`content`]: it is kept only to be shown.
     pub encrypted: bool,
     /// Length of the entry's data in the archive.
     pub compressed_bytes: u32,
@@ -172,6 +211,20 @@ impl Entry<'_> {
     #[must_use]
     pub fn is_directory(&self) -> bool {
         self.name.ends_with(b"/")
+    }
+
+    /// The entry as `reader` reads it. For the resource loader, an entry
+    /// with a method other than DEFLATE is stored, and its data is as long
+    /// as its content: what the directory says it compressed to plays no
+    /// part, since the loader does not read that length.
+    #[must_use]
+    pub fn read_by(self, reader: Reader) -> Self {
+        match (reader, self.method) {
+            (Reader::Resources, Method::Other(_)) => {
+                Self { method: Method::Stored, compressed_bytes: self.bytes, ..self }
+            }
+            _ => self,
+        }
     }
 }
 
@@ -287,39 +340,78 @@ pub fn data<'a>(entry: &Entry<'_>, local: &'a [u8]) -> Result<&'a [u8], FormatEr
 /// The content of `entry`, inflated if it is stored deflated.
 ///
 /// `data` is what [`data`] returned for the entry. `budget` is the most
-/// bytes the content may have.
+/// bytes the content may have. A deflated entry is inflated into
+/// `inflated`, which is cleared first and grown to exactly the length the
+/// entry declares, never by doubling; a stored entry is `data` itself and
+/// leaves `inflated` alone. Whoever reads many entries can so give every
+/// one the same buffer, and the memory a scan takes is that of its largest
+/// entry, not the sum of all of them.
+///
+/// The "encrypted" mark is not read (see the module's notes): an entry that
+/// really is encrypted fails as a DEFLATE stream here, or later in its
+/// parser.
 ///
 /// # Errors
 ///
 /// [`FormatError::OverBudget`] if the entry declares more than `budget`
 /// bytes; nothing is inflated then. [`ReadError::Unsupported`] if the entry
-/// is encrypted or uses a method other than stored and DEFLATE.
-/// [`FormatError::Malformed`] if the data is not a DEFLATE stream or does
-/// not come to exactly the length the entry declares.
+/// uses a method other than stored and DEFLATE. [`FormatError::Malformed`]
+/// if the data is not a DEFLATE stream or does not come to exactly the
+/// length the entry declares.
 pub fn content<'a>(
     entry: &Entry<'_>,
     data: &'a [u8],
     budget: usize,
-) -> Result<Cow<'a, [u8]>, ReadError> {
+    inflated: &'a mut Vec<u8>,
+) -> Result<&'a [u8], ReadError> {
     let declared = usize::try_from(entry.bytes).map_err(|_| MALFORMED)?;
     if declared > budget {
         return Err(FormatError::OverBudget(Budget::Bytes).into());
     }
-    if entry.encrypted {
-        return Err(ReadError::Unsupported);
-    }
     match entry.method {
-        Method::Stored if data.len() == declared => Ok(Cow::Borrowed(data)),
+        Method::Stored if data.len() == declared => Ok(data),
         Method::Stored => Err(MALFORMED),
         Method::Deflated => {
-            // The limit stops a stream that inflates to more than it
-            // declares, so the declared size, which is within budget, bounds
-            // the memory used whatever the stream holds.
-            let inflated = decompress_to_vec_with_limit(data, declared).map_err(|_| MALFORMED)?;
-            if inflated.len() == declared { Ok(Cow::Owned(inflated)) } else { Err(MALFORMED) }
+            inflate(data, declared, inflated)?;
+            Ok(inflated.as_slice())
         }
         Method::Other(_) => Err(ReadError::Unsupported),
     }
+}
+
+/// Inflates the DEFLATE stream `data` into `out`, which ends up holding
+/// exactly `declared` bytes.
+///
+/// Room for `declared` bytes is reserved at once, so the output never moves;
+/// it is filled in steps that double, so a stream that ends early or that
+/// declares more than it holds has written only what it held. The output
+/// never grows past `declared`: a stream that would inflate to more stops
+/// with an error when it is full.
+fn inflate(data: &[u8], declared: usize, out: &mut Vec<u8>) -> Result<(), ReadError> {
+    out.clear();
+    out.reserve_exact(declared);
+    out.resize(declared.min(FIRST_OUTPUT_BYTES), 0);
+    let mut state = DecompressorOxide::new();
+    let (mut input, mut written) = (data, 0);
+    loop {
+        let (status, read, wrote) =
+            decompress(&mut state, input, out, written, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+        input = input.get(read..).unwrap_or_default();
+        written = written.saturating_add(wrote);
+        match status {
+            TINFLStatus::Done => break,
+            TINFLStatus::HasMoreOutput if out.len() < declared => {
+                let next = out.len().saturating_mul(2).max(1).min(declared);
+                out.resize(next, 0);
+            }
+            _ => return Err(MALFORMED),
+        }
+    }
+    if written != declared {
+        return Err(MALFORMED);
+    }
+    out.truncate(written);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -341,8 +433,9 @@ mod tests {
             .iter()
             .map(|entry| {
                 let stored = data(entry, &archive[entry.offset as usize..])?;
-                let content = content(entry, stored, 1 << 20)?;
-                Ok((String::from_utf8_lossy(entry.name).into_owned(), content.into_owned()))
+                let mut inflated = Vec::new();
+                let content = content(entry, stored, 1 << 20, &mut inflated)?;
+                Ok((String::from_utf8_lossy(entry.name).into_owned(), content.to_vec()))
             })
             .collect()
     }
@@ -572,6 +665,12 @@ mod tests {
         Entry { name: b"e", method, encrypted: false, compressed_bytes, bytes, offset: 0 }
     }
 
+    /// The content of `entry`, inflated into a buffer of its own.
+    fn inflate(entry: &Entry<'_>, data: &[u8], budget: usize) -> Result<Vec<u8>, ReadError> {
+        let mut inflated = Vec::new();
+        content(entry, data, budget, &mut inflated).map(<[u8]>::to_vec)
+    }
+
     /// The inflate budget (design report, section 4.8): an entry that
     /// declares more than the budget is refused before a byte is inflated,
     /// and one that inflates to more than it declares is cut off at what it
@@ -584,38 +683,115 @@ mod tests {
         let size = original.len() as u32;
         let honest = entry(Method::Deflated, size, deflated.len() as u32);
 
-        assert_eq!(content(&honest, &deflated, 1 << 20).unwrap(), original);
-        assert_eq!(content(&honest, &deflated, (1 << 20) - 1), Err(OVER_BUDGET));
+        assert_eq!(inflate(&honest, &deflated, 1 << 20).unwrap(), original);
+        assert_eq!(inflate(&honest, &deflated, (1 << 20) - 1), Err(OVER_BUDGET));
 
         // The entry understates its size to get under the budget.
         let liar = entry(Method::Deflated, 1000, deflated.len() as u32);
-        assert_eq!(content(&liar, &deflated, 1 << 20), Err(MALFORMED));
+        assert_eq!(inflate(&liar, &deflated, 1 << 20), Err(MALFORMED));
         // And overstates it.
         let padded = entry(Method::Deflated, size + 1, deflated.len() as u32);
-        assert_eq!(content(&padded, &deflated, 1 << 21), Err(MALFORMED));
+        assert_eq!(inflate(&padded, &deflated, 1 << 21), Err(MALFORMED));
         // A stored entry is held to the budget too.
         let stored = entry(Method::Stored, 10, 10);
-        assert_eq!(content(&stored, &[0; 10], 9), Err(OVER_BUDGET));
-        assert_eq!(content(&stored, &[0; 10], 10).unwrap(), vec![0; 10]);
-        assert_eq!(content(&stored, &[0; 9], 10), Err(MALFORMED));
+        assert_eq!(inflate(&stored, &[0; 10], 9), Err(OVER_BUDGET));
+        assert_eq!(inflate(&stored, &[0; 10], 10).unwrap(), vec![0; 10]);
+        assert_eq!(inflate(&stored, &[0; 9], 10), Err(MALFORMED));
     }
 
     #[test]
     fn damaged_streams_encrypted_entries_and_other_methods_are_told_apart() {
         let deflated = miniz_oxide::deflate::compress_to_vec(&text(4000), 6);
         let honest = entry(Method::Deflated, 4000, deflated.len() as u32);
-        assert_eq!(content(&honest, &deflated, 4000).unwrap(), text(4000));
-        assert_eq!(content(&honest, &deflated[..deflated.len() / 2], 4000), Err(MALFORMED));
-        assert_eq!(content(&honest, b"\xff\xff\xff\xff", 4000), Err(MALFORMED));
-        assert_eq!(content(&honest, b"", 4000), Err(MALFORMED));
+        assert_eq!(inflate(&honest, &deflated, 4000).unwrap(), text(4000));
+        assert_eq!(inflate(&honest, &deflated[..deflated.len() / 2], 4000), Err(MALFORMED));
+        assert_eq!(inflate(&honest, b"\xff\xff\xff\xff", 4000), Err(MALFORMED));
+        assert_eq!(inflate(&honest, b"", 4000), Err(MALFORMED));
 
-        let encrypted = Entry { encrypted: true, ..honest };
-        assert_eq!(content(&encrypted, &deflated, 4000), Err(ReadError::Unsupported));
         // Method 12 is bzip2, 93 is Zstandard.
         for method in [12, 93] {
             let other = entry(Method::Other(method), 4000, deflated.len() as u32);
-            assert_eq!(content(&other, &deflated, 4000), Err(ReadError::Unsupported));
+            assert_eq!(inflate(&other, &deflated, 4000), Err(ReadError::Unsupported));
         }
+    }
+
+    /// Android does not read the "encrypted" mark, so neither does the
+    /// reader: an entry so marked whose bytes are clear is read, and one
+    /// whose bytes really are ciphertext fails as any damaged stream does.
+    #[test]
+    fn the_encrypted_mark_is_not_read() {
+        let deflated = miniz_oxide::deflate::compress_to_vec(&text(4000), 6);
+        let marked =
+            Entry { encrypted: true, ..entry(Method::Deflated, 4000, deflated.len() as u32) };
+        assert_eq!(inflate(&marked, &deflated, 4000).unwrap(), text(4000));
+        let stored = Entry { encrypted: true, ..entry(Method::Stored, 4, 4) };
+        assert_eq!(inflate(&stored, b"abcd", 4).unwrap(), b"abcd");
+        let ciphertext: Vec<u8> = (0..4000u32).map(|at| (at * 7919 % 251) as u8).collect();
+        let secret = Entry { encrypted: true, ..entry(Method::Deflated, 4000, 4000) };
+        assert_eq!(inflate(&secret, &ciphertext, 4000), Err(MALFORMED));
+    }
+
+    /// The resource loader takes any method but DEFLATE for stored, at the
+    /// content's length; the code loader refuses it. Both inflate DEFLATE
+    /// and read stored entries alike.
+    #[test]
+    fn each_of_androids_readers_reads_an_unknown_method_its_own_way() {
+        let manifest = text(300);
+        // The directory says method 99 and a compressed length that is
+        // wrong; the bytes behind the header are the content as it is.
+        let odd = entry(Method::Other(99), 300, 7);
+        let as_resource = odd.read_by(Reader::Resources);
+        assert_eq!((as_resource.method, as_resource.compressed_bytes), (Method::Stored, 300));
+        assert_eq!(inflate(&as_resource, &manifest, 1 << 20).unwrap(), manifest);
+        assert_eq!(odd.read_by(Reader::Code), odd);
+        assert_eq!(
+            inflate(&odd.read_by(Reader::Code), &manifest, 1 << 20),
+            Err(ReadError::Unsupported)
+        );
+        // Taken for stored, it is still held to the budget.
+        assert_eq!(inflate(&as_resource, &manifest, 299), Err(OVER_BUDGET));
+
+        for known in [entry(Method::Stored, 300, 300), entry(Method::Deflated, 300, 20)] {
+            assert_eq!(known.read_by(Reader::Resources), known);
+            assert_eq!(known.read_by(Reader::Code), known);
+        }
+    }
+
+    /// A stream that declares far more than it holds writes only what it
+    /// holds: the output grows with the stream, not to the declared size.
+    #[test]
+    fn a_stream_that_lies_about_its_size_costs_only_what_it_holds() {
+        let declared = 64 << 20;
+        let small = miniz_oxide::deflate::compress_to_vec(&text(1000), 6);
+        let liar = entry(Method::Deflated, declared as u32, small.len() as u32);
+        let mut buffer = Vec::new();
+        assert_eq!(content(&liar, &small, declared, &mut buffer), Err(MALFORMED));
+        assert!(buffer.len() <= FIRST_OUTPUT_BYTES, "{} bytes written", buffer.len());
+        // A real one of that size grows to it in steps.
+        let zeros = vec![0u8; declared];
+        let bomb = miniz_oxide::deflate::compress_to_vec(&zeros, 6);
+        let honest = entry(Method::Deflated, declared as u32, bomb.len() as u32);
+        assert_eq!(content(&honest, &bomb, declared, &mut buffer).unwrap().len(), declared);
+        assert_eq!(buffer.capacity(), declared);
+    }
+
+    /// Every entry may be inflated into one buffer: it is cleared and
+    /// grown to exactly what the entry declares, and a stored entry leaves
+    /// it alone.
+    #[test]
+    fn one_buffer_serves_every_entry() {
+        let mut buffer = Vec::new();
+        let big = miniz_oxide::deflate::compress_to_vec(&text(5000), 6);
+        let small = miniz_oxide::deflate::compress_to_vec(b"tiny", 6);
+        let big_entry = entry(Method::Deflated, 5000, big.len() as u32);
+        assert_eq!(content(&big_entry, &big, 5000, &mut buffer).unwrap(), text(5000));
+        assert_eq!(buffer.capacity(), 5000, "room for what it declares, and no more");
+        let small_entry = entry(Method::Deflated, 4, small.len() as u32);
+        assert_eq!(content(&small_entry, &small, 5000, &mut buffer).unwrap(), b"tiny");
+        assert_eq!(buffer.capacity(), 5000, "the buffer is used again, not replaced");
+        let stored = entry(Method::Stored, 3, 3);
+        assert_eq!(content(&stored, b"abc", 5000, &mut buffer).unwrap(), b"abc");
+        assert_eq!(buffer, b"tiny", "a stored entry is read where it is");
     }
 
     #[test]
@@ -634,7 +810,7 @@ mod tests {
             let _ = read(&bytes);
             let _ = data_offset(&bytes);
             let honest = entry(Method::Deflated, 64, bytes.len() as u32);
-            let _ = content(&honest, &bytes, 64);
+            let _ = inflate(&honest, &bytes, 64);
         }
 
         /// A valid archive with a few bytes changed either still reads or
