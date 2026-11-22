@@ -27,8 +27,9 @@
 //! What a scan finds does not depend on any of this: a thread that waits
 //! reads the same bytes later. A thread that already holds a shared buffer
 //! never waits for another one, so two threads cannot wait on each other;
-//! should it need one more (only an archive whose entries overlap gets
-//! there), it makes one for the time it holds it.
+//! should it need one more (only a manifest or resource table that the
+//! resource loader reads past its span, into the next entry, gets there),
+//! it makes one for the time it holds it.
 
 use std::cell::{Cell, RefCell};
 use std::ops::{Deref, DerefMut};

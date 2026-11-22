@@ -378,6 +378,9 @@ impl Table {
 struct Capture<'a> {
     /// The entry, as the reader of its kind reads it.
     entry: Entry<'a>,
+    /// How long the entry's data is in the archive, as the directory says.
+    /// The resource loader may read more than that (see `plan`).
+    span: u32,
     name: RelPath,
     kind: Kind,
     /// Where the entry is copied to and inflated into, from when the pass
@@ -394,9 +397,10 @@ struct Capture<'a> {
 }
 
 impl<'a> Capture<'a> {
-    fn new(entry: Entry<'a>, name: RelPath, kind: Kind) -> Self {
+    fn new(entry: Entry<'a>, span: u32, name: RelPath, kind: Kind) -> Self {
         Self {
             entry,
+            span,
             name,
             kind,
             buffers: None,
@@ -407,13 +411,13 @@ impl<'a> Capture<'a> {
     }
 
     /// The least this entry takes up in the archive, from its local header
-    /// to the end of its data. The header's extra field, which only the
-    /// header itself gives the length of, comes on top.
+    /// to the end of its data as the directory gives it. The header's extra
+    /// field, which only the header itself gives the length of, comes on top.
     fn least_extent(&self) -> std::ops::Range<u64> {
         let start = u64::from(self.entry.offset);
         let length = (zip::LOCAL_HEADER_BYTES as u64)
             .saturating_add(self.entry.name.len() as u64)
-            .saturating_add(u64::from(self.entry.compressed_bytes));
+            .saturating_add(u64::from(self.span));
         start..start.saturating_add(length)
     }
 
@@ -763,9 +767,12 @@ fn scan_package(
     // and check that the end of the file still is what the plan was made
     // from. One byte more than the file held is allowed, so that growth is
     // noticed.
-    // The captures are fed in file order. No two share a byte (see `plan`),
-    // so each has been read, and has given its buffers back, before the
-    // next one takes any: one entry at a time holds memory.
+    // The captures are fed in file order, each taking from every window the
+    // bytes it wants. No two entries share a byte (see `plan`), so each has
+    // mostly been read, and has given its buffers back, before the next one
+    // takes any. Only an entry read by the resource loader can run past its
+    // span into the next one; the thread then holds both entries' buffers
+    // for a while, which the buffers module allows without waiting.
     let mut in_file_order: Vec<usize> = (0..captures.len()).collect();
     in_file_order.sort_by_key(|&index| captures.get(index).map(|capture| capture.entry.offset));
     let mut unchanged = true;
@@ -886,8 +893,8 @@ fn plan<'a>(
         .chain(resources);
     let mut captures = Vec::new();
     let mut total: u64 = 0;
-    for (kind, path, entry) in wanted {
-        let entry = entry.read_by(kind.reader());
+    for (kind, path, listed) in wanted {
+        let entry = listed.read_by(kind.reader());
         // Both sizes are held in memory while an entry is inflated, so the
         // larger of the two is what the entry costs, and what is reported.
         let cost = u64::from(entry.bytes).max(u64::from(entry.compressed_bytes));
@@ -896,12 +903,15 @@ fn plan<'a>(
             continue;
         }
         total = total.saturating_add(cost);
-        captures.push(Capture::new(entry, path, kind));
+        captures.push(Capture::new(entry, listed.compressed_bytes, path, kind));
     }
 
-    // In a well-formed archive no two entries share a byte. Of two that do,
-    // the one that starts later is not read: its bytes belong to the other,
-    // and reading both would hold both in memory at once. Entries that
+    // In a well-formed archive no two entries share a byte. Of two whose
+    // spans, as the directory gives them, do, the one that starts later is
+    // not read: its bytes belong to the other, and reading both would hold
+    // both in memory at once. An entry the resource loader reads for longer
+    // than its span, as Android does, still reads only its span here, so
+    // the entry after it is read too. Entries that
     // start at the same place keep their reading order, so the first one
     // read is the one that stays.
     let mut order: Vec<usize> = (0..captures.len()).collect();
@@ -2202,6 +2212,35 @@ mod tests {
         let records = scan(&tampered_apk(deflated, method_99), &pack);
         assert_eq!(artifact(&records).subject.id, "com.example.app");
         assert_eq!(coverage(&records), ["Skipped UnsupportedFormat classes.dex None 1"]);
+    }
+
+    /// SoumniBot stores its manifest under an unknown method and declares it
+    /// longer than its bytes; Android reads the declared length, which runs
+    /// into the next entry, and parses the manifest from it. The entry after
+    /// the manifest is still its own entry, and its code is still read.
+    #[test]
+    fn a_manifest_declared_longer_than_it_is_hides_no_code_after_it() {
+        let pack = tracker_pack();
+        let (manifest, dex) = (tracker_manifest_with_permission(), tracker_dex());
+        let apk = ZipBuilder::new()
+            .raw(MANIFEST, 99, 0, &manifest, manifest.len() as u32 + 100)
+            .raw("classes.dex", 8, 0, &miniz_dex(&dex), dex.len() as u32)
+            .finish();
+        let records = scan(&apk, &pack);
+        assert_eq!(artifact(&records).subject.id, "com.example.app");
+        assert_eq!(coverage(&records), Vec::<String>::new());
+        assert_eq!(
+            edges(&records)
+                .iter()
+                .map(|edge| edge.split(' ').take(3).collect::<Vec<_>>().join(" "))
+                .collect::<Vec<_>>(),
+            [
+                "AndroidDex android_class_prefix com.acme.tracker.",
+                "AndroidDex dex_string collect.acme.example",
+                "AndroidManifest android_permission android.permission.CAMERA",
+                "AndroidManifest manifest_component com.acme.tracker.UploadService",
+            ]
+        );
     }
 
     /// The resource table is read through the same loader as the manifest,
