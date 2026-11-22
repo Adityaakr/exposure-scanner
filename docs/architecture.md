@@ -135,8 +135,20 @@ measures 1.19x and fails. A cold disk was not measured.
 Memory does not grow with the bytes read. It grows with the number of files
 listed: a bundle of 300,000 small files took 84 MB. And it grows with the
 largest entry of a package that is read whole to be parsed, a DEX file or a
-manifest: up to the 256 MiB budget, stored and inflated, per worker thread.
-DEX files of real apps are a few megabytes.
+manifest, but not with the number of packages. Each worker thread keeps
+three buffers that it reads every entry into, the stored bytes, the
+inflated bytes and a resource table, and never frees: up to 32 MiB each
+(the table up to its 64 MiB budget), which is room for the DEX files of
+real apps, a few megabytes each. An entry larger than that, up to the
+256 MiB budget, takes one of four buffers the whole scan shares, and a
+thread waits while all four are in use: 1 GiB at most, whatever the number
+of threads. On a folder of 24 crafted packages, each 1 MB holding four DEX
+files that inflate to 255 MiB, a scan peaks at 272 MB at one thread and at
+1.1 GB at ten; 30 real packages (2.5 GB) take 35 MB at one thread. Before
+these buffers, every entry had allocations of its own, and macOS's
+allocator, which keeps large freed blocks for the process, took the
+crafted folder to 15.7 GB at one thread. `cargo xtask bench` gates the
+crafted folder at 600 MB at one thread and 1.5 GB at one per core.
 
 ## How each property is enforced
 
