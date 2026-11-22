@@ -76,28 +76,106 @@ pub(crate) fn print(text: &str) -> Result<()> {
 }
 
 /// Writes a report to `path`, readable by its owner only, or to standard
-/// output when no path is given. A `path` that is not a regular file, such
-/// as `/dev/null`, is written to and otherwise left as it is.
+/// output when no path is given.
+///
+/// A report is never written through a link (security review S4). In a
+/// folder others can write to, such as `/tmp`, anyone can leave a symbolic
+/// link or a hard link at the name the report is about to take, so that
+/// writing the report truncates whatever file of the user's it leads to.
+/// So:
+///
+/// - A `path` that is a symbolic link is refused.
+/// - A report is written to a new file next to `path`, created for this
+///   write alone and readable by its owner only, and then renamed to
+///   `path`. A rename replaces the name and never follows it: what was at
+///   `path`, link or file, is replaced, not written into. It also means a
+///   scan that stops half way leaves the old report, not half of a new one.
+/// - A `path` that is not a regular file, such as `/dev/null`, is written
+///   to and otherwise left as it is: it is opened without being truncated or
+///   created, and only if it is the very thing that was looked at.
 fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
     let Some(path) = path.filter(|path| *path != Path::new(STDOUT)) else { return print(report) };
     let fail = |error| format!("cannot write {}: {error}", path.display());
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
+    match fs::symlink_metadata(path) {
+        Ok(found) if found.file_type().is_symlink() => Err(format!(
+            "cannot write {}: it is a symbolic link, and a report is never written through \
+             one; remove the link or choose another file",
+            path.display()
+        )),
+        Ok(found) if !found.is_file() && !found.is_dir() => {
+            let mut file = fs::OpenOptions::new().write(true).open(path).map_err(fail)?;
+            if !same_file(&found, &file.metadata().map_err(fail)?) {
+                return Err(fail(std::io::Error::other("it was replaced while being opened")));
+            }
+            file.write_all(report.as_bytes()).map_err(fail)
+        }
+        _ => replace(path, report.as_bytes()).map_err(fail),
     }
-    let mut file = options.open(path).map_err(fail)?;
+}
+
+/// Whether two looks at a path saw the same file.
+fn same_file(one: &fs::Metadata, other: &fs::Metadata) -> bool {
     #[cfg(unix)]
     {
-        // `mode` only applies to a new file; tighten one that existed.
-        use std::os::unix::fs::PermissionsExt as _;
-        if file.metadata().map_err(fail)?.is_file() {
-            file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(fail)?;
+        use std::os::unix::fs::MetadataExt as _;
+        one.dev() == other.dev() && one.ino() == other.ino() && !other.is_file()
+    }
+    #[cfg(not(unix))]
+    {
+        one.file_type() == other.file_type() && !other.is_file()
+    }
+}
+
+/// Writes `bytes` to a new file in the folder of `path`, readable by its
+/// owner only, and renames it to `path`.
+fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let name = path.file_name().ok_or_else(|| std::io::Error::other("it names no file"))?;
+    let folder = path.parent().filter(|folder| !folder.as_os_str().is_empty());
+    let folder = folder.unwrap_or_else(|| Path::new("."));
+    let (temporary, mut file) = new_file_beside(folder, name)?;
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    let renamed = written.and_then(|()| fs::rename(&temporary, path));
+    if renamed.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    renamed
+}
+
+/// A file of a name no other file has, in `folder`, made for this write:
+/// `.<name>.<process>.<n>.part`, readable by its owner only.
+fn new_file_beside(folder: &Path, name: &std::ffi::OsStr) -> std::io::Result<(PathBuf, fs::File)> {
+    let mut attempt: u32 = 0;
+    loop {
+        let mut temporary = std::ffi::OsString::from(".");
+        temporary.push(name);
+        temporary.push(format!(".{}.{attempt}.part", std::process::id()));
+        let temporary = folder.join(temporary);
+        let mut options = fs::OpenOptions::new();
+        // `create_new` refuses a name that is taken, a link included.
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        match options.open(&temporary) {
+            Ok(file) => {
+                #[cfg(unix)]
+                {
+                    // `mode` is narrowed by the umask, never widened; this
+                    // is the file's mode whatever the umask was.
+                    use std::os::unix::fs::PermissionsExt as _;
+                    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+                }
+                return Ok((temporary, file));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && attempt < 100 => {
+                attempt = attempt.saturating_add(1);
+            }
+            Err(error) => return Err(error),
         }
     }
-    file.write_all(report.as_bytes()).map_err(fail)
 }
 
 /// Where a command writes its reports.
