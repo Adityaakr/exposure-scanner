@@ -9,7 +9,21 @@ use libfuzzer_sys::fuzz_target;
 use xs_formats::dex::{self, Dex};
 
 fuzz_target!(|data: &[u8]| {
-    let Ok(dex) = Dex::parse(data) else { return };
+    // The header alone decides what the whole file is refused for, and an
+    // empty layout means both walks hand out nothing.
+    let layout = dex::Layout::read(&data[..data.len().min(dex::HEADER_BYTES)], data.len());
+    let dex = match Dex::parse(data) {
+        Ok(dex) => dex,
+        Err(error) => {
+            assert_eq!(layout.err(), Some(error));
+            return;
+        }
+    };
+    let layout = layout.expect("the header accepts what the whole file does");
+    if layout.is_empty() {
+        assert_eq!(dex.strings().count(), 0);
+        assert_eq!(dex.class_descriptors().count(), 0);
+    }
 
     let mut handed_out = 0usize;
     for string in dex.strings() {

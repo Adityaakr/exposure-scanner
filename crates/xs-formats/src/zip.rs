@@ -414,11 +414,190 @@ fn inflate(data: &[u8], declared: usize, out: &mut Vec<u8>) -> Result<(), ReadEr
     Ok(())
 }
 
+/// The first `len` bytes the DEFLATE stream `data` inflates to, if it gets
+/// that far without an error.
+#[must_use]
+pub fn inflate_prefix(data: &[u8], len: usize) -> Option<Vec<u8>> {
+    let mut out = vec![0; len];
+    let mut state = DecompressorOxide::new();
+    let (status, _, wrote) =
+        decompress(&mut state, data, &mut out, 0, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    match status {
+        TINFLStatus::Done | TINFLStatus::HasMoreOutput if wrote == len => Some(out),
+        _ => None,
+    }
+}
+
+/// The farthest back a DEFLATE stream refers to what it has written.
+const DEFLATE_HISTORY: usize = 32 << 10;
+
+/// Inflates the DEFLATE stream `data`, which an entry declares to hold
+/// `declared` bytes, keeping only its first `keep` bytes: what [`inflate`]
+/// would decide of the stream, without holding all that it writes.
+///
+/// `out` ends up holding the first `keep` bytes of the output, or fewer if
+/// the stream ends sooner. The rest is written into `scratch`, of which
+/// only the last 32 KiB a stream can refer back to are kept, so the memory
+/// is `keep` plus a fixed window whatever the entry declares. `scratch` is
+/// reused for every call.
+///
+/// The output is limited the way [`inflate`] limits it, to the same lengths
+/// at the same points, so a stream that it accepts is accepted here and one
+/// it refuses is refused.
+///
+/// # Errors
+///
+/// [`FormatError::Malformed`] whenever [`inflate`] would fail.
+pub fn inflate_head(
+    data: &[u8],
+    declared: usize,
+    keep: usize,
+    out: &mut Vec<u8>,
+    scratch: &mut Vec<u8>,
+) -> Result<(), ReadError> {
+    const STEP: usize = 64 << 10;
+    let keep = keep.min(declared);
+    out.clear();
+    out.resize(keep, 0);
+    scratch.clear();
+    scratch.resize(DEFLATE_HISTORY + STEP, 0);
+    let mut state = DecompressorOxide::new();
+    let mut input = data;
+    // How much `inflate` would have room for: it doubles, up to `declared`.
+    let mut limit = declared.min(FIRST_OUTPUT_BYTES);
+    // How much has been written in all, and where in `scratch` the next byte
+    // goes once the head is full.
+    let (mut written, mut at) = (0usize, 0usize);
+    loop {
+        let room = limit.saturating_sub(written);
+        let (status, read, wrote) = if written < keep {
+            // The head is written where it is kept, as `inflate` writes it.
+            let end = keep.min(limit);
+            let window = out.get_mut(..end).ok_or(MALFORMED)?;
+            decompress(&mut state, input, window, written, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF)
+        } else {
+            if written == keep {
+                // Move the history the stream may refer to into the scratch
+                // window, and write on after it.
+                let history = keep.min(DEFLATE_HISTORY);
+                let from = keep.saturating_sub(history);
+                let (front, _) = scratch.split_at_mut(history);
+                front.copy_from_slice(out.get(from..keep).ok_or(MALFORMED)?);
+                at = history;
+            }
+            if at == scratch.len() {
+                scratch.copy_within(at.saturating_sub(DEFLATE_HISTORY)..at, 0);
+                at = DEFLATE_HISTORY;
+            }
+            let end = scratch.len().min(at.saturating_add(room));
+            let window = scratch.get_mut(..end).ok_or(MALFORMED)?;
+            decompress(&mut state, input, window, at, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF)
+        };
+        input = input.get(read..).unwrap_or_default();
+        if written >= keep {
+            at = at.saturating_add(wrote);
+        }
+        written = written.saturating_add(wrote);
+        match status {
+            TINFLStatus::Done => break,
+            // A window of this function's own ran full, not the room that
+            // `inflate` would have had.
+            TINFLStatus::HasMoreOutput if written < limit => {}
+            TINFLStatus::HasMoreOutput if limit < declared => {
+                limit = limit.saturating_mul(2).max(1).min(declared);
+            }
+            _ => return Err(MALFORMED),
+        }
+    }
+    if written != declared {
+        return Err(MALFORMED);
+    }
+    out.truncate(keep.min(written));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
 
     use super::*;
+
+    /// Content made from a seed: runs, repeats of what came before and
+    /// noise, so that a stream holds literals and references alike.
+    fn seeded(seed: u64, len: usize) -> Vec<u8> {
+        let mut state = seed | 1;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut out: Vec<u8> = Vec::with_capacity(len);
+        while out.len() < len {
+            let pick = next();
+            let run = (pick >> 8) as usize % 300 + 1;
+            match pick % 3 {
+                0 => out.extend(std::iter::repeat_n((pick >> 20) as u8, run)),
+                1 if out.len() > 1 => {
+                    let back = (pick >> 24) as usize % out.len().min(40_000) + 1;
+                    for _ in 0..run {
+                        out.push(out[out.len() - back]);
+                    }
+                }
+                _ => out.extend((0..run).map(|_| next() as u8)),
+            }
+        }
+        out.truncate(len);
+        out
+    }
+
+    /// What `inflate` decides of a stream, and the first `keep` bytes of
+    /// what it wrote.
+    fn inflated_whole(data: &[u8], declared: usize, keep: usize) -> Result<Vec<u8>, ReadError> {
+        let mut out = Vec::new();
+        super::inflate(data, declared, &mut out)?;
+        out.truncate(keep);
+        Ok(out)
+    }
+
+    fn inflated_head(data: &[u8], declared: usize, keep: usize) -> Result<Vec<u8>, ReadError> {
+        let (mut out, mut scratch) = (Vec::new(), Vec::new());
+        inflate_head(data, declared, keep, &mut out, &mut scratch)?;
+        assert!(scratch.len() <= DEFLATE_HISTORY + (64 << 10), "the window grew");
+        Ok(out)
+    }
+
+    /// A reference to a byte before the first one: `inflate` refuses it,
+    /// and so must a reader that keeps less than the whole output.
+    #[test]
+    fn a_reference_before_the_start_is_refused_by_both() {
+        // One fixed-Huffman block: a match of 3 at distance 1, then the end.
+        let data = [0x03, 0x02, 0x00, 0x00];
+        assert_eq!(inflated_whole(&data, 3, 0), Err(MALFORMED));
+        for keep in [0, 1, 3] {
+            assert_eq!(inflated_head(&data, 3, keep), Err(MALFORMED), "keep {keep}");
+        }
+    }
+
+    #[test]
+    fn the_head_is_kept_and_the_rest_checked_at_every_size_around_a_step() {
+        for len in [0, 1, 0x70, 64 << 10, (64 << 10) + 1, 96 << 10, (96 << 10) + 7, 300_000] {
+            let bytes = seeded(len as u64 + 3, len);
+            let data = miniz_oxide::deflate::compress_to_vec(&bytes, 6);
+            for declared in [len.saturating_sub(1), len, len + 1] {
+                for keep in [0, 0x70, len] {
+                    assert_eq!(
+                        inflated_head(&data, declared, keep),
+                        inflated_whole(&data, declared, keep),
+                        "len {len} declared {declared} keep {keep}"
+                    );
+                }
+            }
+            if len > 0 {
+                assert_eq!(inflated_head(&data, len, 0x70).unwrap(), bytes[..len.min(0x70)]);
+            }
+        }
+    }
     use crate::testkit::ZipBuilder;
 
     const OVER_BUDGET: ReadError = ReadError::Format(FormatError::OverBudget(Budget::Bytes));
@@ -805,6 +984,39 @@ mod tests {
     }
 
     proptest! {
+        /// Build plan: whatever `inflate` accepts or refuses, so does
+        /// `inflate_head`, on valid streams of any size, cut, damaged or
+        /// declared at the wrong size, and on bytes that are no stream.
+        #[test]
+        fn inflate_head_decides_as_inflate_does(
+            seed in any::<u64>(),
+            len in prop_oneof![0..2000usize, 60_000..140_000usize, 190_000..270_000usize],
+            level in 0..10u8,
+            declared_delta in -2..3i64,
+            keep in prop_oneof![Just(0usize), Just(0x70), 0..5000usize],
+            damage in prop::collection::vec((any::<prop::sample::Index>(), any::<u8>()), 0..3),
+            cut in prop::option::of(any::<prop::sample::Index>()),
+            garbage in any::<bool>(),
+        ) {
+            let bytes = seeded(seed, len);
+            let mut data = if garbage {
+                seeded(seed ^ 0x5555, len.min(5000))
+            } else {
+                miniz_oxide::deflate::compress_to_vec(&bytes, level)
+            };
+            for (at, value) in damage {
+                if !data.is_empty() {
+                    let at = at.index(data.len());
+                    data[at] = value;
+                }
+            }
+            if let Some(cut) = cut {
+                data.truncate(cut.index(data.len() + 1));
+            }
+            let declared = usize::try_from((len as i64 + declared_delta).max(0)).unwrap();
+            prop_assert_eq!(inflated_head(&data, declared, keep), inflated_whole(&data, declared, keep));
+        }
+
         #[test]
         fn random_bytes_never_panic(bytes in prop::collection::vec(any::<u8>(), 0..300)) {
             let _ = read(&bytes);
