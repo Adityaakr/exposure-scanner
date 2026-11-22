@@ -479,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "xs-collect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "psl",
  "rayon",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "xs-formats"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "miniz_oxide",
  "plist",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "xs-match"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aho-corasick",
  "xs-model",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "xs-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -532,7 +532,7 @@ dependencies = [
 
 [[package]]
 name = "xs-rules"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "minisign-verify",
  "serde_json",

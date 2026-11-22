@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "exposure"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lexopt",
  "serde",
@@ -872,7 +872,7 @@ checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 
 [[package]]
 name = "xs-collect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "psl",
@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "xs-derive"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "psl",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "xs-formats"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "miniz_oxide",
  "plist",
@@ -909,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "xs-match"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aho-corasick",
  "proptest",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "xs-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "serde",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "xs-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "serde",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "xs-rules"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "minisign",
  "minisign-verify",
@@ -953,7 +953,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "minisign",
  "miniz_oxide",

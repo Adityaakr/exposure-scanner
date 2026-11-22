@@ -52,7 +52,7 @@
 
 <!-- The hero: the claim, what the tests show, and a real scan -->
 <section class="hero" aria-labelledby="hero-title">
-  <p class="kicker"><span class="blip" aria-hidden="true"></span><a href="https://github.com/Adityaakr/exposure-scanner/blob/main/CHANGELOG.md">v0.1.0</a><span class="sep" aria-hidden="true">//</span><span>Free, open source, offline</span></p>
+  <p class="kicker"><span class="blip" aria-hidden="true"></span><a href="https://github.com/Adityaakr/exposure-scanner/blob/main/CHANGELOG.md">v0.2.0</a><span class="sep" aria-hidden="true">//</span><span>Free, open source, offline</span></p>
   <h1 id="hero-title" data-type>See whose code is inside your apps.</h1>
   <p class="lede">Every SDK an app ships, the company behind it, and the file that proves it. exposure runs on your machine, and it has no network code at all.</p>
   <div class="actions">
@@ -71,10 +71,10 @@
   </div>
 
   <div class="term" data-play role="group" aria-label="Terminal: exposure scanning two test apps">
-    <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">built from main</span></div>
-<pre class="lines"><span class="ln"><span class="c"># two synthetic test apps from the repository</span></span><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk macos/ElectronSkeleton.app</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 2 apps.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (1 of 2 things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics by PostHog Inc., in ElectronSkeleton and Skeleton.</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with an outbound firewall such as LuLu (free) or Little</span><span class="ln i7">Snitch.</span><span class="ln"> </span><span class="ln">1 more entry in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">2</span> apps with code or an endpoint of a company other than their publisher</span><span class="ln i2">and beside these: 1 SDK of 1 company in the Android apps, in categories the</span><span class="ln i2">headline does not count</span></pre>
+    <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
+<pre class="lines"><span class="ln"><span class="c"># two synthetic test apps from the repository</span></span><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk macos/ElectronSkeleton.app</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 2 apps.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (1 of 2 things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics by PostHog Inc., in ElectronSkeleton and Skeleton. In</span><span class="ln i7">ElectronSkeleton: found as text in the app's code (one kind of evidence),</span><span class="ln i7">not as a name read from a table the app declares.</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with an outbound firewall such as LuLu (free) or Little</span><span class="ln i7">Snitch.</span><span class="ln"> </span><span class="ln">1 more entry in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">2</span> apps with code or an endpoint of a company other than their publisher</span><span class="ln i2">and beside these: 1 SDK of 1 company in the Android apps, in categories the</span><span class="ln i2">headline does not count</span></pre>
   </div>
-  <p class="note">Real output on two synthetic test apps from the repository, from exposure built from main: this summary ships with the next release, and 0.1.0 prints the counts first, then "What you can do first". <a href="sample/">Open the report it is from</a>.</p>
+  <p class="note">Real output of exposure 0.2.0 on two synthetic test apps from the repository. <a href="sample/">Open the report it is from</a>.</p>
 </section>
 
 <!-- What it does -->
@@ -125,7 +125,7 @@
 <section class="sec story howto" id="install" aria-labelledby="steps-title">
   <div class="sec-head"><span class="idx">02</span>How to use it</div>
   <h2 id="steps-title" data-type>Install it, then scan <span class="em">one app or all of them</span>.</h2>
-  <p>Pick your system. Each step has the exact command and what it prints. A command with a copy button works in exposure 0.1.0, the current release; a faded one ships with the next release.</p>
+  <p>Pick your system. Each step has the exact command and what it prints. Every command here works in exposure 0.2.0, the current release.</p>
 
   <fieldset class="os-pick">
     <legend>Your system</legend>
@@ -157,7 +157,7 @@
         <div class="code" data-copy><pre><span class="p">$ </span>xcode-select --install
 <span class="p">$ </span>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 <span class="p">$ </span>source "$HOME/.cargo/env"
-<span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.1.0 exposure</pre></div>
+<span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.2.0 exposure</pre></div>
       </div>
       <div data-os="linux android">
         <p class="os-only">Linux, or a computer for Android packages</p>
@@ -165,16 +165,17 @@
         <p data-os="android">On the Mac or Linux machine: Rust 1.97 or later, then one <code>cargo install</code>. On a Mac, run <code>xcode-select --install</code> first.</p>
         <div class="code" data-copy><pre><span class="p">$ </span>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 <span class="p">$ </span>source "$HOME/.cargo/env"
-<span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.1.0 exposure</pre></div>
+<span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.2.0 exposure</pre></div>
       </div>
       <p class="shows">What it prints</p>
       <div class="term" data-play role="group" aria-label="Terminal: checking the installed version">
         <div class="term-bar"><span class="term-title">the build takes a minute or two, then exposure is in ~/.cargo/bin</span></div>
-<pre class="lines"><span class="ln"><span class="p">$ </span><span class="cmd">exposure --version</span></span><span class="ln">exposure 0.1.0</span></pre>
+<pre class="lines"><span class="ln"><span class="p">$ </span><span class="cmd">exposure --version</span></span><span class="ln">exposure 0.2.0</span></pre>
       </div>
-      <div class="code is-planned" role="group" aria-label="Homebrew commands for the next release, not available yet"><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+      <p>Or, on macOS or Linux, with Homebrew, from the repository's own tap. It builds the release from source too, and brings the Rust compiler for it:</p>
+      <div class="code" data-copy><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
 <span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
-      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span><span class="planned next">Next release</span> Homebrew, from the repository's own tap, building from source. The formula is merged and ships with the next release; until then, install from source above.</span></p>
+      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span><code>brew upgrade</code> installs the next release once the formula names it.</span></p>
     </li>
 
     <li class="step" data-os="mac linux">
@@ -185,12 +186,12 @@
         <div class="code" data-copy><pre><span class="p">$ </span>exposure scan</pre></div>
         <p class="shows">What it prints</p>
         <div class="term" data-play role="group" aria-label="Terminal: the shape of what exposure scan prints">
-          <div class="term-bar"><span class="term-title">the shape of it: the numbers and names are your Mac's, and stay on it</span><span class="term-tag">exposure 0.1.0</span></div>
-<pre class="lines"><span class="ln"><span class="p">$ </span><span class="cmd">exposure scan</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned <span class="ph">n</span> apps.</span></span><span class="ln i2 h2"><span class="ph">n</span> companies whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="ph">n</span> apps with code or an endpoint of a company other than their publisher</span><span class="ln"> </span><span class="ln">What you can do first (<span class="ph">n</span> of <span class="ph">n</span>):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="ph">the SDK</span></span><span class="ln i7"><span class="ph">its category</span>, by <span class="ph">its company</span>, in <span class="ph">n</span> apps: <span class="ph">their names</span></span><span class="ln i7"><span class="ph">the step to take</span></span><span class="ln"> </span><span class="ln">The report has every step and the evidence behind each finding. It lists apps</span><span class="ln">you use, so keep it private.</span></pre>
+          <div class="term-bar"><span class="term-title">the shape of it: the numbers and names are your Mac's, and stay on it</span><span class="term-tag">exposure 0.2.0</span></div>
+<pre class="lines"><span class="ln"><span class="p">$ </span><span class="cmd">exposure scan</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned <span class="ph">n</span> apps.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (<span class="ph">n</span> of <span class="ph">n</span> things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="ph">the SDK</span></span><span class="ln i7"><span class="ph">its category</span> by <span class="ph">its company</span>, in <span class="ph">their names</span>.</span><span class="ln i7"><span class="ph">the first step to take</span></span><span class="ln"> </span><span class="ln"><span class="ph">n</span> more entries in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="ph">n</span> companies whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="ph">n</span> apps with code or an endpoint of a company other than their publisher</span><span class="ln"> </span><span class="ln">The report has every step and the evidence behind each finding. It lists apps</span><span class="ln">you use, so keep it private.</span></pre>
         </div>
         <ul class="points">
           <li><strong>The counts</strong> are of companies and apps, never a score. Crash reporting and other services are listed in the report, not counted.</li>
-          <li><strong>What you can do first</strong> ranks steps by how much they matter: an app's own opt-out where one is documented, the hosts to block with a firewall, the System Settings pane for a permission. exposure applies none of them.</li>
+          <li><strong>What needs your attention first</strong> ranks steps by how much they matter: an app's own opt-out where one is documented, the hosts to block with a firewall, the System Settings pane for a permission. exposure applies none of them.</li>
           <li><strong>The report</strong> replaces the one before at each scan. An app that has not changed since is not read again.</li>
         </ul>
       </div>
@@ -209,34 +210,34 @@
       <div class="code" data-copy><pre><span class="p">$ </span>exposure scan /Applications/<span class="ph">YourApp</span>.app</pre></div>
       <p class="shows">What it prints, for a test app from the repository</p>
       <div class="term" data-play role="group" aria-label="Terminal: exposure scanning one test app">
-        <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.1.0</span></div>
-<pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan macos/ElectronSkeleton.app</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 1 app.</span></span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">1</span> app with code or an endpoint of a company other than their publisher</span><span class="ln"> </span><span class="ln">What you can do first (2 of 2):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics, by PostHog Inc., in 1 app: ElectronSkeleton</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with an outbound firewall such as LuLu (free) or Little</span><span class="ln i7">Snitch.</span><span class="ln"> </span><span class="ln i2 h3">2. <span class="dim">[Low]</span> <span class="b">Sentry</span></span><span class="ln i7">Crash reporting, by Functional Software, Inc. (Sentry), in 1 app:</span><span class="ln i7">ElectronSkeleton</span><span class="ln i7">No setting to turn it off is on record. Remove the apps you can do</span><span class="ln i7">without.</span></pre>
+        <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
+<pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan macos/ElectronSkeleton.app</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 1 app.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (1 of 2 things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics by PostHog Inc., in ElectronSkeleton. Found as text in the</span><span class="ln i7">app's code (one kind of evidence), not as a name read from a table the</span><span class="ln i7">app declares.</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with an outbound firewall such as LuLu (free) or Little</span><span class="ln i7">Snitch.</span><span class="ln"> </span><span class="ln">1 more entry in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">1</span> app with code or an endpoint of a company other than their publisher</span></pre>
       </div>
     </li>
 
     <li class="step" data-os="mac linux android">
       <h3>Scan an Android app</h3>
-      <p>Name the package file: your own release build, or any <code>.apk</code> you have. It is read where it is, on your computer: nothing is extracted to disk, nothing in it runs, and nothing is uploaded.</p>
+      <p>Name the package file: your own release build, or any <code>.apk</code> or Android App Bundle (<code>.aab</code>, the file uploaded to Google Play) you have. It is read where it is, on your computer: nothing is extracted to disk, nothing in it runs, and nothing is uploaded.</p>
       <div class="code" data-copy><pre><span class="p">$ </span>exposure scan ~/Downloads/<span class="ph">app-release</span>.apk</pre></div>
-      <div class="code is-planned" role="group" aria-label="A command for the next release, not available yet"><pre><span class="p">$ </span>exposure scan ~/Downloads/app-release.aab</pre></div>
-      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span><span class="planned next">Next release</span> Android App Bundles (<code>.aab</code>), the files uploaded to Google Play, scanned like the APKs they hold.</span></p>
+      <div class="code" data-copy><pre><span class="p">$ </span>exposure scan ~/Downloads/<span class="ph">app-release</span>.aab</pre></div>
+      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span>A bundle is scanned like the APKs it stands for: its manifest, its resources and the code of every module.</span></p>
       <p class="shows">What it prints on a Mac, for a test package from the repository</p>
       <div class="term" data-play role="group" aria-label="Terminal: exposure scanning a test Android package">
-        <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.1.0</span></div>
-<pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 1 app.</span></span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">1</span> app with code or an endpoint of a company other than their publisher</span><span class="ln"> </span><span class="ln">What you can do first (2 of 2):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics, by PostHog Inc., in 1 app: Skeleton</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with a firewall app that works without root, such as</span><span class="ln i7">NetGuard.</span><span class="ln"> </span><span class="ln i2 h3">2. <span class="dim">[Low]</span> <span class="b">Sentry</span></span><span class="ln i7">Crash reporting, by Functional Software, Inc. (Sentry), in 1 app:</span><span class="ln i7">Skeleton</span><span class="ln i7">No setting to turn it off is on record. Remove the apps you can do</span><span class="ln i7">without.</span></pre>
+        <div class="term-bar"><span class="term-title">~/exposure-scanner/tests/fixtures</span><span class="term-tag">exposure 0.2.0</span></div>
+<pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 1 app.</span></span><span class="ln"> </span><span class="ln">What needs your attention first (1 of 2 things you can do):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics by PostHog Inc., in Skeleton.</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with a firewall app that works without root, such as</span><span class="ln i7">NetGuard.</span><span class="ln"> </span><span class="ln">1 more entry in the report, under What you can do.</span><span class="ln"> </span><span class="ln">The headline counts:</span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">1</span> app with code or an endpoint of a company other than their publisher</span><span class="ln i2">and beside these: 1 SDK of 1 company in the Android apps, in categories the</span><span class="ln i2">headline does not count</span></pre>
       </div>
     </li>
 
     <li class="step" data-os="mac linux android">
-      <h3>Compare two scans <span class="planned next">Next release</span></h3>
-      <p>Save each scan as a JSON report, which works today. Then compare the two: which findings the new build adds, which it no longer has, and which changed grade, app by app. An app is followed from one build to the next by its platform and app id.</p>
+      <h3>Compare two scans</h3>
+      <p>Save each scan as a JSON report. Then compare the two: which findings the new build adds, which it no longer has, and which changed grade, app by app. An app is followed from one build to the next by its platform and app id.</p>
       <div class="code" data-copy><pre><span class="p">$ </span>exposure scan --json old.json <span class="ph">app-1.0</span>.apk
 <span class="p">$ </span>exposure scan --json new.json <span class="ph">app-1.1</span>.apk</pre></div>
-      <div class="code is-planned" role="group" aria-label="A command for the next release, not available yet"><pre><span class="p">$ </span>exposure diff old.json new.json</pre></div>
-      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span><span class="planned next">Next release</span> <code>exposure diff</code> is merged and ships with the next release. With <code>--fail-on headline</code>, it exits with status 3 when the new build adds an SDK that counts in the headline: a release gate for CI.</span></p>
-      <p class="shows">What it prints, built from main: two scans of the test apps, the second with one app more</p>
-      <div class="term is-planned" data-play role="group" aria-label="Terminal: exposure diff comparing two scans">
-        <div class="term-bar"><span class="term-title">~/exposure-scanner</span><span class="term-tag">next release</span></div>
+      <div class="code" data-copy><pre><span class="p">$ </span>exposure diff old.json new.json</pre></div>
+      <p class="code-note"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><span>With <code>--fail-on headline</code>, <code>exposure diff</code> exits with status 3 when the new build adds an SDK that counts in the headline: a release gate for CI.</span></p>
+      <p class="shows">What it prints: two scans of the test apps, the second with one app more</p>
+      <div class="term" data-play role="group" aria-label="Terminal: exposure diff comparing two scans">
+        <div class="term-bar"><span class="term-title">~/exposure-scanner</span><span class="term-tag">exposure 0.2.0</span></div>
 <pre class="lines"><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure diff old.json new.json</span></span><span class="ln h2">ElectronSkeleton (macOS, org.example.exposure.electron-skeleton), 1.0.0: only in the new report</span><span class="ln i2 h2"><span class="add">+</span> PostHog (Analytics, PostHog Inc., counted in the headline): contains</span><span class="ln i2 h2"><span class="add">+</span> Sentry (Crash reporting, Functional Software, Inc. (Sentry)): contains</span><span class="ln"> </span><span class="ln">2 findings added, 0 findings removed, 0 findings changed grade, in 1 of 2 apps.</span></pre>
       </div>
     </li>
@@ -268,18 +269,18 @@
         <ol class="attn-list">
           <li>
             <p class="attn-what"><span class="prio">High</span> <strong>PostHog</strong></p>
-            <p>Analytics by PostHog Inc., in ElectronSkeleton and Skeleton.</p>
+            <p>Analytics by PostHog Inc., in ElectronSkeleton and Skeleton. In ElectronSkeleton: found as text in the app&#39;s code (one kind of evidence), not as a name read from a table the app declares.</p>
             <p class="attn-do"><span class="do-label">First step:</span> Block app.posthog.com, eu.i.posthog.com, i.posthog.com and us.i.posthog.com with an outbound firewall such as LuLu (free) or Little Snitch. <a href="sample/report.html#t-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">Every step</a></p>
           </li>
           <li>
             <p class="attn-what"><span class="prio">High</span> <strong>Example Helper</strong></p>
             <p>Browser extension. It may read and change data on every website you visit, read what you copy, read and change the cookies of the sites it can reach and see the address and title of every tab you have open.</p>
-            <p class="attn-do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open chrome://extensions in your browser. <a href="sample/report.html#t-10a2ec3ab64002c2f89bc6dc05b196db601310b7e7622053a42a0534c641bf2c">Every step</a></p>
+            <p class="attn-do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open chrome://extensions in your browser. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first. <a href="sample/report.html#t-10a2ec3ab64002c2f89bc6dc05b196db601310b7e7622053a42a0534c641bf2c">Every step</a></p>
           </li>
           <li>
             <p class="attn-what"><span class="prio">High</span> <strong>Example Proxy</strong></p>
             <p>Browser extension. It may read and change data on every website you visit, read and change your browsing history, exchange messages with a program installed on this computer, route the browser's traffic through a proxy it chooses and watch the network requests of the sites it can reach.</p>
-            <p class="attn-do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open about:addons in your browser. <a href="sample/report.html#t-5576e6af8335a86234c7a35f2ab5413b35d069c5d5a676abafa80aa4354e4660">Every step</a></p>
+            <p class="attn-do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open about:addons in your browser. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first. <a href="sample/report.html#t-5576e6af8335a86234c7a35f2ab5413b35d069c5d5a676abafa80aa4354e4660">Every step</a></p>
           </li>
         </ol>
       </div>
@@ -293,6 +294,7 @@
     <article class="fix" aria-label="The steps for PostHog, from the sample report">
       <p class="attn-what"><span class="prio">High</span> <strong>PostHog</strong> <span class="tag">Analytics</span></p>
       <p class="fix-sub">PostHog Inc. · 2 apps</p>
+      <p>In ElectronSkeleton: found as text in the app&#39;s code (one kind of evidence), not as a name read from a table the app declares.</p>
       <ol class="fix-steps">
         <li>Block these hosts for <strong>ElectronSkeleton</strong> with an outbound firewall such as LuLu (free) or Little Snitch: app.posthog.com, eu.i.posthog.com, i.posthog.com, us.i.posthog.com. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
         <li>Block these hosts for <strong>Skeleton</strong> with a firewall app that works without root, such as NetGuard: app.posthog.com, eu.i.posthog.com, i.posthog.com, us.i.posthog.com. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
@@ -306,11 +308,11 @@
         <li>Limit the sites it can read: open chrome://extensions in the browser, choose Details under the extension, and under Site access choose On click or On specific sites. It then reads a site only when you allow it.</li>
         <li>The browser has no switch for its other permissions: they stay as long as the extension is installed.</li>
         <li>Or remove it: open chrome://extensions in the browser and choose Remove under the extension. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
+        <li>The findings show the manifest keys it asks in.</li>
       </ol>
     </article>
   </div>
   <p>The test apps have no setting on record, so their first step is a block list. For an app whose publisher documents a setting, the report puts that setting first; the rule pack has such steps on record for a number of common apps, browsers among them. A step is as current as the publisher's documentation, and a scan of files cannot show what an app sends once a setting is off. Nothing is changed for you: you decide.</p>
-  <p class="fine"><span class="planned next">Next release</span> This opening and the added app steps are merged on main and ship with the next release. A report from 0.1.0 opens with its summary counts, then its checklist, What you can do.</p>
   <div class="try">
     <a class="btn btn-primary btn-sm" href="sample/">Open the sample report</a>
     <a class="link-more" href="sample/report.html#actions">Every step in it</a>
@@ -448,7 +450,7 @@
     <li>
       <h3>Teams that ship apps</h3>
       <p>Know which third-party SDKs your release actually contains, from the build itself, before it goes out. Scan an <code>.apk</code> or a Mac app on a machine you control and keep the JSON evidence with your privacy review. Your build never leaves your machine.</p>
-      <p class="how"><span class="planned next">Next release</span> <span>a diff between two builds</span><span>a release gate in CI</span><span><code>.aab</code> bundles</span></p>
+      <p class="how"><span class="planned today">New in 0.2.0</span> <span>a diff between two builds</span><span>a release gate in CI</span><span><code>.aab</code> bundles</span></p>
       <p class="how"><span class="planned">Planned</span> <span>a GitHub Action</span></p>
     </li>
     <li>
@@ -466,11 +468,11 @@
 <section class="sec story" id="next" aria-labelledby="next-title">
   <div class="sec-head"><span class="idx">09</span>What's next</div>
   <h2 id="next-title" data-type>From a scan to <span class="em">a release gate</span>.</h2>
-  <p>The Homebrew formula and three of these are merged and listed as unreleased in the changelog: they ship with the next release. The rest is planned.</p>
+  <p>Homebrew and the first three of these shipped in 0.2.0. The rest is planned.</p>
   <ul class="uses">
-    <li><h3>Compare two builds <span class="planned next">Next release</span></h3><p><code class="is-planned">exposure diff</code>: the SDKs a release added or dropped, per app.</p></li>
-    <li><h3>A release gate <span class="planned next">Next release</span></h3><p><code class="is-planned">--fail-on</code>: a non-zero exit when a build ships an SDK your policy does not allow.</p></li>
-    <li><h3>Android App Bundles <span class="planned next">Next release</span></h3><p>The <code>.aab</code> files uploaded to Google Play, scanned like the APKs they hold.</p></li>
+    <li><h3>Compare two builds <span class="planned today">0.2.0</span></h3><p><code>exposure diff</code>: the SDKs a release added or dropped, per app.</p></li>
+    <li><h3>A release gate <span class="planned today">0.2.0</span></h3><p><code>--fail-on</code>: a non-zero exit when a build ships an SDK your policy does not allow.</p></li>
+    <li><h3>Android App Bundles <span class="planned today">0.2.0</span></h3><p>The <code>.aab</code> files uploaded to Google Play, scanned like the APKs they hold.</p></li>
     <li><h3>A GitHub Action <span class="planned">Planned</span></h3><p>Scans each build, comments the SDK difference against your last release, and fails on a policy breach.</p></li>
     <li><h3>A browser APK check <span class="planned">Planned</span></h3><p>Drop an <code>.apk</code> on a page. It is scanned in your browser, and nothing is uploaded.</p></li>
     <li><h3>More inputs <span class="planned">Planned</span></h3><p>Apps pulled from a phone over USB, and the App Privacy Report an iPhone exports.</p></li>
@@ -510,7 +512,7 @@
     </details>
     <details>
       <summary>And my Android phone?</summary>
-      <div class="answer"><p>It scans <code>.apk</code> files on a Mac or a Linux machine. <span class="planned next">Next release</span> Android App Bundles (<code>.aab</code>) too. <span class="planned">Planned</span> Pull the apps from a phone connected over USB.</p></div>
+      <div class="answer"><p>It scans <code>.apk</code> files and Android App Bundles (<code>.aab</code>) on a Mac or a Linux machine. <span class="planned">Planned</span> Pull the apps from a phone connected over USB.</p></div>
     </details>
     <details>
       <summary>Windows?</summary>
@@ -522,7 +524,7 @@
     </details>
     <details>
       <summary>Why build from source?</summary>
-      <div class="answer"><p>A scanner that reads the list of your apps is more credible when you can build it yourself and get the same binary. The Homebrew formula, which ships with the next release, builds from source too.</p></div>
+      <div class="answer"><p>A scanner that reads the list of your apps is more credible when you can build it yourself and get the same binary. The Homebrew formula builds from source too.</p></div>
     </details>
     <details>
       <summary>Is it free?</summary>

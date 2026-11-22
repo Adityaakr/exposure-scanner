@@ -7,9 +7,9 @@ through which apps, with the evidence for every finding.**
 [![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
 
 > [!IMPORTANT]
-> **This project is under active development.** Milestone 1 is complete and
-> released as v0.1.0, from source only (see the [changelog](CHANGELOG.md)):
-> Homebrew builds it for you with one command.
+> **This project is under active development.** The current release is
+> v0.2.0, from source only (see the [changelog](CHANGELOG.md)): Homebrew
+> builds it for you with one command.
 > Commands, the report format and its output may still change between
 > versions. Suggestions, bug reports and contributions are welcome: open an
 > [issue](https://github.com/Adityaakr/exposure-scanner/issues) or read
@@ -154,8 +154,8 @@ $ brew install adityaakr/exposure-scanner/exposure
 
 The repository is its own tap: the formula is
 [`Formula/exposure.rb`](Formula/exposure.rb). It builds `exposure` from the
-source on `main` with `cargo install --locked`, so the build takes a minute
-or two; Homebrew brings the Rust compiler for it. On a Mac, Homebrew builds
+source of the latest release with `cargo install --locked`, so the build
+takes a minute or two; Homebrew brings the Rust compiler for it. On a Mac, Homebrew builds
 from source only with up-to-date Command Line Tools
 (`xcode-select --install`, or Software Update).
 
@@ -163,9 +163,9 @@ from source only with up-to-date Command Line Tools
   asks for: it trusts the tap on that install. `brew install exposure` works
   once the tap is trusted, with `brew trust adityaakr/exposure-scanner`, and
   on older versions of Homebrew without that step.
-- `brew upgrade` does not see new commits on `main`, since the formula's
-  version only changes with a release. `brew reinstall exposure` builds the
-  latest.
+- `brew upgrade` installs a new release once the formula names it.
+  `brew install --HEAD adityaakr/exposure-scanner/exposure` builds the
+  latest commit on `main` instead.
 
 **With cargo**, from source:
 
@@ -194,7 +194,7 @@ from source only with up-to-date Command Line Tools
    `--locked` builds with the exact dependency versions the project tests.
    The build takes a minute or two, and puts `exposure` in `~/.cargo/bin`.
    To install the release tag rather than the latest commit, add
-   `--tag v0.1.0`.
+   `--tag v0.2.0`.
 
 To build from a clone instead, `cargo build --release --package exposure`
 gives `target/release/exposure`; the clone's
@@ -444,7 +444,7 @@ A report is only as complete as what a device can show. It cannot see:
 |---|---|---|
 | **1. Static truth** | Rust core, evidence format, rule pack, collectors for macOS bundles, Electron apps and Android packages, resolver, HTML report | **Done: v0.1.0** |
 | 2. Phone and browser | iOS report import, Android phones over adb, browser join, browser extension audit, OS permission stores | Started: the browser extension audit is done |
-| 3. Fix and diff | Fix recipes with an undo log, snapshots, a diff between scans | Started: `exposure diff` between two reports is done |
+| 3. Fix and diff | Fix recipes with an undo log, snapshots, a diff between scans | Started: `exposure diff` between two reports is done (v0.2.0) |
 | 4. Confirmed | Platform data-archive adapters, lab capture | Planned |
 | 5. Public index | Scans of popular apps published per artifact hash; a signature contribution workflow | Planned |
 

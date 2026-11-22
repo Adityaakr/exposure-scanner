@@ -100,11 +100,11 @@ Three things to know:
 
 ## Rules for the copy
 
-Every sentence must be true of exposure 0.1.0, the current release, unless
+Every sentence must be true of exposure 0.2.0, the current release, unless
 it is marked **Next release** (merged on `main` and listed as unreleased in
 the changelog) or **Planned** (not built). A command that does not work in
 the current release is faded and has no copy button. Terminal output on the
-pages is real: what 0.1.0 prints for the fixtures, or, for a command marked
+pages is real: what 0.2.0 prints for the fixtures, or, for a command marked
 **Next release**, what `main` prints, and said so; where a scan of your own
 Mac is shown, only its shape is, with placeholders. Findings are about the
 synthetic fixtures or are company-level counts; the site names no
