@@ -235,10 +235,7 @@ says = "Anthropic documents switches for the app's crash reports and product ana
 [[app]]
 id = "chatgpt"
 name = "ChatGPT"
-apps = [
-    { platform = "macos", id = "com.openai.codex" },
-    { platform = "macos", id = "com.openai.chat" },
-]
+apps = [{ platform = "macos", id = "com.openai.chat" }]
 sources = [
     "https://help.openai.com/en/articles/20001535-managing-chatgpt-desktop-browser-policies-with-mdm",
     "https://help.openai.com/en/articles/9268871-how-is-data-retained-in-the-macos-app",
