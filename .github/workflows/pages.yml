@@ -4,7 +4,7 @@ name: pages
 # report on the site is not written by hand: site/build.sh builds exposure
 # from the same commit and scans the synthetic fixtures with it, so the
 # published report is what that code writes. Pull requests that touch the
-# site run the build and the checks, and publish nothing.
+# site or the scanner run the build and the checks, and publish nothing.
 #
 # Publishing needs GitHub Pages enabled for the repository, with "GitHub
 # Actions" as its source (Settings > Pages).
@@ -22,6 +22,11 @@ on:
   pull_request:
     paths:
       - "site/**"
+      - "crates/**"
+      - "rules/**"
+      - "tests/fixtures/**"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
