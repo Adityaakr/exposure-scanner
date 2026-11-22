@@ -307,7 +307,8 @@
       <li>
         <h3>Teams that ship apps</h3>
         <p>Know which third-party SDKs your release actually contains, from the build itself, before it goes out. Scan an <code>.apk</code> or a Mac app on a machine you control and keep the JSON evidence with your privacy review. Your build never leaves your machine.</p>
-        <p class="how"><span class="planned">Planned</span> <span>a diff between two builds</span><span>a release gate in CI</span><span>a GitHub Action</span><span><code>.aab</code> bundles</span></p>
+        <p class="how"><span class="planned next">Next release</span> <span>a diff between two builds</span><span>a release gate in CI</span><span><code>.aab</code> bundles</span></p>
+        <p class="how"><span class="planned">Planned</span> <span>a GitHub Action</span></p>
       </li>
       <li>
         <h3>People who want to know</h3>
@@ -340,7 +341,7 @@
         <p>From the repository's own tap, building from source.</p>
         <div class="code is-planned" role="group" aria-label="Planned commands, not available yet"><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
 <span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
-        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg>Not available yet. It works once the CLI v1 release adds the Homebrew formula to the repository; until then, install from source above.</p>
+        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg>Not available yet. The formula is merged and ships with the next release; until then, install from source above.</p>
       </div>
       <div>
         <p class="label">Then scan</p>
@@ -361,13 +362,14 @@
   <div class="sec-inner story">
     <p class="eyebrow">What's next</p>
     <h2 class="display" id="next-title">From a scan to <span class="em">a release gate</span>.</h2>
-    <p>None of this is built yet. It is listed so you know where the project is going.</p>
+    <p>Three of these are merged and listed as unreleased in the changelog: they ship with the next release. The rest is planned.</p>
     <ul class="uses">
-      <li><h3>Compare two builds <span class="planned">Planned</span></h3><p><code class="is-planned">exposure diff</code>: the SDKs a release added or dropped, per app.</p></li>
-      <li><h3>A release gate <span class="planned">Planned</span></h3><p>A non-zero exit when a build ships an SDK your policy does not allow.</p></li>
+      <li><h3>Compare two builds <span class="planned next">Next release</span></h3><p><code class="is-planned">exposure diff</code>: the SDKs a release added or dropped, per app.</p></li>
+      <li><h3>A release gate <span class="planned next">Next release</span></h3><p><code class="is-planned">--fail-on</code>: a non-zero exit when a build ships an SDK your policy does not allow.</p></li>
+      <li><h3>Android App Bundles <span class="planned next">Next release</span></h3><p>The <code>.aab</code> files uploaded to Google Play, scanned like the APKs they hold.</p></li>
       <li><h3>A GitHub Action <span class="planned">Planned</span></h3><p>Scans each build, comments the SDK difference against your last release, and fails on a policy breach.</p></li>
       <li><h3>A browser APK check <span class="planned">Planned</span></h3><p>Drop an <code>.apk</code> on a page. It is scanned in your browser, and nothing is uploaded.</p></li>
-      <li><h3>More inputs <span class="planned">Planned</span></h3><p>Android App Bundles, apps pulled from a phone over USB, and the App Privacy Report an iPhone exports.</p></li>
+      <li><h3>More inputs <span class="planned">Planned</span></h3><p>Apps pulled from a phone over USB, and the App Privacy Report an iPhone exports.</p></li>
     </ul>
   </div>
 </section>
@@ -406,7 +408,7 @@
       </details>
       <details>
         <summary>And my Android phone?</summary>
-        <div class="answer"><p>It scans <code>.apk</code> files on a Mac or a Linux machine. <span class="planned">Planned</span> Pull the apps from a phone connected over USB.</p></div>
+        <div class="answer"><p>It scans <code>.apk</code> files on a Mac or a Linux machine. <span class="planned next">Next release</span> Android App Bundles (<code>.aab</code>) too. <span class="planned">Planned</span> Pull the apps from a phone connected over USB.</p></div>
       </details>
       <details>
         <summary>Windows?</summary>

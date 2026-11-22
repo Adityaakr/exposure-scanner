@@ -395,6 +395,7 @@ strong { font-weight: 600; }
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .planned.today { color: var(--contains-ink); background: var(--contains-bg); box-shadow: none; }
+.planned.next { color: var(--contains-ink); box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* ---------- Code and terminal ---------- */
 

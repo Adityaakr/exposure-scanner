@@ -52,7 +52,7 @@
     <div class="wrap">
       <p class="eyebrow">Docs</p>
       <h1 id="page-title">Install exposure and read your first report.</h1>
-      <p class="lede">Everything here is true of exposure 0.1.0. Items not built yet are marked <span class="planned">Planned</span>. The full reference lives in the <a href="https://github.com/Adityaakr/exposure-scanner/tree/main/docs">repository's docs</a>.</p>
+      <p class="lede">Everything here is true of exposure 0.1.0, the current release. What is merged but not released yet is marked <span class="planned next">Next release</span>; what is not built yet is marked <span class="planned">Planned</span>. The full reference lives in the <a href="https://github.com/Adityaakr/exposure-scanner/tree/main/docs">repository's docs</a>.</p>
     </div>
   </section>
 
@@ -100,10 +100,10 @@
         </ol>
 
         <h3>Homebrew <span class="planned">Planned</span></h3>
-        <p>The repository will carry its own Homebrew tap, with a formula that builds from source:</p>
+        <p>The repository is its own Homebrew tap, with a formula that builds from source:</p>
         <div class="code is-planned" role="group" aria-label="Planned commands, not available yet"><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
 <span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
-        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg>Not available yet. It works once the CLI v1 release adds the Homebrew formula to the repository; until then, install from source above.</p>
+        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg>Not available yet. The formula is merged and ships with the next release; until then, install from source above.</p>
 
         <h3>From a clone</h3>
         <p>The clone's <code>rust-toolchain.toml</code> pins the exact toolchain.</p>
@@ -172,7 +172,7 @@ exposure --help | --version</pre></div>
           </table>
         </div>
         <p>For scripts, <code>exposure scan app-release.apk --json -</code> prints the JSON report on standard output. A summary goes to standard error, ending with a scope line that says where the scan looked; it names no app and no path.</p>
-        <p>A path that does not exist is refused before anything is read. After that, an app that cannot be read never stops the scan: it is reported as a coverage note, never as "nothing found". Today a scan that completes exits with status 0, whatever it finds. <span class="planned">Planned</span> A release-gate option that exits non-zero when a build breaks your policy.</p>
+        <p>A path that does not exist is refused before anything is read. After that, an app that cannot be read never stops the scan: it is reported as a coverage note, never as "nothing found". In 0.1.0 a scan that completes exits with status 0, whatever it finds. <span class="planned next">Next release</span> <code>--fail-on</code> exits with status 3 when a finding meets a condition, such as a company or a category, and <code>exposure diff OLD NEW</code> compares two JSON reports.</p>
       </section>
 
       <section id="files" aria-labelledby="files-title">
@@ -244,7 +244,8 @@ exposure --help | --version</pre></div>
               <tr><td>Linux</td><td>Every check runs there on every change. Scans the paths you name.</td></tr>
               <tr><td>Android packages (<code>.apk</code>)</td><td>Scanned by path on either.</td></tr>
               <tr><td>Browser extensions</td><td>Found in your profiles on macOS, scanned by path elsewhere.</td></tr>
-              <tr><td>Android App Bundles, phones, iOS exports</td><td><span class="planned">Planned</span></td></tr>
+              <tr><td>Android App Bundles (<code>.aab</code>)</td><td><span class="planned next">Next release</span></td></tr>
+              <tr><td>Phones, iOS exports</td><td><span class="planned">Planned</span></td></tr>
               <tr><td>Windows</td><td>Not planned yet.</td></tr>
             </tbody>
           </table>

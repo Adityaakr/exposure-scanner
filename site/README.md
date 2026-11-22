@@ -56,21 +56,41 @@ an inline script or style, when anything would load from another server,
 when a link inside the site points to a missing file or anchor, or when the
 sample report is missing or not the inert page the scanner writes.
 
-## Publishing
+## Deploying
 
-`.github/workflows/pages.yml` runs `build.sh` and `check.py` on every pull
-request that touches `site/`, and fails it if the committed sample report is
-out of date. On `main` it also publishes the built folder with GitHub Pages.
-That needs Pages enabled for the repository with **GitHub Actions** as the
-source (Settings > Pages). The site uses relative links only, so it works at
-`https://<owner>.github.io/exposure-scanner/` and on a custom domain alike;
-only the absolute address of the share image in each page's `og:image`
-names the Pages address.
+`site/` is the whole website, ready to serve as it is: static files, relative
+links only, fonts included, the sample report committed. There is no build
+step. Point any static host at the `site` folder.
+
+| Host | How |
+|---|---|
+| **Vercel** | Add New > Project > import this repository. Root Directory: `site`. Framework Preset: **Other**. Leave the Build Command and Output Directory empty. Deploy. From a terminal: `npx vercel deploy site --prod`. |
+| **Netlify** | Add new site > Import an existing project > this repository. Base directory: empty. Build command: empty. Publish directory: `site`. Deploy. Without Git, drop the `site` folder on <https://app.netlify.com/drop>. From a terminal: `npx netlify-cli deploy --dir site --prod`. |
+| **Cloudflare Pages** | Workers & Pages > Create > Pages > Connect to Git > this repository. Framework preset: **None**. Build command: empty (or `exit 0` if the form asks for one). Build output directory: `site`. Save and Deploy. From a terminal: `npx wrangler pages deploy site --project-name exposure`. |
+| **GitHub Pages** | Settings > Pages > Source: **GitHub Actions**. `.github/workflows/pages.yml` then publishes the site on every push to `main` that touches it or the scanner. |
+
+Three things to know:
+
+- **The sample report.** A host that serves the folder as it is serves the
+  committed `sample/report.html`. The GitHub Pages workflow instead builds
+  `exposure` from the same commit and writes the sample afresh before it
+  publishes, and its pull-request check fails when the committed copy is out
+  of date. After a change to the scanner, run `site/build.sh --sample` and
+  commit the result so every host shows the current report.
+- **The share image.** Each page's `og:image` names
+  `https://adityaakr.github.io/exposure-scanner/assets/og.png`, because link
+  previews need an absolute address. On another host, replace that address
+  in `index.html`, `sample/index.html` and `docs/index.html` with your own.
+- **The tooling.** `build.sh`, `check.py` and this file are served too when
+  the folder is published as it is. They hold nothing private. The GitHub
+  Pages workflow leaves them out.
 
 ## Rules for the copy
 
-Every sentence must be true of the code on `main`. Anything not built is
-marked **Planned**. Findings are about the synthetic fixtures or are
-company-level counts; the site names no third-party app as a finding.
-Wording states graded facts, as the report does: "ships", "may access",
-never "spies".
+Every sentence must be true of exposure 0.1.0, the current release, unless
+it is marked **Next release** (merged on `main` and listed as unreleased in
+the changelog) or **Planned** (not built). A command that does not work in
+the current release is faded and has no copy button. Findings are about the
+synthetic fixtures or are company-level counts; the site names no
+third-party app as a finding. Wording states graded facts, as the report
+does: "ships", "may access", never "spies".

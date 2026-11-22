@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-5OjasZD0iUXLT0sEVi0QpfCWEPt0sJvAa3WV1FeQ8+U='; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-Tld4UI1dnEZpmcgNJQFrML+4BYY0W5thNJnRXMj7cqI='; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
@@ -101,6 +101,7 @@ section { margin-top: 2.5rem; }
 .owner { color: var(--soft-ink); font-size: 0.9rem; }
 .where { font-size: 0.9rem; }
 .zero { font-weight: 600; }
+.beside { background: var(--panel); border-radius: 0.5rem; margin-top: 0.75rem; padding: 0.75rem 1rem; font-size: 0.9rem; }
 .note, .meta, .none { color: var(--soft-ink); font-size: 0.9rem; }
 .none { background: var(--panel); border-radius: 0.5rem; padding: 0.75rem 1rem; }
 .totals {
@@ -348,6 +349,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <div class="count"><p class="n">1</p><p class="label">company whose code the scanned apps ship</p><p class="sub">Strongest grade <code>contains</code>: the code is present. Presence is not use.</p></div>
 <div class="count"><p class="n">2</p><p class="label">apps with a third-party channel</p><p class="sub">A counted finding names a company that is not the app's own publisher.</p></div>
 </div>
+<p class="beside">Beside these counts, the Android apps ship 1 SDK of 1 company in categories the counts leave out: <strong>Functional Software, Inc. (Sentry)</strong> (Sentry). They are in the list above and in the findings below.</p>
 <ul class="totals">
 <li>6 apps scanned</li>
 <li>14 findings</li>
