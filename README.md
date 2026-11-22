@@ -1,7 +1,43 @@
 # exposure-scanner
 
-**A local scanner that shows which companies have a channel to your data,
-through which apps, with the evidence for every finding.**
+**See whose code is inside your apps.**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/report-dark.png">
+  <img src="docs/images/report-light.png" width="720" alt="The top of an exposure report: 14 findings in 5 of 6 apps scanned, starting with PostHog analytics in two apps and a browser extension that may read every website, each with a first step to take.">
+</picture>
+
+<sub>The report for the repository's synthetic test fixtures. The whole
+report is on the [sample page](https://adityaakr.github.io/exposure-scanner/sample/).</sub>
+
+```console
+$ brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+$ brew install adityaakr/exposure-scanner/exposure
+$ exposure scan
+```
+
+What the Google Play build of Bitwarden 2026.9.1 ships that its F-Droid
+build does not:
+
+```console
+$ exposure diff fdroid.json play.json
+Bitwarden (Android, com.x8bit.bitwarden), 2026.9.1
+  + Firebase Cloud Messaging (Push messaging, Google LLC): contains
+  + Firebase Crashlytics (Crash reporting, Google LLC): contains
+  + Firebase Installations (Installation identifiers, Google LLC): contains
+  + Google DataTransport (Telemetry transport, Google LLC): contains
+  + Google Play Billing Library (Payments, Google LLC): contains
+
+5 findings added, 0 findings removed, 0 findings changed grade, in 1 of 1 app.
+```
+
+`exposure` reads the apps on your disk, names the third-party SDKs they ship
+and the company behind each, and cites the evidence for every finding. It
+shows whose code is in an app, not what the app sends
+([what a scan cannot see](#what-a-device-side-scan-cannot-see)).
+[Install](#install) has the details, and
+[release gates](#release-gates-and-comparing-builds) shows how the two
+reports above were made.
 
 [![ci](https://github.com/Adityaakr/exposure-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/Adityaakr/exposure-scanner/actions/workflows/ci.yml)
 [![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
