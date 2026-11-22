@@ -1,13 +1,55 @@
-// The site's conveniences, and nothing else: copy buttons on commands, a
-// guess at the visitor's system for the steps, headings and commands typed
-// out as they come into view, and figures that settle in. It makes no
-// request and stores nothing. Typing and playback run only when boot.js
-// found that motion is welcome; otherwise the page stays as it was written.
+// The site's conveniences, and nothing else: the theme switch, copy buttons
+// on commands, a guess at the visitor's system for the steps, headings and
+// commands typed out as they come into view, and figures that settle in. It
+// makes no request. The one thing it stores is the theme a visitor picks,
+// in this browser's local storage, and nothing else. Typing and playback
+// run only when boot.js found that motion is welcome; otherwise the page
+// stays as it was written.
 (function () {
   "use strict";
   var root = document.documentElement;
   var motion = root.classList.contains("motion");
   var each = function (list, fn) { Array.prototype.forEach.call(list, fn); };
+
+  // The theme switch. The page follows the system's light or dark setting
+  // until the visitor picks one; the pick is kept for their next visit.
+  (function () {
+    var buttons = document.querySelectorAll(".theme-toggle");
+    if (!buttons.length) return;
+    var light = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+    function current() {
+      var set = root.getAttribute("data-theme");
+      if (set === "light" || set === "dark") return set;
+      return light && light.matches ? "light" : "dark";
+    }
+    function label() {
+      var text = "Switch to the " + (current() === "dark" ? "light" : "dark") + " theme";
+      each(buttons, function (button) {
+        button.setAttribute("aria-label", text);
+        button.setAttribute("title", text);
+      });
+    }
+    each(buttons, function (button) {
+      button.addEventListener("click", function () {
+        var next = current() === "dark" ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try {
+          window.localStorage.setItem("exposure-theme", next);
+        } catch (e) {
+          // Storage can be refused; the switch still works for this page.
+        }
+        each(document.querySelectorAll('meta[name="theme-color"]'), function (meta) {
+          meta.setAttribute("content", next === "light" ? "#eef2ef" : "#020403");
+        });
+        label();
+      });
+    });
+    label();
+    if (light) {
+      if (light.addEventListener) light.addEventListener("change", label);
+      else if (light.addListener) light.addListener(label);
+    }
+  })();
 
   // Copy buttons. The prompt and any output lines are left out of the copy.
   var copyIcon =

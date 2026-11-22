@@ -5,8 +5,9 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#020403">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#020403" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef2ef" media="(prefers-color-scheme: light)">
 <title>Sample report · exposure</title>
 <meta name="description" content="The unchanged HTML report exposure writes, from a scan of the synthetic test apps in its repository: every finding with its grade and the evidence records behind it.">
 <meta property="og:type" content="website">
@@ -36,7 +37,9 @@
     </a>
     <nav aria-label="Main">
       <ul class="nav">
+        <li class="wider"><a href="../#start">Start here</a></li>
         <li><a href="../#install">Steps</a></li>
+        <li class="wider"><a href="../#developers">Developers</a></li>
         <li class="wide"><a href="../#how">How it works</a></li>
         <li class="wide"><a href="../#trust">Privacy</a></li>
         <li class="mid"><a href="./" aria-current="page">Sample</a></li>
@@ -44,6 +47,7 @@
         <li><a class="gh" href="https://github.com/Adityaakr/exposure-scanner" aria-label="exposure on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
       </ul>
     </nav>
+    <button class="theme-toggle" type="button" aria-label="Switch to the light theme" title="Switch to the light theme"><svg class="to-light" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="2.75"/><path d="M8 1.25v1.5M8 13.25v1.5M1.25 8h1.5M13.25 8h1.5M3.23 3.23l1.06 1.06M11.71 11.71l1.06 1.06M3.23 12.77l1.06-1.06M11.71 4.29l1.06-1.06"/></svg><svg class="to-dark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M13.6 9.9A5.9 5.9 0 0 1 6.1 2.4a5.9 5.9 0 1 0 7.5 7.5z"/></svg></button>
   </div>
 </header>
 

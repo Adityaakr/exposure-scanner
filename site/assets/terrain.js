@@ -3,6 +3,8 @@
 // middle, under the column of text. It is a few sine waves drawn on a
 // canvas; nothing is loaded. A visitor who asks for reduced motion gets one
 // still frame, and without script the page has only its dotted backdrop.
+// The lines take their colour and strength from the stylesheet (--terrain
+// and --terrain-strength), so the light theme draws them deeper and fainter.
 (function () {
   "use strict";
   var canvas = document.getElementById("terrain");
@@ -19,6 +21,20 @@
   var EYE = 2.3;      // the eye's height above the valley floor
   var width = 0;
   var height = 0;
+  var rgb = "61, 255, 140";
+  var strength = 1;
+
+  // The theme's colour for the lines, read again when the theme changes.
+  function colours() {
+    var style = window.getComputedStyle(document.documentElement);
+    var parts = style.getPropertyValue("--terrain").trim().split(/[\s,]+/);
+    if (parts.length === 3) rgb = parts.join(", ");
+    var s = parseFloat(style.getPropertyValue("--terrain-strength"));
+    strength = isFinite(s) ? Math.max(0, Math.min(1, s)) : 1;
+  }
+  function rgba(alpha) {
+    return "rgba(" + rgb + ", " + (alpha * strength).toFixed(3) + ")";
+  }
 
   function resize() {
     var ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -72,17 +88,17 @@
 
     // A faint glow along the horizon.
     var glow = ctx.createLinearGradient(0, horizon - height * 0.18, 0, horizon + height * 0.06);
-    glow.addColorStop(0, "rgba(61, 255, 140, 0)");
-    glow.addColorStop(0.75, "rgba(61, 255, 140, 0.05)");
-    glow.addColorStop(1, "rgba(61, 255, 140, 0)");
+    glow.addColorStop(0, rgba(0));
+    glow.addColorStop(0.75, rgba(0.05));
+    glow.addColorStop(1, rgba(0));
     ctx.fillStyle = glow;
     ctx.fillRect(0, horizon - height * 0.18, width, height * 0.24);
 
     // The grid fades out into the distance, toward the horizon.
     var fade = ctx.createLinearGradient(0, horizon - height * 0.12, 0, height);
-    fade.addColorStop(0, "rgba(61, 255, 140, 0)");
-    fade.addColorStop(0.22, "rgba(61, 255, 140, 0.16)");
-    fade.addColorStop(1, "rgba(61, 255, 140, 0.5)");
+    fade.addColorStop(0, rgba(0));
+    fade.addColorStop(0.22, rgba(0.16));
+    fade.addColorStop(1, rgba(0.5));
     ctx.strokeStyle = fade;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -114,6 +130,14 @@
     else frame = window.requestAnimationFrame(tick);
   }
 
+  // A new theme, picked with the switch or set by the system: new colours,
+  // and the still frame drawn again in them.
+  function recolour() {
+    colours();
+    if (still()) draw(6);
+  }
+
+  colours();
   resize();
   run();
   window.addEventListener("resize", function () {
@@ -123,5 +147,13 @@
   if (query) {
     if (query.addEventListener) query.addEventListener("change", run);
     else if (query.addListener) query.addListener(run);
+  }
+  var scheme = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+  if (scheme) {
+    if (scheme.addEventListener) scheme.addEventListener("change", recolour);
+    else if (scheme.addListener) scheme.addListener(recolour);
+  }
+  if (window.MutationObserver) {
+    new MutationObserver(recolour).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   }
 })();
