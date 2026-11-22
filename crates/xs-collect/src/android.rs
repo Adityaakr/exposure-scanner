@@ -115,6 +115,10 @@ use xs_model::{MatcherKind, RelPath, Sha256Digest, Sha256Stream, SubjectDigest, 
 use crate::access::Asked;
 use crate::read::WINDOW;
 
+mod buffers;
+
+use buffers::{Buffer, EntryBuffers};
+
 /// Most DEX files read from one package. Android loads `classes.dex`,
 /// `classes2.dex` and so on; the largest apps ship around a hundred.
 pub const MAX_DEX_FILES: usize = 1000;
@@ -298,6 +302,18 @@ impl Kind {
     const fn is_table(self) -> bool {
         matches!(self, Self::Resources | Self::BundleResources)
     }
+
+    /// Which of Android's readers reads an entry of this kind: the resource
+    /// loader for the manifest and the resource table, the code loader for
+    /// a DEX file. A bundle is read the way the APKs made from it are.
+    const fn reader(self) -> zip::Reader {
+        match self {
+            Self::Dex => zip::Reader::Code,
+            Self::Manifest | Self::BundleManifest | Self::Resources | Self::BundleResources => {
+                zip::Reader::Resources
+            }
+        }
+    }
 }
 
 /// The number in the name of a DEX file Android loads from a package: 1 for
@@ -327,8 +343,8 @@ enum Content {
 
 /// A resource table, in the form of an APK or of a bundle.
 enum Table {
-    Binary(Vec<u8>),
-    Proto(Vec<u8>),
+    Binary(Buffer),
+    Proto(Buffer),
 }
 
 impl Table {
@@ -343,12 +359,14 @@ impl Table {
 
 /// One entry the pass copies out of the archive as it goes by.
 struct Capture<'a> {
+    /// The entry, as the reader of its kind reads it.
     entry: Entry<'a>,
     name: RelPath,
     kind: Kind,
-    /// The archive from the entry's local header on, as far as it has been
-    /// read. Empty again once the entry has been read from it.
-    bytes: Vec<u8>,
+    /// Where the entry is copied to and inflated into, from when the pass
+    /// reaches the entry until it has been read. `bytes.stored` holds the
+    /// archive from the entry's local header on, as far as it has been read.
+    buffers: Option<EntryBuffers>,
     /// How many bytes are wanted. Until the fixed part of the local header
     /// has been read this is the length of that part; the header then says
     /// how long its name and extra field are.
@@ -364,7 +382,7 @@ impl<'a> Capture<'a> {
             entry,
             name,
             kind,
-            bytes: Vec::new(),
+            buffers: None,
             wanted: zip::LOCAL_HEADER_BYTES,
             header_read: false,
             outcome: None,
@@ -382,26 +400,52 @@ impl<'a> Capture<'a> {
         start..start.saturating_add(length)
     }
 
+    /// The buffers this entry needs: room for the most its local header and
+    /// data can take, and for its content if it is inflated.
+    fn buffers(&self) -> EntryBuffers {
+        let size = |bytes: u32| usize::try_from(bytes).unwrap_or(usize::MAX);
+        let stored = zip::LOCAL_HEADER_BYTES
+            .saturating_add(self.entry.name.len())
+            .saturating_add(usize::from(u16::MAX))
+            .saturating_add(size(self.entry.compressed_bytes));
+        let inflated = match self.entry.method {
+            zip::Method::Deflated => size(self.entry.bytes),
+            zip::Method::Stored | zip::Method::Other(_) => 0,
+        };
+        buffers::for_entry(stored, inflated)
+    }
+
     /// Takes what `window`, the bytes of the file from `offset` on, holds of
     /// this entry, and reads the entry once all of it is there. Windows
     /// arrive in file order and without gaps.
     fn feed(&mut self, offset: u64, window: &[u8], matchers: &Matchers<'_>) {
         while self.outcome.is_none() {
-            let missing = self.wanted.saturating_sub(self.bytes.len());
+            let copied = self.buffers.as_ref().map_or(0, |buffers| buffers.stored.len());
+            let missing = self.wanted.saturating_sub(copied);
             // Where the next missing byte is, relative to the window.
             let next = u64::from(self.entry.offset)
-                .saturating_add(self.bytes.len() as u64)
+                .saturating_add(copied as u64)
                 .checked_sub(offset)
                 .and_then(|next| usize::try_from(next).ok());
             let available = next.and_then(|next| window.get(next..)).unwrap_or_default();
-            let take = missing.min(available.len());
-            self.bytes.extend_from_slice(available.get(..take).unwrap_or_default());
+            let take = available.get(..missing.min(available.len())).unwrap_or_default();
+            if take.is_empty() {
+                return;
+            }
+            // The buffers are taken when the pass reaches the entry, and
+            // given back as soon as it has been read.
+            if self.buffers.is_none() {
+                self.buffers = Some(self.buffers());
+            }
+            let Some(buffers) = &mut self.buffers else { return };
+            buffers.stored.extend_from_slice(take);
+            let copied = buffers.stored.len();
 
-            if !self.header_read && self.bytes.len() >= zip::LOCAL_HEADER_BYTES {
+            if !self.header_read && copied >= zip::LOCAL_HEADER_BYTES {
                 self.header_read = true;
                 // A header that is not one ends the capture here: reading
                 // the entry then fails, and that is reported.
-                if let Ok(data_offset) = zip::data_offset(&self.bytes) {
+                if let Ok(data_offset) = zip::data_offset(&buffers.stored) {
                     let data_bytes =
                         usize::try_from(self.entry.compressed_bytes).unwrap_or(usize::MAX);
                     self.wanted = data_offset.saturating_add(data_bytes);
@@ -409,32 +453,47 @@ impl<'a> Capture<'a> {
                 // The same window may hold the rest of the entry.
                 continue;
             }
-            if self.bytes.len() < self.wanted {
+            if copied < self.wanted {
                 return;
             }
             self.read(matchers);
         }
     }
 
-    /// Reads the entry from what was copied of it, and lets the copy go.
+    /// Reads the entry from what was copied of it, and lets the buffers go.
     fn read(&mut self, matchers: &Matchers<'_>) {
-        let local = std::mem::take(&mut self.bytes);
-        self.outcome = Some(self.content(&local, matchers));
+        self.outcome = Some(match self.buffers.take() {
+            Some(mut buffers) => self.content(&mut buffers, matchers),
+            // The pass never reached the entry: the file ends before it.
+            None => Err(ReadError::Format(FormatError::Malformed)),
+        });
     }
 
     /// Inflates the entry and parses it. Evidence comes only from a table
     /// that was read whole: a file that fails part of the way through
     /// yields its error and nothing else.
-    fn content(&self, local: &[u8], matchers: &Matchers<'_>) -> Result<Content, ReadError> {
-        let data = zip::data(&self.entry, local)?;
+    fn content(
+        &self,
+        buffers: &mut EntryBuffers,
+        matchers: &Matchers<'_>,
+    ) -> Result<Content, ReadError> {
+        let EntryBuffers { stored, inflated } = buffers;
+        let data = zip::data(&self.entry, stored)?;
         let budget = usize::try_from(self.kind.budget()).unwrap_or(usize::MAX);
-        let content = zip::content(&self.entry, data, budget)?;
+        let content = zip::content(&self.entry, data, budget, inflated)?;
+        // The table is kept until the manifest says which string to look
+        // up, while the next entries are read into the entry buffers.
+        let table = || {
+            let mut table = buffers::for_table(content.len());
+            table.extend_from_slice(content);
+            table
+        };
         Ok(match self.kind {
-            Kind::Manifest => Content::Manifest(android_manifest::parse(&content)?),
-            Kind::BundleManifest => Content::Manifest(android_proto::manifest(&content)?),
-            Kind::Dex => Content::Dex(dex_hits(&content, matchers)?),
-            Kind::Resources => Content::Resources(Table::Binary(content.into_owned())),
-            Kind::BundleResources => Content::Resources(Table::Proto(content.into_owned())),
+            Kind::Manifest => Content::Manifest(android_manifest::parse(content)?),
+            Kind::BundleManifest => Content::Manifest(android_proto::manifest(content)?),
+            Kind::Dex => Content::Dex(dex_hits(content, matchers)?),
+            Kind::Resources => Content::Resources(Table::Binary(table())),
+            Kind::BundleResources => Content::Resources(Table::Proto(table())),
         })
     }
 
@@ -508,7 +567,9 @@ impl From<Unread> for io::Error {
 /// is shorter than the size the plan was made for.
 fn read_at(reader: &mut (impl Read + Seek), offset: u64, length: usize) -> Result<Vec<u8>, Unread> {
     reader.seek(SeekFrom::Start(offset))?;
-    let mut bytes = Vec::new();
+    // Exactly the room asked for: reading to the end would grow the buffer
+    // by doubling, and leave the blocks it outgrew behind.
+    let mut bytes = Vec::with_capacity(length);
     reader.take(length as u64).read_to_end(&mut bytes)?;
     if bytes.len() == length { Ok(bytes) } else { Err(Unread::Changed) }
 }
@@ -685,10 +746,17 @@ fn scan_package(
     // and check that the end of the file still is what the plan was made
     // from. One byte more than the file held is allowed, so that growth is
     // noticed.
+    // The captures are fed in file order. No two share a byte (see `plan`),
+    // so each has been read, and has given its buffers back, before the
+    // next one takes any: one entry at a time holds memory.
+    let mut in_file_order: Vec<usize> = (0..captures.len()).collect();
+    in_file_order.sort_by_key(|&index| captures.get(index).map(|capture| capture.entry.offset));
     let mut unchanged = true;
     let (sha256, bytes) = pass(reader, file_bytes.saturating_add(1), buffer, |offset, window| {
-        for capture in &mut captures {
-            capture.feed(offset, window, matchers);
+        for &index in &in_file_order {
+            if let Some(capture) = captures.get_mut(index) {
+                capture.feed(offset, window, matchers);
+            }
         }
         unchanged &= expected.iter().all(|region| region.agrees_with(offset, window));
     })?;
@@ -802,6 +870,7 @@ fn plan<'a>(
     let mut captures = Vec::new();
     let mut total: u64 = 0;
     for (kind, path, entry) in wanted {
+        let entry = entry.read_by(kind.reader());
         // Both sizes are held in memory while an entry is inflated, so the
         // larger of the two is what the entry costs, and what is reported.
         let cost = u64::from(entry.bytes).max(u64::from(entry.compressed_bytes));
@@ -1981,15 +2050,17 @@ mod tests {
         let deflated = miniz_dex(&dex);
         let size = dex.len() as u32;
         for (entry, expected) in [
-            // Encrypted.
-            (
-                ZipBuilder::new().raw("classes.dex", 8, 1, &deflated, size),
-                "Skipped UnsupportedFormat",
-            ),
-            // A compression method Android has no reader for either.
+            // A compression method Android has no reader for either: the
+            // code loader refuses it, so ART does not load the file.
             (
                 ZipBuilder::new().raw("classes.dex", 93, 0, &deflated, size),
                 "Skipped UnsupportedFormat",
+            ),
+            (ZipBuilder::new().raw("classes.dex", 99, 0, &dex, size), "Skipped UnsupportedFormat"),
+            // Marked encrypted, and it is: the stream does not inflate.
+            (
+                ZipBuilder::new().raw("classes.dex", 8, 1, &deflated[1..], size),
+                "Unrecognized ParseError",
             ),
             // A stream that is cut short.
             (
@@ -2009,6 +2080,142 @@ mod tests {
             assert_eq!(coverage(&records), [format!("{expected} classes.dex None 1")]);
             // The manifest is still read.
             assert_eq!(edges(&records).len(), 1);
+        }
+    }
+
+    /// The tracker's manifest, asking for the camera too.
+    fn tracker_manifest_with_permission() -> Vec<u8> {
+        testkit::AxmlBuilder::new()
+            .start(
+                "manifest",
+                &[
+                    testkit::Attr::android(testkit::ANDROID_VERSION_NAME, "versionName", "1.2.3"),
+                    testkit::Attr::plain("package", "com.example.app"),
+                ],
+            )
+            .start(
+                "uses-permission",
+                &[testkit::Attr::android(
+                    testkit::ANDROID_NAME,
+                    "name",
+                    "android.permission.CAMERA",
+                )],
+            )
+            .end()
+            .start("application", &[])
+            .start(
+                "service",
+                &[testkit::Attr::android(
+                    testkit::ANDROID_NAME,
+                    "name",
+                    "com.acme.tracker.UploadService",
+                )],
+            )
+            .end()
+            .end()
+            .end()
+            .finish()
+    }
+
+    /// The tracker package with its manifest and its DEX file written the
+    /// way given: `(method, flags, data, declared)`.
+    fn tampered_apk(
+        manifest: impl FnOnce(&[u8]) -> (u16, u16, Vec<u8>),
+        dex: impl FnOnce(&[u8]) -> (u16, u16, Vec<u8>),
+    ) -> Vec<u8> {
+        let (manifest_bytes, dex_bytes) = (tracker_manifest_with_permission(), tracker_dex());
+        let (manifest_method, manifest_flags, manifest_data) = manifest(&manifest_bytes);
+        let (dex_method, dex_flags, dex_data) = dex(&dex_bytes);
+        ZipBuilder::new()
+            .raw(
+                MANIFEST,
+                manifest_method,
+                manifest_flags,
+                &manifest_data,
+                manifest_bytes.len() as u32,
+            )
+            .raw("classes.dex", dex_method, dex_flags, &dex_data, dex_bytes.len() as u32)
+            .finish()
+    }
+
+    /// Security review M3, with the tricks of BadPack, SoumniBot and Konfety:
+    /// Android installs a package whose manifest is marked encrypted or
+    /// stored under a method no reader knows, and loads a DEX file marked
+    /// encrypted. The scan reads all three, so the app's identity, the
+    /// permissions it asks for and the SDKs in its code are not hidden.
+    #[test]
+    fn the_tricks_android_reads_through_hide_nothing_from_the_scan() {
+        let pack = tracker_pack();
+        let deflated = |bytes: &[u8]| (8, 0, miniz_dex(bytes));
+        let marked = |bytes: &[u8]| (8, 1, miniz_dex(bytes));
+        let method_99 = |bytes: &[u8]| (99, 0, bytes.to_vec());
+        let honest = scan(&tampered_apk(deflated, deflated), &pack);
+        assert_eq!(artifact(&honest).subject.id, "com.example.app");
+        assert_eq!(coverage(&honest), Vec::<String>::new());
+        assert_eq!(edges(&honest).len(), 4, "{:?}", edges(&honest));
+
+        for (case, apk) in [
+            ("manifest stored under method 99", tampered_apk(method_99, deflated)),
+            ("manifest marked encrypted", tampered_apk(marked, deflated)),
+            ("DEX file marked encrypted", tampered_apk(deflated, marked)),
+            ("both marked encrypted", tampered_apk(marked, marked)),
+        ] {
+            let records = scan(&apk, &pack);
+            let artifact = artifact(&records);
+            assert_eq!(artifact.subject.id, "com.example.app", "{case}");
+            assert_eq!(artifact.subject.version.as_deref(), Some("1.2.3"), "{case}");
+            assert_eq!(coverage(&records), Vec::<String>::new(), "{case}");
+            assert_eq!(
+                edges(&records)
+                    .iter()
+                    .map(|edge| edge.split(' ').take(3).collect::<Vec<_>>().join(" "))
+                    .collect::<Vec<_>>(),
+                [
+                    "AndroidDex android_class_prefix com.acme.tracker.",
+                    "AndroidDex dex_string collect.acme.example",
+                    "AndroidManifest android_permission android.permission.CAMERA",
+                    "AndroidManifest manifest_component com.acme.tracker.UploadService",
+                ],
+                "{case}"
+            );
+        }
+
+        // A DEX file under a method the code loader does not know is not
+        // loaded by Android either, and stays a gap.
+        let records = scan(&tampered_apk(deflated, method_99), &pack);
+        assert_eq!(artifact(&records).subject.id, "com.example.app");
+        assert_eq!(coverage(&records), ["Skipped UnsupportedFormat classes.dex None 1"]);
+    }
+
+    /// The resource table is read through the same loader as the manifest,
+    /// so the app's name survives an unknown method too.
+    #[test]
+    fn a_resource_table_under_an_unknown_method_still_names_the_app() {
+        let table =
+            testkit::ArscBuilder::new().string(0x7f0f_0001, &[(None, "Example App")]).finish();
+        let manifest = testkit::AxmlBuilder::new()
+            .start(
+                "manifest",
+                &[
+                    testkit::Attr::android(testkit::ANDROID_VERSION_NAME, "versionName", "1.2.3"),
+                    testkit::Attr::plain("package", "com.example.app"),
+                ],
+            )
+            .start(
+                "application",
+                &[testkit::Attr::reference(testkit::ANDROID_LABEL, "label", 0x7f0f_0001)],
+            )
+            .end()
+            .end()
+            .finish();
+        for method in [0, 12, 99] {
+            let apk = ZipBuilder::new()
+                .deflated(MANIFEST, &manifest)
+                .raw(RESOURCES, method, 0, &table, table.len() as u32)
+                .finish();
+            let records = scan(&apk, &tracker_pack());
+            assert_eq!(artifact(&records).facts.name.as_deref(), Some("Example App"), "{method}");
+            assert_eq!(coverage(&records), Vec::<String>::new(), "{method}");
         }
     }
 

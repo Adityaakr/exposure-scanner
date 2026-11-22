@@ -19,15 +19,22 @@ fuzz_target!(|archive: &[u8]| {
     let directory = &archive[start..start + end.directory_bytes];
     let Ok(entries) = zip::directory(directory, &end) else { return };
     assert_eq!(entries.len(), usize::from(end.entries));
+    // One buffer for every entry, as the collector reads them.
+    let mut inflated = Vec::new();
     for entry in &entries {
         // `directory` promises an entry that starts before the directory.
         let local = &archive[entry.offset as usize..];
         let _ = zip::data_offset(local);
-        let Ok(data) = zip::data(entry, local) else { continue };
-        assert_eq!(data.len(), entry.compressed_bytes as usize);
-        if let Ok(content) = zip::content(entry, data, BUDGET) {
-            assert_eq!(content.len(), entry.bytes as usize);
-            assert!(content.len() <= BUDGET);
+        // Each entry the way both of Android's readers read it.
+        for reader in [zip::Reader::Code, zip::Reader::Resources] {
+            let entry = entry.read_by(reader);
+            let Ok(data) = zip::data(&entry, local) else { continue };
+            assert_eq!(data.len(), entry.compressed_bytes as usize);
+            if let Ok(content) = zip::content(&entry, data, BUDGET, &mut inflated) {
+                assert_eq!(content.len(), entry.bytes as usize);
+                assert!(content.len() <= BUDGET);
+            }
+            assert!(inflated.capacity() <= BUDGET, "the buffer never outgrows the budget");
         }
     }
 });
