@@ -20,7 +20,7 @@
 //! The packages are made by the benchmark, in its own folder. What they
 //! test is that memory is bounded by the scan's threads and not by the
 //! number of packages: before the gate, 25 MB of them took one scan at one
-//! thread to a peak of 14 GB on macOS, whose allocator keeps freed blocks.
+//! thread to a peak of 15.7 GB on macOS, whose allocator keeps freed blocks.
 //! On macOS the figure is the peak memory footprint, what the system
 //! charges against memory pressure, where it is larger than the peak
 //! resident size.

@@ -303,6 +303,29 @@ fn a_report_replaces_its_name_and_never_writes_into_a_linked_file() {
     assert_eq!(names, ["report.json", "victim.txt"]);
 }
 
+/// `/dev/stdout` is a symbolic link on macOS and Linux, and so is the
+/// `/dev/fd/N` a shell's process substitution passes. Writing to it is
+/// writing to the stream, so the report arrives on standard output.
+#[test]
+fn the_json_option_writes_through_a_link_to_standard_output() {
+    let output = exposure(&["scan", FIXTURE, "--json", "/dev/stdout"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8(output.stdout).unwrap() == scan(&[Path::new(FIXTURE)], 1));
+}
+
+/// A link to a device is written to as the device is; the link and the
+/// device stay as they were.
+#[test]
+fn a_report_is_written_through_a_symbolic_link_to_a_device() {
+    let dir = tempfile::tempdir().unwrap();
+    let planted = dir.path().join("report.json");
+    std::os::unix::fs::symlink("/dev/null", &planted).unwrap();
+    let output = exposure(&["scan", FIXTURE, "--json", text(&planted)]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(fs::symlink_metadata(&planted).unwrap().file_type().is_symlink());
+    assert!(!fs::metadata(&planted).unwrap().is_file());
+}
+
 /// `--json /dev/null` is the ordinary way to discard a report and keep the
 /// summary. A device is not the scanner's file to change the mode of, and a
 /// normal user may not change it at all.

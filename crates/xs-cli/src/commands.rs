@@ -84,7 +84,10 @@ pub(crate) fn print(text: &str) -> Result<()> {
 /// writing the report truncates whatever file of the user's it leads to.
 /// So:
 ///
-/// - A `path` that is a symbolic link is refused.
+/// - A `path` that is a symbolic link to a file, a folder or nothing is
+///   refused. A link to a device or a stream, such as `/dev/stdout` or the
+///   `/dev/fd/N` of a shell's process substitution, is written to as that
+///   device is, below.
 /// - A report is written to a new file next to `path`, created for this
 ///   write alone and readable by its owner only, and then renamed to
 ///   `path`. A rename replaces the name and never follows it: what was at
@@ -92,25 +95,46 @@ pub(crate) fn print(text: &str) -> Result<()> {
 ///   scan that stops half way leaves the old report, not half of a new one.
 /// - A `path` that is not a regular file, such as `/dev/null`, is written
 ///   to and otherwise left as it is: it is opened without being truncated or
-///   created, and only if it is the very thing that was looked at.
+///   created, and only if it is the very thing that was looked at and still
+///   not a regular file. Through a link, whose device the system may report
+///   under another number once opened (macOS does for `/dev/fd/N`), it must
+///   be of the kind that was looked at and not a regular file, so a link
+///   re-pointed at a file meanwhile is refused.
 fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
     let Some(path) = path.filter(|path| *path != Path::new(STDOUT)) else { return print(report) };
     let fail = |error| format!("cannot write {}: {error}", path.display());
     match fs::symlink_metadata(path) {
-        Ok(found) if found.file_type().is_symlink() => Err(format!(
-            "cannot write {}: it is a symbolic link, and a report is never written through \
-             one; remove the link or choose another file",
-            path.display()
-        )),
-        Ok(found) if !found.is_file() && !found.is_dir() => {
-            let mut file = fs::OpenOptions::new().write(true).open(path).map_err(fail)?;
-            if !same_file(&found, &file.metadata().map_err(fail)?) {
-                return Err(fail(std::io::Error::other("it was replaced while being opened")));
+        Ok(found) if found.file_type().is_symlink() => match fs::metadata(path) {
+            Ok(target) if !target.is_file() && !target.is_dir() => {
+                let kind = target.file_type();
+                write_into(path, report, |opened| opened.file_type() == kind && !opened.is_file())
+                    .map_err(fail)
             }
-            file.write_all(report.as_bytes()).map_err(fail)
+            _ => Err(format!(
+                "cannot write {}: it is a symbolic link to a file, and a report is never \
+                 written through one; remove the link or choose another file",
+                path.display()
+            )),
+        },
+        Ok(found) if !found.is_file() && !found.is_dir() => {
+            write_into(path, report, |opened| same_file(&found, opened)).map_err(fail)
         }
         _ => replace(path, report.as_bytes()).map_err(fail),
     }
+}
+
+/// Writes `report` into what `path` leads to, opened without being created
+/// or truncated, if what was opened is still what was looked at.
+fn write_into(
+    path: &Path,
+    report: &str,
+    looked_at: impl FnOnce(&fs::Metadata) -> bool,
+) -> std::io::Result<()> {
+    let mut file = fs::OpenOptions::new().write(true).open(path)?;
+    if !looked_at(&file.metadata()?) {
+        return Err(std::io::Error::other("it was replaced while being opened"));
+    }
+    file.write_all(report.as_bytes())
 }
 
 /// Whether two looks at a path saw the same file.

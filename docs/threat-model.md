@@ -70,7 +70,7 @@ own report, cache and files, and nothing here tries to stop them.
   all four are in use. So a folder of crafted packages, each a megabyte that
   inflates to a gigabyte, costs a scan about 270 MB at one thread and about
   1.1 GB at ten, however many there are; before this bound, 25 MB of them
-  took a scan at one thread to 14 GB on macOS, whose allocator keeps freed
+  took a scan at one thread to 15.7 GB on macOS, whose allocator keeps freed
   blocks. `cargo xtask bench` checks it on such a folder.
 - **The zip reader is no stricter than Android.** A package that Android
   reads and the scanner does not is a package that hides from the scan, and
@@ -138,11 +138,12 @@ own report, cache and files, and nothing here tries to stop them.
   readable by their owner only, and the two folders are made, or tightened,
   so that only the owner can open them.
 - A report is never written through a link. A report file named by a
-  symbolic link is refused, and a report is written to a new file beside its
+  symbolic link to a file is refused, and a report is written to a new file beside its
   name and renamed into place, so a link that another user leaves in a
   shared folder such as `/tmp` cannot make the scan truncate or change the
   mode of a file of the user's, and a scan that stops leaves no half of a
-  report. A device such as `/dev/null` is written to as it is.
+  report. A device or stream such as `/dev/null`, or a link to one such as
+  `/dev/stdout`, is written to as it is.
 - The cache holds the records a report shows and two hashes per app: no
   path, no file list. An entry is used only if it is a regular file of the
   user who runs the scan that nobody else may write, and only when its own
