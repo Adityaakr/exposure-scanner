@@ -12,7 +12,9 @@
 //!
 //! What is opened on demand is in a `details` element: the browser shows and
 //! hides it, with no script, and it is in the document whether it is open
-//! or not. Printing opens it. A link never leads into one: a browser that
+//! or not. Printing opens it in browsers that support the `::details-content`
+//! pseudo-element (current Chrome, Edge, Safari and Firefox); an older browser
+//! prints it closed. A link never leads into one: a browser that
 //! does not open it for the link would show nothing, so what a link names is
 //! outside every `details`.
 //!

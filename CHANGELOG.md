@@ -49,7 +49,9 @@ version can change commands, the report format or the evidence format.
   demand, as are the facts, steps and records of each finding, the
   lower-priority entries of the checklist, long block lists, the glossary and
   the coverage tables. They are `details` elements: no script, the content
-  is in the file whether open or not, and printing opens them. No link leads
+  is in the file whether open or not, and printing opens them in browsers
+  that support the `::details-content` pseudo-element (current Chrome, Edge,
+  Safari and Firefox); an older browser prints them closed. No link leads
   into one that is closed. "What you can do" stands out as a panel of its
   own. The terminal summary of `exposure scan` prints the same entries
   before the headline counts. The JSON report is unchanged.

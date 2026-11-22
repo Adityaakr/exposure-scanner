@@ -222,9 +222,8 @@ What needs your attention first (5 of 14 things you can do):
 
   1. [High] PostHog
        Analytics by PostHog Inc., in Logseq and Example.
-       Block app.posthog.com, eu.i.posthog.com, i.posthog.com and
-       us.i.posthog.com with an outbound firewall such as LuLu (free) or Little
-       Snitch.
+       In Logseq, turn it off: Settings > Advanced, then turn off Send usage
+       data and diagnostics to Logseq.
   ...
 
 9 more entries in the report, under What you can do.

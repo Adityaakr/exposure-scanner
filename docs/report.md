@@ -185,8 +185,10 @@ sample, the page for the fixtures of this repository, is
 It leads with what needs your attention and keeps the detail one click
 away: what is opened on demand is in a `details` element, which the browser
 opens and closes with no script. Its content is in the file whether it is
-open or not, printing opens it, and no link on the page leads into one that
-is closed. It holds:
+open or not, printing opens it in browsers that support the
+`::details-content` pseudo-element (current Chrome, Edge, Safari and Firefox;
+an older browser prints it closed), and no link on the page leads into one
+that is closed. It holds:
 
 | Part | What it says |
 |---|---|
