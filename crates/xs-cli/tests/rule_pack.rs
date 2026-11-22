@@ -294,3 +294,16 @@ fn host_tokens_hold_their_boundary() {
         }
     }
 }
+
+/// The search automatons are built as DFAs at start-up and shared by every
+/// thread (see `xs_match::content`). A table grows with the literals of a
+/// pack; this keeps a pack from growing it past what start-up and the
+/// caches of a core can afford, and says what it is.
+#[test]
+fn the_search_automatons_of_the_pack_stay_small() {
+    let pack = pack();
+    let matchers = Matchers::build(&pack).unwrap();
+    let bytes = matchers.content_heap_bytes();
+    println!("search automatons: {bytes} bytes for {} tokens", matchers.pattern_count());
+    assert!(bytes > 0 && bytes < 4 << 20, "{bytes} bytes");
+}

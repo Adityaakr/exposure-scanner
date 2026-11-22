@@ -167,6 +167,13 @@ impl<'p> Matchers<'p> {
         self.patterns.len()
     }
 
+    /// The memory the search automatons of every matcher kind hold, in
+    /// bytes. Each is built at start-up and shared by every thread.
+    #[must_use]
+    pub fn content_heap_bytes(&self) -> usize {
+        self.kinds.values().map(|kind| kind.content.heap_bytes()).sum()
+    }
+
     /// The engine that searches the free-form bytes of a file of `scope` for
     /// the tokens of `matcher`.
     ///

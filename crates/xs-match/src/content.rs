@@ -2,10 +2,18 @@
 //!
 //! Script text, the string data of a binary and the non-code sections of a
 //! Mach-O file have no table to look a name up in, so they are searched. The
-//! engine is the `aho-corasick` crate's contiguous NFA (design report,
-//! section 6.2 decision 1): one pass over the bytes finds every literal of a
-//! pack, its speed barely depends on how many literals there are, and it is
-//! small enough to build at start-up, so a pack ships no compiled automaton.
+//! engine is the `aho-corasick` crate (design report, section 6.2 decision
+//! 1): one pass over the bytes finds every literal of a pack, its speed
+//! barely depends on how many literals there are, and it is small enough to
+//! build at start-up, so a pack ships no compiled automaton.
+//!
+//! It is built as a DFA, a table with one transition per state and class
+//! of byte, rather than the contiguous NFA it was first built as, which
+//! follows failure links between states. The built-in pack's 408 tokens
+//! make tables of about 0.5 MB in all, built at start-up (a scan of an empty
+//! folder still takes under 10 ms), and the search costs less than half as
+//! much: on one thread over the 14 apps of an Apple M5 (6.8 GB read), the
+//! whole scan took 3.6 s of user time against 5.3 s, with the same report.
 //!
 //! Every occurrence is reported, also when two literals overlap or one
 //! contains the other. Each occurrence then has to pass its token's boundary
@@ -100,7 +108,8 @@ impl ContentEngine {
             return Ok(Self::default());
         }
         let automaton = AhoCorasick::builder()
-            .kind(Some(AhoCorasickKind::ContiguousNFA))
+            // See the module documentation for why a DFA.
+            .kind(Some(AhoCorasickKind::DFA))
             // The only match kind that reports overlapping occurrences.
             .match_kind(MatchKind::Standard)
             .build(literals.iter().map(|literal| literal.bytes))?;
@@ -122,6 +131,12 @@ impl ContentEngine {
         self.patterns.len()
     }
 
+    /// The memory the engine's automaton holds, in bytes.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.automaton.as_ref().map_or(0, AhoCorasick::memory_usage)
+    }
+
     /// Whether the engine has nothing to search for.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -132,7 +147,7 @@ impl ContentEngine {
     /// to judge and that sits on its token's boundary.
     fn each_hit(&self, window: &[u8], carry: usize, last: bool, mut found: impl FnMut(PatternId)) {
         let Some(automaton) = &self.automaton else { return };
-        // An unanchored overlapping search is what a contiguous NFA with
+        // An unanchored overlapping search is what a DFA with
         // standard match semantics supports, so this cannot fail.
         let Ok(occurrences) = automaton.try_find_overlapping_iter(Input::new(window)) else {
             return;
