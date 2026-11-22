@@ -79,7 +79,9 @@
 //! [`MAX_DEX_FILES`] DEX files, and the limits of the manifest and DEX
 //! readers. What a budget cuts off becomes an `over_budget` coverage record.
 //! Two entries that share bytes of the archive are not both read, so the
-//! entries held at one time cannot add up either. Nothing is extracted to
+//! entries held at one time cannot add up either; only a manifest or
+//! resource table that the resource loader reads past its span is held
+//! together with the entry after it. Nothing is extracted to
 //! disk and nothing is executed.
 //!
 //! Those budgets bound one package; what bounds the scan is where entries
