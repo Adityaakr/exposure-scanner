@@ -52,7 +52,9 @@ jobs:
         run: |
           formula=adityaakr/exposure-scanner/exposure
           tap=$(brew --repository adityaakr/exposure-scanner)
-          tag=$(sed -n 's/^  url .*tag: "\([^"]*\)".*/\1/p' "$tap/Formula/exposure.rb")
+          # `tag:` is on the url line or on one of the lines after it.
+          tag=$(grep -m1 -E '^ *(url .*)?tag: *"' "$tap/Formula/exposure.rb" | sed -E 's/.*tag: *"([^"]+)".*/\1/')
+          [ -n "$tag" ] || { echo "::error::no tag: found in Formula/exposure.rb"; exit 1; }
           if git ls-remote --exit-code --tags https://github.com/Adityaakr/exposure-scanner "refs/tags/$tag" >/dev/null; then
             brew audit --strict --formula "$formula"
           else
