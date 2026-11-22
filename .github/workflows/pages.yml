@@ -1,0 +1,109 @@
+name: pages
+
+# Builds the website in site/ and publishes it with GitHub Pages. The sample
+# report on the site is not written by hand: site/build.sh builds exposure
+# from the same commit and scans the synthetic fixtures with it, so the
+# published report is what that code writes. Pull requests that touch the
+# site or the scanner run the build and the checks, and publish nothing.
+#
+# Publishing needs GitHub Pages enabled for the repository, with "GitHub
+# Actions" as its source (Settings > Pages).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "crates/**"
+      - "rules/**"
+      - "tests/fixtures/**"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "crates/**"
+      - "rules/**"
+      - "tests/fixtures/**"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install || rustup show
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: pages-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: |
+            pages-
+            linux-
+
+      - name: Build the site, with the sample report written afresh
+        run: site/build.sh "$RUNNER_TEMP/site"
+
+      # A pull request must commit the report its own code writes. On main,
+      # a change to the scanner can change the report before anyone updates
+      # the committed copy; the fresh report is published and a warning says
+      # so.
+      - name: The committed sample report is current
+        run: |
+          if cmp -s site/sample/report.html "$RUNNER_TEMP/site/sample/report.html" &&
+             cmp -s site/sample/report.json "$RUNNER_TEMP/site/sample/report.json"; then
+            echo "site/sample/ matches what this commit's exposure writes"
+            exit 0
+          fi
+          message="site/sample/ differs from what this commit's exposure writes; run site/build.sh --sample and commit the result"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "::error::$message"
+            exit 1
+          fi
+          echo "::warning::$message. The published site carries the fresh report."
+
+      - name: No third-party requests, and every internal link resolves
+        run: python3 -I site/check.py "$RUNNER_TEMP/site"
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

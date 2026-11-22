@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>exposure: see whose code is inside your apps</title>
+<meta name="description" content="exposure is a free, open-source scanner that reads the apps on your Mac and the Android packages you give it, finds the analytics, advertising and crash-reporting SDKs they ship, and names the company behind each one, with the evidence. It runs on your machine and has no network code.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="exposure: see whose code is inside your apps">
+<meta property="og:description" content="A local, open-source scanner that names the companies whose SDKs ship inside your apps, and shows the file and bytes behind every finding.">
+<meta property="og:image" content="https://adityaakr.github.io/exposure-scanner/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="site-header">
+  <div class="nav-pill">
+    <a class="brand" href="./" aria-label="exposure, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="7" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M9 11h8M9 15.5h4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><rect x="16" y="16" width="8" height="8" rx="2" fill="#f0b429"/></svg>
+      exposure
+    </a>
+    <nav aria-label="Main">
+      <ul class="nav">
+        <li class="wide"><a href="#how">How it works</a></li>
+        <li class="wide"><a href="#trust">Privacy</a></li>
+        <li class="mid"><a href="sample/">Sample report</a></li>
+        <li><a href="docs/">Docs</a></li>
+      </ul>
+    </nav>
+    <div class="nav-end">
+      <a class="icon-btn gh" href="https://github.com/Adityaakr/exposure-scanner" aria-label="exposure on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <button class="icon-btn theme-toggle" type="button" aria-label="Switch theme">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>
+      </button>
+      <a class="btn btn-primary btn-sm" href="#install">Install</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- The hero: the claim, then the real thing rising from the card -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-media">
+    <a class="hero-badge" href="https://github.com/Adityaakr/exposure-scanner/blob/main/CHANGELOG.md"><span class="grade g-contains">v0.1.0</span> Free, open source, and offline</a>
+    <h1 id="hero-title">See whose code is inside your apps.</h1>
+    <p class="hero-sub">Every SDK an app ships, the company behind it, and the file that proves it. exposure runs on your machine, and it has no network code at all.</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="#install">Install exposure</a>
+      <a class="btn btn-secondary" href="sample/">See a real report</a>
+    </div>
+
+    <div class="hero-object">
+      <div class="term" role="group" aria-label="Terminal: exposure scanning two test apps">
+        <div class="term-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">exposure-scanner/tests/fixtures</span></div>
+<pre class="lines"><span class="ln"><span class="c"># two synthetic test apps from the repository</span></span><span class="ln h2"><span class="p">$ </span><span class="cmd">exposure scan android/Skeleton.apk macos/ElectronSkeleton.app</span></span><span class="ln"><span class="dim">…</span></span><span class="ln h2">Your report: /Users/you/Library/Application Support/exposure/report.html</span><span class="ln">It is open in your browser.</span><span class="ln"> </span><span class="ln"><span class="b">Scanned 2 apps.</span></span><span class="ln i2 h2"><span class="hi">1</span> company whose code the scanned apps ship, in advertising, analytics and the like</span><span class="ln i2 h2"><span class="hi">2</span> apps with code or an endpoint of a company other than their publisher</span><span class="ln"> </span><span class="ln">What you can do first (2 of 2):</span><span class="ln"> </span><span class="ln i2 h3">1. <span class="high">[High]</span> <span class="b">PostHog</span></span><span class="ln i7">Analytics, by PostHog Inc., in 2 apps: ElectronSkeleton and Skeleton</span><span class="ln i7">Block app.posthog.com, eu.i.posthog.com, i.posthog.com and</span><span class="ln i7">us.i.posthog.com with an outbound firewall such as LuLu (free) or Little</span><span class="ln i7">Snitch.</span><span class="ln"> </span><span class="ln i2 h3">2. <span class="dim">[Low]</span> <span class="b">Sentry</span></span><span class="ln i7">Crash reporting, by Functional Software, Inc. (Sentry), in 2 apps:</span><span class="ln i7">ElectronSkeleton and Skeleton</span><span class="ln i7">No setting to turn it off is on record. Remove the apps you can do</span><span class="ln i7">without.</span></pre>
+      </div>
+
+      <article class="finding-card" aria-label="The PostHog finding from the report">
+        <div class="fc-company"><strong>PostHog Inc.</strong> <span class="tag counted">counted in the summary</span></div>
+        <p class="fc-app">Skeleton · <code>org.example.exposure.skeleton</code> · Android</p>
+        <div class="fc-sdk"><strong>PostHog</strong> <span class="tag">Analytics</span></div>
+        <p class="fc-graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+        <p class="fc-ev-head">Evidence: 2 records</p>
+        <ul class="fc-ev">
+          <li>
+            <p class="what">Classes defined in the app's code</p>
+            <dl class="fc-facts">
+              <dt>Marker</dt><dd><code>com.posthog.android.</code></dd>
+              <dt>Found in</dt><dd><code>classes2.dex</code>, class table</dd>
+              <dt>Record</dt><dd><a href="sample/report.html#r-17929ab8f738ac57e1e6bd41439a0b43b3a44e47381790ea210eb1d3bc503db6">sha256:17929ab8f738…</a></dd>
+            </dl>
+          </li>
+          <li>
+            <p class="what">A text constant in the app's code</p>
+            <dl class="fc-facts">
+              <dt>Marker</dt><dd><code>us.i.posthog.com</code></dd>
+              <dt>Found in</dt><dd><code>classes2.dex</code>, text constants</dd>
+              <dt>Record</dt><dd><a href="sample/report.html#r-631fd5a6a5e94cba358466cf66c03f15378cb15c252358ebfb5045c801cc5b91">sha256:631fd5a6a5e9…</a></dd>
+            </dl>
+          </li>
+        </ul>
+      </article>
+    </div>
+  </div>
+  <p class="hero-note">Real output of exposure 0.1.0 on two synthetic test apps from the repository. <a href="sample/">Open the report it is from</a>.</p>
+</section>
+
+<div class="proof" role="region" aria-label="What the tests show">
+  <ul>
+    <li><span class="n">48</span><span class="l">SDK rules, signed, each marker citing the vendor's own code or docs</span></li>
+    <li><span class="n">231<small> / 231</small></span><span class="l">planted markers found by the canary test</span></li>
+    <li><span class="n">30<small> / 30</small></span><span class="l">real apps with no third-party SDK come back clean</span></li>
+    <li><span class="n">0</span><span class="l">sockets opened, because there is no network code</span></li>
+  </ul>
+</div>
+
+<!-- The problem -->
+<section class="sec" aria-labelledby="problem-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">The problem</p>
+    <h2 class="display" id="problem-title">Apps carry code from companies <span class="em">you never chose</span>.</h2>
+    <p>Analytics, advertising, attribution, session-replay and crash-reporting SDKs sit inside the apps you use. Each one is a channel from an app to a company you may never have heard of, and nothing on your computer lists them.</p>
+    <figure class="scene">
+      <div class="drill reveal" aria-label="One marker traced from an app bundle to a company">
+        <div class="drill-card"><code>ElectronSkeleton.app</code><span>the app bundle</span></div>
+        <div class="drill-card"><code>Contents/Resources/app.asar</code><span>its archive, read without unpacking it to disk</span></div>
+        <div class="drill-card"><code>main.js</code><span>the app's own script</span></div>
+        <div class="drill-card"><code>app.posthog.com</code><span>a marker the SDK cannot avoid leaving</span><p class="to"><span class="grade g-contains">contains</span><strong>PostHog</strong>, analytics, by PostHog Inc.</p></div>
+      </div>
+      <figcaption class="cap">one marker, from the bundle down to the company, in a test app from the repository</figcaption>
+    </figure>
+    <p>Privacy labels are written by the publisher. Online scanners want the app uploaded. exposure reads the app itself, on your machine, and shows you where it looked.</p>
+  </div>
+</section>
+
+<!-- What it does -->
+<section class="sec" aria-labelledby="does-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">What exposure does</p>
+    <h2 class="display" id="does-title">It names the company, and shows <span class="em">the bytes that prove it</span>.</h2>
+    <p><strong>exposure</strong> reads the apps on your Mac and the Android packages you give it, finds the analytics, advertising, attribution, session-replay and crash-reporting SDKs they ship, and names the company behind each one. Every finding has a grade and cites its raw records: the marker, the file, how many times.</p>
+    <figure class="scene">
+      <div class="scene-finding reveal">
+        <article class="finding-card" aria-label="A finding from the sample report">
+          <div class="fc-company"><strong>PostHog Inc.</strong> <span class="tag counted">counted in the summary</span></div>
+          <p class="fc-app">ElectronSkeleton · <code>org.example.exposure.electron-skeleton</code> · macOS</p>
+          <div class="fc-sdk"><strong>PostHog</strong> <span class="tag">Analytics</span></div>
+          <p class="fc-graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+          <dl class="fc-facts">
+            <dt>Confidence</dt><dd>medium: text found in the app's own code</dd>
+            <dt>Party</dt><dd>Third party: not this app's publisher</dd>
+          </dl>
+          <p class="fc-ev-head">Evidence: 1 record</p>
+          <ul class="fc-ev">
+            <li>
+              <p class="what">Text in a script</p>
+              <dl class="fc-facts">
+                <dt>Marker</dt><dd><code>app.posthog.com</code></dd>
+                <dt>Found in</dt><dd><code>Contents/Resources/app.asar</code>, in the contents of its files</dd>
+                <dt>Example</dt><dd><code>main.js</code></dd>
+                <dt>Record</dt><dd><a href="sample/report.html#r-19326b8ab37f26675dbddb06366e72f901cbf62bd6ddbe840a7333b47b57857c">sha256:19326b8ab37f…</a></dd>
+              </dl>
+            </li>
+          </ul>
+        </article>
+      </div>
+      <figcaption class="cap">the same finding, as the report writes it</figcaption>
+    </figure>
+    <div class="try">
+      <a class="btn btn-primary btn-sm" href="sample/">See the whole report</a>
+      <a class="link-more" href="docs/#reading">How to read a finding</a>
+    </div>
+    <p class="fine"><span class="grade g-contains">contains</span> means the code is present, not that it runs or sends anything. A clean report does not mean a clean app: an SDK with no rule is not reported.</p>
+  </div>
+</section>
+
+<!-- A real scan -->
+<section class="sec" id="proof" aria-labelledby="real-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">A real scan</p>
+    <h2 class="display" id="real-title">One Mac, sixteen apps, <span class="em">2.2 seconds</span>.</h2>
+    <p>The maintainer's Mac, scanned on 22 November 2026 with exposure 0.1.0: 16 apps and 8 browser extensions, 10,756 files and 6.8 GB, with the cache off. Nothing left the machine. These are the companies it named, and in how many apps.</p>
+    <figure class="scene">
+      <ul class="bars reveal">
+        <li class="bar-row">
+          <div class="bar-top"><div class="bar-name"><strong>Sentry</strong><span class="soft">Functional Software, Inc.</span></div><span class="bar-n">10 <span class="soft">of 16</span></span></div>
+          <div class="bar-meta"><span class="tag">Crash reporting</span><span class="tag uncounted">not counted</span></div>
+          <div class="bar-track" aria-hidden="true"><span class="bar-fill uncounted w-10"></span></div>
+        </li>
+        <li class="bar-row">
+          <div class="bar-top"><div class="bar-name"><strong>Statsig</strong><span class="soft">OpenAI</span></div><span class="bar-n">2 <span class="soft">of 16</span></span></div>
+          <div class="bar-meta"><span class="tag">Analytics</span><span class="tag counted">counted</span></div>
+          <div class="bar-track" aria-hidden="true"><span class="bar-fill w-2"></span></div>
+        </li>
+        <li class="bar-row">
+          <div class="bar-top"><div class="bar-name"><strong>Datadog RUM</strong><span class="soft">Datadog, Inc.</span></div><span class="bar-n">1 <span class="soft">of 16</span></span></div>
+          <div class="bar-meta"><span class="tag">Analytics</span><span class="tag counted">counted</span></div>
+          <div class="bar-track" aria-hidden="true"><span class="bar-fill w-1"></span></div>
+        </li>
+        <li class="bar-row">
+          <div class="bar-top"><div class="bar-name"><strong>PostHog</strong><span class="soft">PostHog Inc.</span></div><span class="bar-n">1 <span class="soft">of 16</span></span></div>
+          <div class="bar-meta"><span class="tag">Analytics</span><span class="tag counted">counted</span></div>
+          <div class="bar-track" aria-hidden="true"><span class="bar-fill w-1"></span></div>
+        </li>
+        <li class="bar-row">
+          <div class="bar-top"><div class="bar-name"><strong>Segment</strong><span class="soft">Twilio Inc.</span></div><span class="bar-n">1 <span class="soft">of 16</span></span></div>
+          <div class="bar-meta"><span class="tag">Analytics</span><span class="tag counted">counted</span></div>
+          <div class="bar-track" aria-hidden="true"><span class="bar-fill w-1"></span></div>
+        </li>
+      </ul>
+      <div class="counts">
+        <p><span class="n">4</span>companies whose code the apps ship, in the counted categories</p>
+        <p><span class="n">5</span>apps with code of a company other than their publisher</p>
+      </div>
+    </figure>
+    <p class="fine">App names are left out on purpose: the list of apps a person uses is sensitive in itself, which is why a report stays on your machine. The same scan also listed updater components (Squirrel in 6 apps, Sparkle in 5), which name no company, and 117 claims about what the apps and extensions may access.</p>
+  </div>
+</section>
+
+<!-- How it works -->
+<section class="sec" id="how" aria-labelledby="how-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">How it works</p>
+    <h2 class="display" id="how-title">Three steps, and <span class="em">none of them runs the app</span>.</h2>
+    <p>No guessing from names, and no lookup in anyone's cloud. A finding exists only when the app's own files hold a marker that an SDK cannot avoid leaving.</p>
+    <figure class="scene">
+      <ol class="track reveal" aria-label="The pipeline, from apps to report">
+        <li><strong>Apps on disk</strong>bundles, archives, <code>.apk</code> files, extensions</li>
+        <li><strong>Read</strong>in bounded windows, nothing run</li>
+        <li class="key"><strong>Match</strong>literal markers from 48 signed rules</li>
+        <li><strong>Evidence</strong>records keyed by SHA-256</li>
+        <li><strong>Claims</strong>company, party and grade</li>
+        <li><strong>Report</strong>HTML for you, JSON for programs</li>
+      </ol>
+    </figure>
+    <ul class="uses">
+      <li>
+        <h3>It reads the files, and only reads them.</h3>
+        <p>Mach-O binaries, <code>Info.plist</code> and privacy manifests on macOS; <code>app.asar</code> archives in Electron apps; DEX code and the manifest in Android packages; each browser extension's <code>manifest.json</code>. It never runs anything it scans, changes anything, or follows a symbolic link inside an app.</p>
+      </li>
+      <li>
+        <h3>It matches 48 signed rules.</h3>
+        <p>A rule lists literal markers an SDK cannot avoid leaving: a class name, a framework folder, an endpoint. Each marker has a boundary rule and cites the SDK's own code or documentation. Rules are data, with no regular expressions and no scripts, and the scanner loads only a rule pack whose signature checks out.</p>
+      </li>
+      <li>
+        <h3>It writes a report you can check by hand.</h3>
+        <p>One HTML page grouped by company, and a JSON file for programs. The page loads nothing and runs no script, whatever the scanned apps' names contain.</p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<!-- Grades -->
+<section class="sec" aria-labelledby="grades-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">Every finding is graded</p>
+    <h2 class="display" id="grades-title">Graded facts, and <span class="em">never a score</span>.</h2>
+    <p>The grade says what kind of evidence there is, and a finding takes the highest grade its evidence reaches. No finding says what an app or a company intends.</p>
+    <figure class="scene">
+      <ol class="track track-grades reveal" aria-label="The grades, from weakest to strongest evidence">
+        <li><span class="chips"><span class="grade g-declares">declares</span><span class="planned today">Today</span></span><strong>An address</strong>the app's own files name the endpoint</li>
+        <li class="key"><span class="chips"><span class="grade g-contains">contains</span><span class="planned today">Today</span></span><strong>Ships</strong>the app ships the SDK's code</li>
+        <li class="later"><span class="chips"><span class="grade g-contacts">contacts</span><span class="planned">Planned</span></span><strong>Contacted</strong>a connection was recorded</li>
+        <li class="later"><span class="chips"><span class="grade g-confirmed">confirmed</span><span class="planned">Planned</span></span><strong>Confirmed</strong>the receiver lists the sender</li>
+      </ol>
+    </figure>
+    <p>The headline counts companies in five categories: advertising, analytics, attribution, profiling and session replay. Crash reporting, push messaging, payments and update feeds are listed under the company that runs them, and not counted. A crash report can still carry data about you, so the report shows every one.</p>
+  </div>
+</section>
+
+<!-- Trust and privacy -->
+<section class="sec" id="trust" aria-labelledby="trust-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">Trust and privacy</p>
+    <h2 class="display" id="trust-title">Safer than <span class="em">the apps it reports on</span>.</h2>
+    <p>A tool that reads the list of apps you use has to be. These are mechanisms, checked in CI, not promises.</p>
+    <ul class="uses">
+      <li>
+        <h3>No network code</h3>
+        <p>Nothing leaves the machine, because nothing in it can send. Socket-capable dependencies are banned, and CI proves that a scan opens no socket.</p>
+        <p class="how"><span>dependency bans</span><span>symbol audit of the binary</span><span>a network namespace with no interfaces</span><span>strace</span><span>a macOS sandbox that denies the network</span></p>
+      </li>
+      <li>
+        <h3>Read only</h3>
+        <p>Files are opened for reading. Nothing is extracted to disk and nothing scanned is run. Of a browser profile, only each extension's manifest is read: never your history, cookies, bookmarks or logins.</p>
+      </li>
+      <li>
+        <h3>Two files, both private</h3>
+        <p>A scan writes the report and a results cache, both readable only by you. <code>--no-cache</code> turns the cache off, and you can delete it at any time.</p>
+      </li>
+      <li>
+        <h3>The report is inert</h3>
+        <p>It runs no script and loads nothing from anywhere. It holds no date, no device name and no path you gave it.</p>
+      </li>
+      <li>
+        <h3>Same input, same bytes</h3>
+        <p>The same apps and rule pack give a byte-identical report on any machine, at any thread count. Two clean builds of one commit give the same binary, and CI checks it nightly.</p>
+      </li>
+      <li>
+        <h3>Open source</h3>
+        <p>The code is Apache-2.0. The rules and company map are CC BY 4.0, and every marker cites the vendor's own code or documentation.</p>
+      </li>
+    </ul>
+    <p class="fine">What a scan cannot see, and every report says so: what happens on a company's servers, what is inside encrypted traffic, tracking routed through an app's own domain, SDKs it has no rule for, and whether shipped code ever runs. A clean report does not mean a clean app. <a href="https://github.com/Adityaakr/exposure-scanner/blob/main/docs/threat-model.md">Read the threat model</a>.</p>
+  </div>
+</section>
+
+<!-- Who it is for -->
+<section class="sec" aria-labelledby="who-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">Who it is for</p>
+    <h2 class="display" id="who-title">For people who ship apps, use them, <span class="em">and write about them</span>.</h2>
+    <ul class="uses">
+      <li>
+        <h3>Teams that ship apps</h3>
+        <p>Know which third-party SDKs your release actually contains, from the build itself, before it goes out. Scan an <code>.apk</code> or a Mac app on a machine you control and keep the JSON evidence with your privacy review. Your build never leaves your machine.</p>
+        <p class="how"><span class="planned next">Next release</span> <span>a diff between two builds</span><span>a release gate in CI</span><span><code>.aab</code> bundles</span></p>
+        <p class="how"><span class="planned">Planned</span> <span>a GitHub Action</span></p>
+      </li>
+      <li>
+        <h3>People who want to know</h3>
+        <p>One command lists the companies whose code ships in your Mac's apps, and the powerful permissions your browser extensions hold. Then it tells you what you can do: an app's own opt-out where one is documented, the hosts to block with a firewall such as LuLu or Little Snitch, the System Settings pane for each permission. You decide; exposure changes nothing.</p>
+      </li>
+      <li>
+        <h3>Researchers and journalists</h3>
+        <p>A <span class="grade g-contains">contains</span> finding depends only on the app file and the rule pack, so anyone holding the same file gets the same records. Cite the file's SHA-256 and the record, and your readers can check it. A wrong finding is settled by the files, in a public dispute.</p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<!-- Get started -->
+<section class="sec" id="install" aria-labelledby="install-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">Get started</p>
+    <h2 class="display" id="install-title">Install it, then <span class="em">run one command</span>.</h2>
+    <p>exposure is one command-line binary for macOS on Apple silicon and Linux. It is built from source on your machine, so you can read the code it runs.</p>
+    <div class="code-stack">
+      <div>
+        <p class="label">From source <span class="planned today">Works today</span></p>
+        <p>Apple's command-line tools, Rust 1.97 or later, then one <code>cargo install</code>. On Linux, skip the first line.</p>
+        <div class="code" data-copy><pre><span class="p">$ </span>xcode-select --install
+<span class="p">$ </span>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+<span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.1.0 exposure</pre></div>
+      </div>
+      <div>
+        <p class="label">Homebrew <span class="planned next">Next release</span></p>
+        <p>From the repository's own tap, building from source.</p>
+        <div class="code is-planned" role="group" aria-label="Commands for the next release, not available yet"><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+<span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
+        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg>Not available yet. The formula is merged and ships with the next release; until then, install from source above.</p>
+      </div>
+      <div>
+        <p class="label">Then scan</p>
+        <p>On a Mac this reads <code>/Applications</code>, <code>~/Applications</code> and your browser extensions, writes the report to a folder only you can read, prints what to do first, and opens the report.</p>
+        <div class="code" data-copy><pre><span class="p">$ </span>exposure scan</pre></div>
+      </div>
+    </div>
+    <p>To scan one app or an Android package, name it: <code>exposure scan Some.app app-release.apk</code>. For a program, <code>--json -</code> prints the JSON report.</p>
+    <div class="try">
+      <a class="btn btn-primary btn-sm" href="docs/">Read the docs</a>
+      <a class="link-more" href="docs/#install">Every install option</a>
+    </div>
+  </div>
+</section>
+
+<!-- What's next -->
+<section class="sec" id="next" aria-labelledby="next-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">What's next</p>
+    <h2 class="display" id="next-title">From a scan to <span class="em">a release gate</span>.</h2>
+    <p>The Homebrew formula and three of these are merged and listed as unreleased in the changelog: they ship with the next release. The rest is planned.</p>
+    <ul class="uses">
+      <li><h3>Compare two builds <span class="planned next">Next release</span></h3><p><code class="is-planned">exposure diff</code>: the SDKs a release added or dropped, per app.</p></li>
+      <li><h3>A release gate <span class="planned next">Next release</span></h3><p><code class="is-planned">--fail-on</code>: a non-zero exit when a build ships an SDK your policy does not allow.</p></li>
+      <li><h3>Android App Bundles <span class="planned next">Next release</span></h3><p>The <code>.aab</code> files uploaded to Google Play, scanned like the APKs they hold.</p></li>
+      <li><h3>A GitHub Action <span class="planned">Planned</span></h3><p>Scans each build, comments the SDK difference against your last release, and fails on a policy breach.</p></li>
+      <li><h3>A browser APK check <span class="planned">Planned</span></h3><p>Drop an <code>.apk</code> on a page. It is scanned in your browser, and nothing is uploaded.</p></li>
+      <li><h3>More inputs <span class="planned">Planned</span></h3><p>Apps pulled from a phone over USB, and the App Privacy Report an iPhone exports.</p></li>
+    </ul>
+  </div>
+</section>
+
+<!-- Questions -->
+<section class="sec" id="faq" aria-labelledby="faq-title">
+  <div class="sec-inner story">
+    <p class="eyebrow">Questions</p>
+    <h2 class="display" id="faq-title">The things people <span class="em">ask first</span>.</h2>
+    <div class="faq">
+      <details>
+        <summary>Does it send anything anywhere?</summary>
+        <div class="answer"><p>No. It contains no network code, and CI proves that a scan opens no socket.</p></div>
+      </details>
+      <details>
+        <summary>If an app "ships" an SDK, does it send my data to that company?</summary>
+        <div class="answer"><p>Not necessarily. "Ships" means the code is in the app's files. The app may never call it, or may call it only for some users. Showing a live connection is a later milestone.</p></div>
+      </details>
+      <details>
+        <summary>Why is crash reporting not in the headline count?</summary>
+        <div class="answer"><p>The headline counts five categories: advertising, analytics, attribution, profiling and session replay. Crash reporting, push messaging and payments are listed in the report under the company that runs them, but they are not counted. A crash report can still carry data about you, so the report shows every one.</p></div>
+      </details>
+      <details>
+        <summary>How accurate is it?</summary>
+        <div class="answer">
+          <ul>
+            <li>Every marker of every rule is planted in a synthetic app and must be found: 231 of 231 today.</li>
+            <li>Thirty real apps that ship no third-party SDK, including ad blockers and a browser built on Chromium, must come back with no third-party finding, and they do.</li>
+            <li>It knows 48 SDKs. An SDK it has no rule for is not reported.</li>
+          </ul>
+        </div>
+      </details>
+      <details>
+        <summary>Does it work on my iPhone?</summary>
+        <div class="answer"><p>No. iOS does not let one app read another's files. <span class="planned">Planned</span> Import the App Privacy Report your iPhone can export.</p></div>
+      </details>
+      <details>
+        <summary>And my Android phone?</summary>
+        <div class="answer"><p>It scans <code>.apk</code> files on a Mac or a Linux machine. <span class="planned next">Next release</span> Android App Bundles (<code>.aab</code>) too. <span class="planned">Planned</span> Pull the apps from a phone connected over USB.</p></div>
+      </details>
+      <details>
+        <summary>Windows?</summary>
+        <div class="answer"><p>Not planned yet.</p></div>
+      </details>
+      <details>
+        <summary>An app of mine is named, and the finding is wrong.</summary>
+        <div class="answer"><p>Use the <a href="https://github.com/Adityaakr/exposure-scanner/issues/new?template=dispute.yml">dispute form</a>. A dispute is settled by the files: the build is fetched again from its public address, and every record is checked against its bytes. <a href="https://github.com/Adityaakr/exposure-scanner/blob/main/docs/disputes.md">How disputes work</a>.</p></div>
+      </details>
+      <details>
+        <summary>Why build from source?</summary>
+        <div class="answer"><p>A scanner that reads the list of your apps is more credible when you can build it yourself and get the same binary. The Homebrew formula, which ships with the next release, builds from source too.</p></div>
+      </details>
+      <details>
+        <summary>Is it free?</summary>
+        <div class="answer"><p>Yes. The scanner is free and open source under Apache-2.0, and its rules are CC BY 4.0.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- The close -->
+<section class="sec close" aria-labelledby="close-title">
+  <div class="sec-inner">
+    <h2 class="display" id="close-title">Run it on one app you use every day.</h2>
+    <div class="code" data-copy><pre><span class="p">$ </span>exposure scan /Applications/YourApp.app</pre></div>
+    <div class="actions">
+      <a class="btn btn-primary" href="#install">Install exposure</a>
+      <a class="btn btn-secondary" href="sample/">See a real report</a>
+    </div>
+    <p class="close-note">Read the report, check one record by hand, and tell us what it got wrong. Missing an SDK? <a href="https://github.com/Adityaakr/exposure-scanner/blob/main/CONTRIBUTING.md#adding-or-changing-a-rule">Suggest a rule</a>.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="footer-row">
+    <a class="brand" href="./" aria-label="exposure, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="7" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M9 11h8M9 15.5h4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><rect x="16" y="16" width="8" height="8" rx="2" fill="#f0b429"/></svg>
+      exposure
+    </a>
+    <ul class="footer-links">
+      <li><a href="sample/">Sample report</a></li>
+      <li><a href="docs/">Docs</a></li>
+      <li><a href="https://github.com/Adityaakr/exposure-scanner">GitHub</a></li>
+      <li><a href="https://github.com/Adityaakr/exposure-scanner/blob/main/CHANGELOG.md">Changelog</a></li>
+      <li><a href="https://github.com/Adityaakr/exposure-scanner/blob/main/docs/threat-model.md">Threat model</a></li>
+      <li><a href="https://github.com/Adityaakr/exposure-scanner/issues/new?template=dispute.yml">Dispute a finding</a></li>
+    </ul>
+  </div>
+  <div class="footer-base">
+    <span>Code Apache-2.0 · Rules and company map CC BY 4.0</span>
+    <span class="no-track"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 9.5C8 19.3 5 15.5 5 11V6l7-3z"/></svg>This site sets no cookies, runs no analytics and loads nothing from other servers.</span>
+  </div>
+</footer>
+</body>
+</html>
