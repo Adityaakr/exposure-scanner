@@ -10,7 +10,9 @@
 class Exposure < Formula
   desc "Show which companies' SDKs your apps ship, with the evidence for each"
   homepage "https://github.com/Adityaakr/exposure-scanner"
-  url "https://github.com/Adityaakr/exposure-scanner.git", tag: "v0.2.0"
+  url "https://github.com/Adityaakr/exposure-scanner.git",
+      tag:      "v0.2.0",
+      revision: "517b72ab111f21b06523f323ec3053416b86a5c4"
   # The code, and the rule pack compiled into the binary.
   license all_of: ["Apache-2.0", "CC-BY-4.0"]
   head "https://github.com/Adityaakr/exposure-scanner.git", branch: "main"
