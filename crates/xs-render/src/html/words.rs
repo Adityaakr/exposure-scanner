@@ -205,6 +205,14 @@ pub(crate) const fn reason_words(reason: CoverageReason) -> &'static str {
         }
         CoverageReason::Unreadable => "The file system refused the read.",
         CoverageReason::UnsupportedFormat => "This version has no reader for the format.",
+        CoverageReason::Missing => {
+            "The app's own files name it, and it is not there as a file. A link in its place \
+             is never followed."
+        }
+        CoverageReason::CompiledScript => {
+            "Compiled JavaScript (V8 bytecode) is not searched: its text is not stored as plain \
+             bytes, so an SDK inside it would not be found."
+        }
     }
 }
 

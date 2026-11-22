@@ -365,6 +365,50 @@ fn a_publisher_known_by_its_signature_links_to_the_record_that_names_it() {
     assert!(root.by_id(&link[1..]).unwrap().text().contains(GOOGLE_TEAM));
 }
 
+/// Security review M2: an Android package named after Google only claims to
+/// be Google's. Every publisher line of the app says so and why, its
+/// findings say the party is not established, and the app still counts as
+/// one with a third-party channel.
+#[test]
+fn an_app_that_only_claims_a_company_says_so_on_every_publisher_line() {
+    let mut layer = layer();
+    let google = layer.entities.iter_mut().find(|entity| entity.id == "google").unwrap();
+    google.app_ids = vec!["com.google".into()];
+    let pack = Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(b"pack") }]).unwrap();
+    let app = subject(Platform::Android, "com.google.lookalike", 9);
+    let evidence = set([
+        artifact(&app, "Lookalike", None),
+        sdk(&app, "sdk/acme-analytics", MatcherKind::AppleFramework, None),
+        sdk(&app, "sdk/crashlytics", MatcherKind::AppleFramework, None),
+        asks(&app, "NSCameraUsageDescription"),
+    ]);
+    let claims = claims(&evidence, &pack);
+    assert!(claims.iter().filter(|claim| claim.company.is_some()).all(|claim| {
+        claim.party == Party::Unknown && claim.claimed_vendor() == Some("google")
+    }));
+    assert_eq!(Headline::of(&claims).apps_third_party, 1);
+
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let lines: Vec<String> = root
+        .descendants()
+        .into_iter()
+        .filter(|e| e.has_class("publisher"))
+        .map(Element::text)
+        .collect();
+    assert!(lines.len() >= 3, "a company's, another company's and the permissions: {lines:?}");
+    for line in &lines {
+        assert!(
+            line.starts_with(
+                "Publisher: not established. Its app id says it is Google LLC's, \
+                              and the scan did not check its signature"
+            ),
+            "{line}"
+        );
+    }
+    let findings = section(&root, "findings").text();
+    assert!(findings.contains("the app names itself after a company the scan could not confirm"));
+}
+
 /// The strings a hostile app controls, and those the report file controls.
 struct Strings {
     name: &'static str,
@@ -1225,6 +1269,59 @@ fn coverage_lists_every_app_and_everything_that_was_set_aside() {
     }
 }
 
+/// Security review S3: a main executable that is not there says so, and
+/// compiled JavaScript is counted in files, with what not searching it
+/// means.
+#[test]
+fn a_missing_main_executable_and_compiled_script_are_set_aside_in_plain_words() {
+    let pack = pack();
+    let app = subject(Platform::Macos, "org.example.notes", 1);
+    let gap = |reason, location: &str, count| {
+        Record::Coverage(CoverageRecord {
+            v: V1,
+            collector: Collector::MacosBundle,
+            subject: app.clone(),
+            status: CoverageStatus::Skipped,
+            reason,
+            location: Some(RelPath::new(location).unwrap()),
+            bytes: None,
+            count,
+        })
+    };
+    let evidence = set([
+        artifact(&app, "Notes", None),
+        gap(CoverageReason::Missing, "Contents/MacOS/Notes", 1),
+        gap(CoverageReason::CompiledScript, "Contents/Resources/app.asar", 5),
+    ]);
+    let root = render(&[], &evidence, &meta(&pack), &pack);
+    let table = section(&root, "coverage").named("table")[1];
+    let mut rows: Vec<Vec<String>> = table.named("tbody")[0]
+        .named("tr")
+        .into_iter()
+        .map(|row| row.named("td").into_iter().map(Element::text).take(4).collect())
+        .collect();
+    rows.sort();
+    assert_eq!(
+        rows,
+        [
+            [
+                "Notes",
+                "Contents/MacOS/Notes",
+                "Not read",
+                "The app's own files name it, and it is not there as a file. A link in its \
+                 place is never followed.",
+            ],
+            [
+                "Notes",
+                "Contents/Resources/app.asar",
+                "Not read",
+                "Compiled JavaScript (V8 bytecode) is not searched: its text is not stored as \
+                 plain bytes, so an SDK inside it would not be found. 5 files.",
+            ],
+        ]
+    );
+}
+
 /// A package that could not be read has no hash and no content to report
 /// on. It is not an app that was scanned: it is listed with what was set
 /// aside, under the name of its file, and two of them stay two.
@@ -1327,18 +1424,21 @@ fn coverage_says_where_the_scan_looked_or_that_it_is_not_on_record() {
 #[test]
 fn every_coverage_reason_and_matcher_has_words() {
     use CoverageReason::{
-        EncryptedBinary, NoPrivilege, OverBudget, ParseError, UnexpectedCase, Unreadable,
-        UnrecognizedRecord, UnsupportedFormat,
+        CompiledScript, EncryptedBinary, Missing, NoPrivilege, OverBudget, ParseError,
+        SupersededVersion, UnexpectedCase, Unreadable, UnrecognizedRecord, UnsupportedFormat,
     };
     let reasons = [
         NoPrivilege,
         EncryptedBinary,
         OverBudget,
         ParseError,
+        SupersededVersion,
         UnexpectedCase,
         UnrecognizedRecord,
         Unreadable,
         UnsupportedFormat,
+        Missing,
+        CompiledScript,
     ];
     let mut seen: Vec<&str> = reasons.into_iter().map(words::reason_words).collect();
     seen.extend(MatcherKind::ALL.into_iter().map(words::matcher_words));
@@ -1806,6 +1906,123 @@ fn the_checklist_comes_first_and_puts_what_exposes_the_most_first() {
         let target = link.attr("href").unwrap().trim_start_matches('#');
         let finding = root.by_id(target).unwrap_or_else(|| panic!("no element `{target}`"));
         assert!(finding.has_class("finding"), "{target}");
+    }
+}
+
+/// Security review S2: an entry says when what it rests on is text alone,
+/// where the reader decides, and an entry that rests on nothing but text
+/// inside a library the app ships ranks one step down.
+#[test]
+fn an_entry_says_when_it_rests_on_text_alone() {
+    let pack = advised_pack();
+    let notes = subject(Platform::Macos, "org.example.notes", 1);
+    let other = subject(Platform::Macos, "org.example.other", 2);
+    let found_as = |subject: &Subject, matcher, scope| {
+        let Record::Edge(mut edge) = sdk(subject, "sdk/acme-analytics", matcher, None) else {
+            unreachable!()
+        };
+        edge.proof.token = "collect.acme.example".into();
+        edge.proof.location = RelPath::new("Contents/MacOS/App").unwrap();
+        edge.proof.region = Region::NonCode;
+        edge.proof.scope = scope;
+        Record::Edge(edge)
+    };
+    let head = |found: &[Claim], evidence: &EvidenceSet| {
+        let root = render(found, evidence, &meta(&pack), &pack);
+        let entry = section(&root, "actions")
+            .descendants()
+            .into_iter()
+            .find(|e| e.has_class("todo"))
+            .unwrap()
+            .text();
+        (checklist(&root), entry)
+    };
+
+    // Text in a binary's data: medium confidence, one kind of evidence.
+    let evidence = set([
+        artifact(&notes, "Notes", None),
+        found_as(&notes, MatcherKind::MachoToken, Scope::AppCode),
+    ]);
+    let derived = claims(&evidence, &pack);
+    assert_eq!(derived[0].confidence, xs_model::Confidence::Medium);
+    let (heads, entry) = head(&derived, &evidence);
+    assert_eq!(heads, ["High AcmeAnalytics Analytics"]);
+    let said = "Found as text in the app's code (one kind of evidence), not as a name read from \
+                a table the app declares.";
+    assert!(entry.contains(said), "{entry}");
+    let todos = super::checklist(&derived, &evidence, &meta(&pack), &pack).unwrap();
+    assert!(todos[0].about.ends_with(said), "{}", todos[0].about);
+
+    // In two apps, one of them by a framework: only the other is named.
+    let evidence = set([
+        artifact(&notes, "Notes", None),
+        found_as(&notes, MatcherKind::MachoToken, Scope::AppCode),
+        artifact(&other, "Other", None),
+        sdk(&other, "sdk/acme-analytics", MatcherKind::AppleFramework, None),
+    ]);
+    let derived = claims(&evidence, &pack);
+    let (heads, entry) = head(&derived, &evidence);
+    assert_eq!(heads, ["High AcmeAnalytics Analytics"]);
+    assert!(entry.contains("In Notes: found as text in the app's code"), "{entry}");
+    assert!(!entry.contains("In Other"), "{entry}");
+
+    // By a framework alone: nothing to say.
+    let evidence = set([
+        artifact(&other, "Other", None),
+        sdk(&other, "sdk/acme-analytics", MatcherKind::AppleFramework, None),
+    ]);
+    let derived = claims(&evidence, &pack);
+    let (_, entry) = head(&derived, &evidence);
+    assert!(!entry.contains("found as text") && !entry.contains("Found as text"), "{entry}");
+
+    // Text inside a library the app ships: low confidence, one step down.
+    let evidence = set([
+        artifact(&notes, "Notes", None),
+        found_as(&notes, MatcherKind::ContentLiteral, Scope::Dependency),
+    ]);
+    let derived = claims(&evidence, &pack);
+    assert_eq!(derived[0].confidence, xs_model::Confidence::Low);
+    let (heads, entry) = head(&derived, &evidence);
+    assert_eq!(heads, ["Medium AcmeAnalytics Analytics"]);
+    assert!(entry.contains("Found as text inside a library or a file the app ships"), "{entry}");
+}
+
+/// Security review M6: removing an extension deletes what it keeps in the
+/// browser, which for a wallet is the vault. Every step that removes one
+/// says so, on the page and in the terminal.
+#[test]
+fn every_step_that_removes_an_extension_warns_of_what_it_deletes() {
+    const WARNING: &str = "Removing an extension deletes what it keeps in this browser. For a \
+                           wallet or a password manager, make sure you have its recovery phrase \
+                           or an export first.";
+    let (pack, evidence) = (advised_pack(), evidence_with_access());
+    let claims = claims(&evidence, &pack);
+    let root = render(&claims, &evidence, &meta(&pack), &pack);
+    let removes: Vec<String> = root
+        .named("li")
+        .into_iter()
+        .map(|step| step.text())
+        .filter(|text| text.starts_with("Or remove it:"))
+        .collect();
+    // Chrome's and Firefox's extension, each in the checklist and under its
+    // findings.
+    assert!(removes.len() >= 2, "{removes:?}");
+    for text in &removes {
+        let (step, warning) = text.split_once(". Removing").unwrap_or_else(|| panic!("{text}"));
+        assert!(step.contains("choose Remove"), "{text}");
+        assert_eq!(format!("Removing{warning}"), WARNING, "{text}");
+    }
+
+    let todos = super::checklist(&claims, &evidence, &meta(&pack), &pack).unwrap();
+    let steps: Vec<&str> = todos
+        .iter()
+        .filter(|todo| todo.about.starts_with("Browser extension"))
+        .map(|todo| todo.step.as_str())
+        .collect();
+    assert_eq!(steps.len(), 2, "{todos:?}");
+    for step in steps {
+        assert!(step.contains("remove it") || step.starts_with("Remove it"), "{step}");
+        assert!(step.ends_with(WARNING), "{step}");
     }
 }
 

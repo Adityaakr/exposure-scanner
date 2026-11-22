@@ -5,7 +5,7 @@ use std::io::{IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use xs_match::Matchers;
-use xs_model::record::Record;
+use xs_model::record::{Record, SubjectKind};
 use xs_model::report::{ScanScope, Scanner};
 use xs_model::{EvidenceSet, Headline, Pack, Report};
 use xs_render::{ReportMeta, Todo};
@@ -125,6 +125,8 @@ struct Rendered {
     findings: Vec<xs_model::Claim>,
     /// The checklist in plain words, when it was asked for.
     todos: Vec<Todo>,
+    /// What the scan could not look at at all.
+    unchecked: Vec<xs_render::NotChecked>,
 }
 
 /// Derives claims from `evidence` and renders the reports `outputs` asks
@@ -160,6 +162,7 @@ fn render(
         headline: Headline::of(&claims),
         todos,
         findings: claims,
+        unchecked: xs_render::not_checked(evidence),
     })
 }
 
@@ -240,8 +243,11 @@ pub(crate) fn scan(args: &args::Scan) -> Result<Gate> {
         plural(headline.companies_contacts.into(), "company"),
         plural(headline.companies_contains.into(), "company"),
         plural(headline.apps_third_party.into(), "app"),
-        outcome.scope,
+        outcome.scope.words(&xs_render::unread_browsers(&report.unchecked)),
     );
+    for line in not_checked_lines(&report.unchecked) {
+        let _ = writeln!(std::io::stderr(), "{line}");
+    }
     if let Some(beside) = beside_the_headline(&report) {
         let _ = writeln!(std::io::stderr(), "exposure: beside the headline: {beside}");
     }
@@ -270,6 +276,32 @@ pub(crate) fn scan(args: &args::Scan) -> Result<Gate> {
         print(&summary(&report, &scanned, &page, opened))?;
     }
     Ok(close_on(&conditions, report.findings.iter().map(|claim| (claim, None)), None))
+}
+
+/// The lines of the terminal summary on standard error about what the scan
+/// could not look at at all, so that it is not read as clean (security
+/// review, M7). A browser is named; an extension or an app is not, and is
+/// counted, since these lines name no extension or app.
+fn not_checked_lines(unchecked: &[xs_render::NotChecked]) -> Vec<String> {
+    let mut lines: Vec<String> = unchecked
+        .iter()
+        .filter(|item| item.browser.is_some())
+        .map(|item| format!("exposure: not checked: {}", item.sentence()))
+        .collect();
+    for (extension, noun) in [(true, "extension"), (false, "app")] {
+        let count = unchecked
+            .iter()
+            .filter(|item| item.browser.is_none())
+            .filter(|item| (item.kind == SubjectKind::Extension) == extension)
+            .count() as u64;
+        if count > 0 {
+            lines.push(format!(
+                "exposure: not checked: {} that could not be read; the report names them",
+                plural(count, noun),
+            ));
+        }
+    }
+    lines
 }
 
 /// What Android apps ship beside the headline, in a few words, or nothing
@@ -404,6 +436,10 @@ fn summary(report: &Rendered, scanned: &str, page: &Path, opened: bool) -> Strin
         out.push_str("Open it in your browser.\n");
     }
     out.push_str(&format!("\nScanned {scanned}.\n"));
+    for item in &report.unchecked {
+        out.push('\n');
+        out.push_str(&wrap(&format!("Not checked: {}", item.sentence()), ""));
+    }
 
     let todos = &report.todos;
     let first = xs_render::first_todos(todos);
@@ -595,6 +631,85 @@ pub(crate) fn rules_verify(args: &args::RulesVerify) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Security review M7: a browser whose profile folder the system will
+    /// not let the scan list is named at the top of the page, in the summary
+    /// printed on standard output and on standard error, with what lets the
+    /// scan read it; and where the scan looked no longer names it. A scan
+    /// with no such record names nothing.
+    #[test]
+    fn a_browser_the_scan_could_not_read_is_named_where_the_reader_looks() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let support = tempfile::tempdir().unwrap();
+        let chrome = support.path().join("Google/Chrome");
+        fs::create_dir_all(chrome.join("Default/Extensions")).unwrap();
+        fs::set_permissions(&chrome, fs::Permissions::from_mode(0o000)).unwrap();
+        let found = xs_collect::browser::installed(support.path());
+        fs::set_permissions(&chrome, fs::Permissions::from_mode(0o700)).unwrap();
+        if found.unlisted.is_empty() {
+            // Run with privileges that ignore the folder's mode.
+            return;
+        }
+        let pack = built_in_pack().unwrap();
+        let page = std::path::Path::new("/nowhere/report.html");
+        let outputs = Outputs { html: Some(page), json: None, checklist: true };
+        let rendered = |evidence: &EvidenceSet| {
+            render(evidence, &pack, this_scanner(), Some(ScanScope::Installed), outputs).unwrap()
+        };
+
+        let mut evidence = EvidenceSet::new();
+        for (&(browser, reason), &count) in &found.unlisted {
+            evidence.insert(xs_collect::browser::unlisted(browser, reason, count)).unwrap();
+        }
+        let report = rendered(&evidence);
+        let said = "Google Chrome's extensions. macOS did not let the scan read its profile \
+                    folder. To include them, allow your terminal app under System Settings > \
+                    Privacy & Security > Full Disk Access, scan again, then turn it off.";
+        let html = report.html.as_deref().unwrap();
+        let escaped = said.replace('&', "&amp;").replace('>', "&gt;").replace('\'', "&#39;");
+        assert!(html.contains(&format!("<strong>Not checked:</strong> {escaped}")), "{html}");
+        let terminal = summary(&report, "0 apps", page, false);
+        let flat = terminal.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(flat.contains(&format!("Not checked: {said}")), "{terminal}");
+        assert_eq!(
+            not_checked_lines(&report.unchecked),
+            [format!("exposure: not checked: {said}")]
+        );
+        let scope = ScanScope::Installed.words(&xs_render::unread_browsers(&report.unchecked));
+        assert!(scope.contains("not the extensions of Google Chrome, which could not be read"));
+        assert!(!scope.contains("profiles of Arc, Brave, Google Chrome"), "{scope}");
+        assert!(
+            html.contains("not the extensions of Google Chrome, which could not be read"),
+            "{html}"
+        );
+
+        // A scan that read everything says nothing of the kind.
+        let report = rendered(&EvidenceSet::new());
+        assert!(!report.html.as_deref().unwrap().contains("Not checked"));
+        assert!(!summary(&report, "0 apps", page, false).contains("Not checked"));
+        assert!(not_checked_lines(&report.unchecked).is_empty());
+    }
+
+    #[test]
+    fn extensions_and_apps_not_checked_are_counted_apart() {
+        let item = |kind| xs_render::NotChecked {
+            kind,
+            browser: None,
+            what: String::from("x"),
+            why: "y",
+            step: None,
+        };
+        let unchecked =
+            [item(SubjectKind::Extension), item(SubjectKind::Extension), item(SubjectKind::App)];
+        assert_eq!(
+            not_checked_lines(&unchecked),
+            [
+                "exposure: not checked: 2 extensions that could not be read; the report names them",
+                "exposure: not checked: 1 app that could not be read; the report names them",
+            ]
+        );
+    }
 
     #[test]
     fn long_lines_are_wrapped_and_long_words_kept_whole() {

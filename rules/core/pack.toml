@@ -1,7 +1,7 @@
 # The project's own rule layer. Data in this directory is licensed CC BY 4.0
 # (see ../README.md).
 layer = "core"
-version = 7
+version = 8
 license = "CC-BY-4.0"
 
 # The fixed list of categories. Only the five marked `headline` count in a

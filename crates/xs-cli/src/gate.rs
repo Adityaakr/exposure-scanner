@@ -9,7 +9,6 @@
 
 use std::collections::BTreeSet;
 
-use xs_model::claim::Party;
 use xs_model::record::{EdgeType, Grade};
 use xs_model::{Claim, Pack, access, permission};
 
@@ -80,7 +79,7 @@ impl Condition {
                 claim.headline
                     && claim.edge == EdgeType::Channel
                     && claim.company.is_some()
-                    && (claim.grade >= Grade::Contains || claim.party == Party::Third)
+                    && (claim.grade >= Grade::Contains || claim.counts_as_third_party())
             }
             Test::Category(id) => claim.category == *id,
             Test::Company(id) => claim.company.as_deref() == Some(id.as_str()),

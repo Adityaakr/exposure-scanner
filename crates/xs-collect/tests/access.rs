@@ -386,18 +386,29 @@ fn a_signature_that_cannot_be_read_is_reported_and_decides_nothing() {
     assert_eq!(gaps(&half), gap(CoverageStatus::Unrecognized, CoverageReason::ParseError));
 }
 
-/// A main executable that is a link is never followed, and one that is a
-/// script has no signature inside it. Either way the signature was not
-/// looked at, and the report says so.
+/// A main executable that is a link is never followed, one that is a
+/// script has no signature inside it, and one that is not there has none
+/// either. Each way the signature was not looked at, and the report says
+/// so: a file in a format this version does not read as an executable, or
+/// no file at the place the property list names (security review S3).
 #[test]
 fn a_main_executable_that_is_no_mach_o_file_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let unread =
         vec![(MAIN.to_string(), CoverageStatus::Skipped, CoverageReason::UnsupportedFormat, 1)];
+    let missing = vec![(MAIN.to_string(), CoverageStatus::Skipped, CoverageReason::Missing, 1)];
 
     let script = evidence(&bundle(dir.path(), b"#!/bin/sh\nexec true\n", ""));
     assert_eq!(sandbox(&script), None);
     assert_eq!(gaps(&script), unread);
+
+    let gone = dir.path().join("gone");
+    fs::create_dir(&gone).unwrap();
+    let root = bundle(&gone, b"", "");
+    fs::remove_file(root.join(MAIN)).unwrap();
+    let gone = evidence(&root);
+    assert_eq!(sandbox(&gone), None);
+    assert_eq!(gaps(&gone), missing);
 
     let outside = dir.path().join("elsewhere");
     write(&outside, entitled(&[SANDBOX, CAMERA]));
@@ -411,7 +422,7 @@ fn a_main_executable_that_is_no_mach_o_file_is_reported() {
         [("camera", MatcherKind::UsageDescription, "NSCameraUsageDescription", 1)]
     );
     assert_eq!(sandbox(&linked), None);
-    assert_eq!(gaps(&linked), unread);
+    assert_eq!(gaps(&linked), missing);
 }
 
 fn permission(name: &str) -> (&'static str, Vec<Attr>) {

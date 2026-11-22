@@ -314,12 +314,14 @@ as "nothing found":
 | A file inside a bundle, or a bundle's folder | `skipped`, `unreadable`, under that bundle, with the place inside it |
 | An `.apk` file: no permission, a read error, or the file changes while it is read | `skipped`, `unreadable`, under the name of the file |
 | A file over 2 GiB; a zip entry over 256 MiB, or past 1 GiB inflated in one package | `skipped`, `over_budget`, with its size |
-| A browser whose profile folder the system will not let the scan list (macOS protects some apps' data this way) | `skipped`, `no_privilege`, under the browser, such as `chrome`, with how many folders |
+| A browser whose profile folder the system will not let the scan list (macOS protects some apps' data this way) | `skipped`, `no_privilege`, under the browser, such as `chrome`, with how many folders. The top of the report, the summary `exposure scan` prints and its lines on standard error say "Not checked: Google Chrome's extensions" with the Full Disk Access step, and the scope line leaves the browser out |
 | A browser extension whose `manifest.json` is missing, is a link, or cannot be read; an add-on archive over 64 MiB | `skipped`, `unreadable` or `over_budget`, under the extension's id |
 | A `manifest.json` that is not JSON, or a message catalogue the name points at that is missing | `unrecognized`, `parse_error`, or `skipped`, `unreadable`, under the extension, with the place inside it |
 | Older version folders of a Chromium extension that an update left behind, next to the highest version, which is the one scanned | `skipped`, `superseded_version`, under the extension, with how many folders |
 | An encrypted Mach-O binary | `skipped`, `encrypted_binary`; the ciphertext is not searched |
 | A zip64 archive or a DEX container file | `skipped`, `unsupported_format` |
+| The main executable `Info.plist` names, when there is no file at that place or only a link | `skipped`, `missing`, at that place |
+| JavaScript compiled to V8 bytecode (`.jsc`), whose text is not stored as plain bytes | `skipped`, `compiled_script`, with how many files |
 | A damaged file, or a usage description under a key this build does not know | `unrecognized`, `parse_error` or `unrecognized_record` |
 
 An `.apk` file is identified by its hash. One that was not read to its end

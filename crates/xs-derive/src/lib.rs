@@ -68,7 +68,7 @@ use core::fmt;
 
 use xs_model::access;
 use xs_model::canon::CanonError;
-use xs_model::claim::{Claim, ClaimId, ClaimKey, ClaimObject, Confidence};
+use xs_model::claim::{Claim, ClaimId, ClaimKey, ClaimObject, Confidence, NOTE_CLAIMED_VENDOR};
 use xs_model::matcher::MatcherKind;
 use xs_model::pack::{Pack, Rule};
 use xs_model::permission::{self, ManifestKey, Permission};
@@ -364,6 +364,14 @@ fn finish(
         && pack.category(category).is_some_and(|category| category.headline);
     let vendor = resolve::vendor(group.subject, signers, pack);
     let party = resolve::party(company.as_deref(), group.object, vendor.as_ref());
+    // Whose the company's code is turns on the vendor, so a claim that names
+    // a company says when the app only claims to be some company's own.
+    let mut notes = notes;
+    if company.is_some()
+        && let Some(claimed) = resolve::claims(group.subject, signers, pack)
+    {
+        notes.push(alloc::format!("{NOTE_CLAIMED_VENDOR}:{claimed}"));
+    }
     // Variants are declared in ladder order, so the last rung is the highest.
     // A group is only created for a record, so it always has one.
     let grade = group.rungs.last().copied().unwrap_or(Grade::Declares);
@@ -873,21 +881,23 @@ mod tests {
 
     #[test]
     fn then_the_company_that_lists_the_app_id() {
-        // Unsigned, as an Android package is: the app id is all there is.
+        // A company that lists no Team ID: an unsigned app with its app id
+        // is believed to be its.
         let claims =
-            claims_of("com.google.Chrome", None, &["sdk/crashlytics", "sdk/acme-analytics"], &[]);
-        let own = claim(&claims, "sdk/crashlytics");
+            claims_of("com.acme.Dashboard", None, &["sdk/acme-analytics", "sdk/crashlytics"], &[]);
+        let own = claim(&claims, "sdk/acme-analytics");
         assert_eq!(own.party, Party::First);
         assert_eq!(
             own.vendor,
             Some(Vendor {
-                company: Some("google".into()),
+                company: Some("acme".into()),
                 by: Some(VendorBasis::AppId),
-                domain: Some("google.com".into()),
+                domain: Some("acme.com".into()),
                 evidence: vec![],
             })
         );
-        assert_eq!(claim(&claims, "sdk/acme-analytics").party, Party::Third);
+        assert!(own.notes.is_empty());
+        assert_eq!(claim(&claims, "sdk/crashlytics").party, Party::Third);
 
         // Signed by a team nobody lists, under a company that lists no Team
         // ID: the signature says nothing against the app id.
@@ -897,20 +907,74 @@ mod tests {
         assert_eq!(claims[0].vendor.as_ref().unwrap().by, Some(VendorBasis::AppId));
     }
 
-    /// An app cannot make a tracker first party by naming itself after the
-    /// tracker's company.
+    /// Security review M2: an app cannot make a company's SDKs first party,
+    /// and drop out of the headline, by naming itself after the company.
+    /// Google lists a Team ID, so an app with Google's app id and without
+    /// that Team ID, unsigned or signed by another team, only claims to be
+    /// Google's.
     #[test]
-    fn a_signature_by_another_team_overrules_the_app_id() {
-        let claims = claims_of(
-            "com.google.Lookalike",
-            Some(OTHER_TEAM),
-            &["sdk/crashlytics", "sdk/acme-analytics"],
-            &[],
-        );
-        for claim in &claims {
-            assert_eq!(claim.vendor, None, "{}", claim.object.id);
-            assert_eq!(claim.party, Party::Unknown, "{}", claim.object.id);
+    fn an_app_id_without_the_company_s_team_id_only_claims_the_company() {
+        for team in [None, Some(OTHER_TEAM)] {
+            let claims = claims_of(
+                "com.google.Lookalike",
+                team,
+                &["sdk/crashlytics", "sdk/acme-analytics"],
+                &[],
+            );
+            for claim in &claims {
+                assert_eq!(claim.vendor, None, "{}", claim.object.id);
+                assert_eq!(claim.party, Party::Unknown, "{}", claim.object.id);
+                assert_eq!(claim.claimed_vendor(), Some("google"), "{}", claim.object.id);
+            }
+            assert_eq!(
+                claim(&claims, "sdk/crashlytics").notes,
+                ["retired:2025-03-31", "claims-vendor:google"],
+                "the rule's notes come first"
+            );
+            // The app still has a third-party channel, as it would under any
+            // other name.
+            assert_eq!(Headline::of(&claims).apps_third_party, 1, "{team:?}");
         }
+    }
+
+    /// Security review M2: no signer of an Android package is read, so its
+    /// package name never names its vendor, even for a company that lists
+    /// no Team ID.
+    #[test]
+    fn an_android_package_named_after_a_company_only_claims_it() {
+        for (app, company) in
+            [("com.google.android.Lookalike", "google"), ("com.acme.Dashboard", "acme")]
+        {
+            let records = [artifact(app, 1, None), framework_edge(app, 1, "sdk/acme-analytics")]
+                .map(|record| match record {
+                    Record::Artifact(mut record) => {
+                        record.subject.platform = Platform::Android;
+                        Record::Artifact(record)
+                    }
+                    Record::Edge(mut record) => {
+                        record.subject.platform = Platform::Android;
+                        Record::Edge(record)
+                    }
+                    other => other,
+                });
+            let claims = derive(&set(records), &pack()).unwrap();
+            assert_eq!(claims.len(), 1, "{app}");
+            assert_eq!(claims[0].vendor, None, "{app}");
+            assert_eq!(claims[0].party, Party::Unknown, "{app}");
+            assert_eq!(claims[0].claimed_vendor(), Some(company), "{app}");
+            assert_eq!(Headline::of(&claims).apps_third_party, 1, "{app}");
+        }
+    }
+
+    /// A signature that names a listed company decides, whatever the app id
+    /// says: nothing is left only claimed.
+    #[test]
+    fn a_listed_signature_leaves_nothing_claimed() {
+        let claims =
+            claims_of("com.acme.Dashboard", Some(GOOGLE_TEAM), &["sdk/acme-analytics"], &[]);
+        assert_eq!(claims[0].party, Party::Third);
+        assert_eq!(claims[0].vendor.as_ref().unwrap().company.as_deref(), Some("google"));
+        assert!(claims[0].notes.is_empty());
     }
 
     #[test]

@@ -30,6 +30,7 @@ mod html;
 mod markup;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
+mod unchecked;
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -43,6 +44,7 @@ use xs_model::report::{ReportSchema, ScanScope, Scanner};
 use xs_model::{Claim, EvidenceSet, Headline};
 
 pub use crate::html::{CONTENT_SECURITY_POLICY, checklist, html};
+pub use crate::unchecked::{NotChecked, not_checked, unread_browsers};
 
 /// How much an entry of the checklist exposes. Entries are listed with
 /// the highest first.
@@ -53,7 +55,9 @@ pub enum TodoPriority {
     /// that may read the pages a person visits.
     High,
     /// What apps may reach of a person: camera, microphone, screen,
-    /// location, personal data; and a domain an app declares for tracking.
+    /// location, personal data; a domain an app declares for tracking; and
+    /// code of a company the high priority covers that was found only as
+    /// text inside a library the apps ship.
     Medium,
     /// The rest a person can act on.
     Low,

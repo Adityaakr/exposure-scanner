@@ -17,7 +17,7 @@ use std::process::{Command, Output};
 use common::report_options;
 use xs_formats::testkit::{self, Attr, AxmlBuilder, DexBuilder, ZipBuilder};
 use xs_model::record::{Grade, Record};
-use xs_model::{Confidence, MatcherKind, Report};
+use xs_model::{Confidence, Headline, MatcherKind, Party, Report};
 
 const FIXTURE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/android/Skeleton.apk");
@@ -542,4 +542,87 @@ fn an_app_bundle_is_scanned_like_the_apk_it_stands_for() {
 
     let output = exposure(&["scan", text(&path), "--json", "/dev/null", "--fail-on", "headline"]);
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
+}
+
+/// A package that ships Google's ads SDK, seen by its manifest entry and
+/// its property file, under the package name `package`.
+fn admob_app(package: &str) -> Vec<u8> {
+    let manifest = AxmlBuilder::new()
+        .start(
+            "manifest",
+            &[
+                Attr::int(testkit::ANDROID_VERSION_CODE, "versionCode", 1),
+                Attr::android(testkit::ANDROID_VERSION_NAME, "versionName", "1.0.0"),
+                Attr::plain("package", package),
+            ],
+        )
+        .start("application", &[Attr::android(testkit::ANDROID_LABEL, "label", "Lookalike")])
+        .start(
+            "activity",
+            &[Attr::android(
+                testkit::ANDROID_NAME,
+                "name",
+                "com.google.android.gms.ads.AdActivity",
+            )],
+        )
+        .end()
+        .end()
+        .end()
+        .finish();
+    let classes = DexBuilder::new().class(&format!("{package}.MainActivity")).finish();
+    ZipBuilder::new()
+        .deflated("AndroidManifest.xml", &manifest)
+        .deflated("classes.dex", &classes)
+        .stored("play-services-ads.properties", b"version=25.5.0\n")
+        .finish()
+}
+
+/// Security review M2: no signing certificate of an Android package is
+/// read, so a package that names itself `com.google.*` does not make
+/// Google's SDKs in it first party. It ships AdMob like any other app: the
+/// app counts in the headline, and its AdMob entry is still what needs
+/// attention first.
+#[test]
+fn a_package_named_after_google_still_has_google_s_ads_as_a_third_party_channel() {
+    for package in ["org.example.lookalike", "com.google.lookalike"] {
+        let dir = tempfile::tempdir().unwrap();
+        let apk = dir.path().join("app.apk");
+        fs::write(&apk, admob_app(package)).unwrap();
+
+        let report: Report = serde_json::from_str(&scan(&[&apk], 1)).unwrap();
+        let admob = report
+            .claims
+            .iter()
+            .find(|claim| claim.object.id == "sdk/google-mobile-ads")
+            .unwrap_or_else(|| panic!("{package}: no AdMob claim: {:?}", report.claims));
+        assert_eq!(admob.company.as_deref(), Some("google"), "{package}");
+        assert!(admob.headline, "{package}");
+        assert_ne!(admob.party, Party::First, "{package}");
+        if package.starts_with("com.google.") {
+            assert_eq!(admob.party, Party::Unknown, "{package}");
+            assert_eq!(admob.vendor, None, "{package}");
+            assert_eq!(admob.claimed_vendor(), Some("google"), "{package}");
+        } else {
+            assert_eq!(admob.party, Party::Third, "{package}");
+            assert_eq!(admob.claimed_vendor(), None, "{package}");
+        }
+        assert_eq!(Headline::of(&report.claims).apps_third_party, 1, "{package}");
+        assert_eq!(report.headline.apps_third_party, 1, "{package}");
+
+        // The summary a scan prints leads with the AdMob entry.
+        let home = tempfile::tempdir().unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
+            .env("HOME", home.path())
+            .env("XDG_DATA_HOME", home.path().join("data"))
+            .args(["scan", "--no-cache", "--no-open"])
+            .arg(&apk)
+            .output()
+            .unwrap();
+        let said = stdout(&output);
+        assert!(said.contains("1. [High] Google Mobile Ads (AdMob)"), "{package}: {said}");
+        assert!(
+            said.contains("1 app with code or an endpoint of a company other than their publisher"),
+            "{package}: {said}"
+        );
+    }
 }

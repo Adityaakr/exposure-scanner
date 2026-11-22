@@ -578,7 +578,7 @@ fn scan_archive(
     add_gap(&mut gaps, unrecognized, CoverageReason::ParseError, unreadable);
     let unusable = usize::try_from(header.unusable()).unwrap_or(usize::MAX);
     add_gap(&mut gaps, unrecognized, CoverageReason::ParseError, unusable);
-    add_gap(&mut gaps, CoverageStatus::Skipped, CoverageReason::UnsupportedFormat, bytecode);
+    add_gap(&mut gaps, CoverageStatus::Skipped, CoverageReason::CompiledScript, bytecode);
     Ok((tables, gaps))
 }
 
@@ -644,7 +644,7 @@ impl Roots {
             note_package(matchers, inner, &mut root.tables.packages);
         }
         if bytecode {
-            add_gap(&mut root.gaps, CoverageStatus::Skipped, CoverageReason::UnsupportedFormat, 1);
+            add_gap(&mut root.gaps, CoverageStatus::Skipped, CoverageReason::CompiledScript, 1);
         }
     }
 
@@ -1333,7 +1333,7 @@ mod tests {
         assert_eq!(
             gaps,
             gaps_of(&[
-                (CoverageStatus::Skipped, CoverageReason::UnsupportedFormat, 2),
+                (CoverageStatus::Skipped, CoverageReason::CompiledScript, 2),
                 (NOT_UNDERSTOOD.0, NOT_UNDERSTOOD.1, 2),
             ])
         );

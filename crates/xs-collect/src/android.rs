@@ -956,7 +956,10 @@ fn records(
         collector: Collector::AndroidApk,
         subject: subject.clone(),
         facts: Facts {
-            name: declared(label.as_ref(), text::MAX_NAME_BYTES),
+            name: label
+                .as_ref()
+                .map(|label| text::clean_name(label, text::MAX_NAME_BYTES))
+                .filter(|label| !label.is_empty()),
             team_id: None,
             sandbox: None,
             files_scanned: 1,
@@ -1343,6 +1346,79 @@ mod tests {
         let records = scan(&apk, &tracker_pack());
         assert_eq!(records.len(), 1, "{records:?}");
         assert_eq!(artifact(&records).subject.id, "org.example.clean");
+    }
+
+    /// The shipped rule pack, read without its signature, which the
+    /// binary's tests check.
+    fn shipped_pack() -> Pack {
+        let bytes = include_bytes!("../../../rules/dist/core.pack.json");
+        let layer: Layer = serde_json::from_slice(bytes).unwrap();
+        Pack::new(vec![LoadedLayer { layer, sha256: Sha256Digest::of(bytes) }]).unwrap()
+    }
+
+    /// The rules the edges of `records` are about, sorted and deduplicated.
+    fn rules_found(records: &[Record]) -> Vec<String> {
+        let mut rules: Vec<String> = records
+            .iter()
+            .filter_map(|record| match record {
+                Record::Edge(edge) => Some(edge.rule.clone()),
+                _ => None,
+            })
+            .collect();
+        rules.sort();
+        rules.dedup();
+        rules
+    }
+
+    /// Security review M1: Firebase Analytics depends on
+    /// `play-services-ads-identifier`, which defines its classes in the
+    /// package `com.google.android.gms.ads.identifier`, inside Google's ads
+    /// namespace. An app that reads the advertising ID shows no ads, so it
+    /// must not be reported as shipping AdMob.
+    #[test]
+    fn the_advertising_id_library_is_not_the_ads_sdk() {
+        let pack = shipped_pack();
+        let apk = |extra: &[&str]| {
+            let mut dex = DexBuilder::new()
+                .class("org.example.measured.Main")
+                .class("com.google.android.gms.measurement.AppMeasurement")
+                .class("com.google.firebase.analytics.FirebaseAnalytics")
+                // What play-services-ads-identifier 18.0.0 defines.
+                .class("com.google.android.gms.ads.identifier.AdvertisingIdClient")
+                .class("com.google.android.gms.ads.identifier.AdvertisingIdClient$Info")
+                .class("com.google.android.gms.ads.identifier.zza")
+                .class("com.google.android.gms.internal.ads_identifier.zza");
+            for class in extra {
+                dex = dex.class(class);
+            }
+            ZipBuilder::new()
+                .deflated(
+                    MANIFEST,
+                    &testkit::manifest("org.example.measured", "1", &[("activity", ".Main")]),
+                )
+                .deflated("classes.dex", &dex.finish())
+                .finish()
+        };
+
+        let records = scan(&apk(&[]), &pack);
+        assert_eq!(rules_found(&records), ["sdk/google-analytics"], "{:?}", edges(&records));
+
+        // The ads SDK itself is still found by its classes: each of them,
+        // alone, as it is named in play-services-ads-api 25.5.0.
+        for class in [
+            "com.google.android.gms.ads.AdRequest$Builder",
+            "com.google.android.gms.ads.AdView",
+            "com.google.android.gms.ads.MobileAds",
+            "com.google.android.gms.ads.admanager.AdManagerAdView",
+            "com.google.android.gms.internal.ads.zzbza",
+        ] {
+            let records = scan(&apk(&[class]), &pack);
+            assert_eq!(
+                rules_found(&records),
+                ["sdk/google-analytics", "sdk/google-mobile-ads"],
+                "{class}"
+            );
+        }
     }
 
     /// Two builds that share an app id and a version are two subjects.

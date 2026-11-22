@@ -372,6 +372,39 @@ fn an_app_name_cannot_put_escape_sequences_on_the_terminal() {
     }
 }
 
+/// Security review S1: a publisher may start a name with a left-to-right
+/// mark, as WhatsApp does. The mark reorders nothing, so the name is shown
+/// without it; an override still shows as U+FFFD.
+#[test]
+fn a_directional_mark_in_an_app_name_is_dropped_and_an_override_is_not() {
+    let home = tempfile::tempdir().unwrap();
+    for (folder, written, shown) in [
+        ("Marked.app", "&#8206;Marked", "[Low] Sentry"),
+        ("Override.app", "Over&#8238;ride", "Over\u{FFFD}ride"),
+    ] {
+        let app = variant(home.path(), folder, "org.example.marked", folder.as_bytes());
+        let plist = fs::read_to_string(app.join("Contents/Info.plist")).unwrap();
+        let name = "<key>CFBundleName</key>\n\t<string>Skeleton</string>";
+        let renamed =
+            plist.replacen(name, &format!("<key>CFBundleName</key><string>{written}</string>"), 1);
+        assert_ne!(renamed, plist, "the fixture names itself Skeleton");
+        fs::write(app.join("Contents/Info.plist"), renamed).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_exposure"))
+            .env("HOME", home.path())
+            .env("XDG_DATA_HOME", home.path().join("data"))
+            .args(["scan", "--no-cache", "--no-open"])
+            .arg(&app)
+            .output()
+            .unwrap();
+        let said = stdout(&output);
+        assert!(said.contains(shown), "{said}");
+        if folder == "Marked.app" {
+            assert!(said.contains("Marked"), "{said}");
+            assert!(!said.contains('\u{FFFD}') && !said.contains('\u{200E}'), "{said}");
+        }
+    }
+}
+
 /// A scan says what it covered on a line of its own. Given a path, that is
 /// the path and nothing else: the installed apps were not looked at, and the
 /// summary must not read as if they had been.
