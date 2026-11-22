@@ -138,8 +138,8 @@ own report, cache and files, and nothing here tries to stop them.
   readable by their owner only, and the two folders are made, or tightened,
   so that only the owner can open them.
 - A report is never written through a link. A report file named by a
-  symbolic link to a file is refused, and a report is written to a new file beside its
-  name and renamed into place, so a link that another user leaves in a
+  symbolic link that does not lead to a device or stream is refused, and a
+  report is written to a new file beside its name and renamed into place, so a link that another user leaves in a
   shared folder such as `/tmp` cannot make the scan truncate or change the
   mode of a file of the user's, and a scan that stops leaves no half of a
   report. A device or stream such as `/dev/null`, or a link to one such as

@@ -36,7 +36,11 @@ version can change commands, the report format or the evidence format.
   the headline does not count, such as the five Google SDKs of Bitwarden's
   Play build, in the terminal summary and the HTML report, so a scan whose
   counts are zero does not read as "nothing found".
-- Fuzz targets for the resource table and the app bundle readers.
+- Fuzz targets for the resource table and the app bundle readers, and for
+  the readers a macOS app reaches first: Mach-O, code signatures, property
+  lists and asar archives.
+- **A hostile-folder memory gate** in `cargo xtask bench`, on a folder of
+  crafted packages that inflate to gigabytes.
 
 ### Changed
 
@@ -70,6 +74,19 @@ version can change commands, the report format or the evidence format.
   there as a file is `missing`, no longer `unsupported_format`, and V8
   bytecode files are `compiled_script`, counted in files, with what not
   searching them means.
+- **Android packages are read the way Android reads them**: the "encrypted"
+  flag is ignored, and the manifest and resource table are read as stored
+  under any compression method but DEFLATE, so a package that hides its
+  manifest or code that way is no longer reported as `unidentified.apk`.
+- **Memory is bounded by the scan's threads**, not by the packages it reads:
+  a folder of small crafted packages that inflate to gigabytes no longer
+  takes a scan's memory to gigabytes on macOS. See
+  [the architecture](docs/architecture.md#performance).
+- **A report is never written through a link**: a report file named by a
+  symbolic link that does not lead to a device or stream, such as
+  `/dev/stdout`, is refused, and a report is written beside its name and
+  renamed into place, so a scan that stops leaves no half of a report. See
+  [the threat model](docs/threat-model.md).
 - Rule pack version 8.
 
 ### Fixed

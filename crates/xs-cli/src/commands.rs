@@ -85,9 +85,9 @@ pub(crate) fn print(text: &str) -> Result<()> {
 /// So:
 ///
 /// - A `path` that is a symbolic link to a file, a folder, nothing or what
-///   cannot be looked at is refused. A link to a device or a stream, such as `/dev/stdout` or the
-///   `/dev/fd/N` of a shell's process substitution, is written to as that
-///   device is, below.
+///   cannot be looked at is refused. A link to a device or a stream, such
+///   as `/dev/stdout` or the `/dev/fd/N` of a shell's process
+///   substitution, is written to as that device is, below.
 /// - A report is written to a new file next to `path`, created for this
 ///   write alone and readable by its owner only, and then renamed to
 ///   `path`. A rename replaces the name and never follows it: what was at
