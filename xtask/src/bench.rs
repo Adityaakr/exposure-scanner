@@ -11,6 +11,20 @@
 //! | Warm scan | Populated cache, no changes | Under 5 s |
 //! | Determinism | The report of every run | One report |
 //!
+//! And one gate of the security review (M4), on input made to cost memory:
+//!
+//! | Benchmark | Method | Gate |
+//! |---|---|---|
+//! | Hostile memory | A folder of 24 packages of 1 MB, each holding four DEX files that inflate to 255 MiB, scanned at 1 thread and at one per core | Under 600 MB at 1 thread, under 1.5 GB at one per core |
+//!
+//! The packages are made by the benchmark, in its own folder. What they
+//! test is that memory is bounded by the scan's threads and not by the
+//! number of packages: before the gate, 25 MB of them took one scan at one
+//! thread to a peak of 14 GB on macOS, whose allocator keeps freed blocks.
+//! On macOS the figure is the peak memory footprint, what the system
+//! charges against memory pressure, where it is larger than the peak
+//! resident size.
+//!
 //! The scaling gate is the one that catches the splitting trap (section 6.2
 //! decision 5): if the largest files of the queue are handed to one thread,
 //! eight threads are barely faster than one.
@@ -70,11 +84,23 @@ const MAX_COLD: Duration = Duration::from_secs(60);
 const MIN_SCALING_BYTES: u64 = 1 << 30;
 /// Where both systems keep the tool that reports a process's peak memory.
 const TIME: &str = "/usr/bin/time";
+/// The hostile folder: how many packages, how many DEX files each, and what
+/// each DEX file inflates to, just under the collector's budget for one
+/// entry.
+const HOSTILE_PACKAGES: usize = 24;
+const HOSTILE_DEX_FILES: usize = 4;
+const HOSTILE_DEX_BYTES: usize = 255 << 20;
+/// The hostile-memory gates, in bytes: at one thread, and at one per core.
+const MAX_HOSTILE_ONE_THREAD: u64 = 600_000_000;
+const MAX_HOSTILE_ALL_THREADS: u64 = 1_500_000_000;
 
 /// One measured run.
 struct Run {
     elapsed: Duration,
     peak_bytes: u64,
+    /// The peak memory footprint where the system reports one (macOS), or
+    /// else the peak resident size.
+    footprint_bytes: u64,
     report: Vec<u8>,
     /// What the scan told the terminal.
     summary: String,
@@ -108,6 +134,19 @@ fn peak_bytes(usage: &str) -> Option<u64> {
     } else {
         // A run that fails makes GNU time put a notice before the number.
         usage.lines().last()?.trim().parse::<u64>().ok()?.checked_mul(1024)
+    }
+}
+
+/// The peak memory footprint in what `/usr/bin/time -l` wrote on macOS, in
+/// bytes, or the peak resident size where there is no footprint.
+fn footprint_bytes(usage: &str) -> Option<u64> {
+    let footprint = usage
+        .lines()
+        .find(|line| line.ends_with("peak memory footprint"))
+        .and_then(|line| line.split_whitespace().next()?.parse::<u64>().ok());
+    match (footprint, peak_bytes(usage)) {
+        (Some(footprint), Some(resident)) => Some(footprint.max(resident)),
+        (footprint, resident) => footprint.or(resident),
     }
 }
 
@@ -145,10 +184,39 @@ fn run(
     if !output.status.success() {
         return Err(format!("the scan failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
     }
-    let peak_bytes = peak_bytes(&crate::read_text(&usage)?)
-        .ok_or_else(|| format!("cannot find the peak memory in what {TIME} wrote"))?;
+    let usage = crate::read_text(&usage)?;
+    let missing = || format!("cannot find the peak memory in what {TIME} wrote");
+    let peak_bytes = peak_bytes(&usage).ok_or_else(missing)?;
+    let footprint_bytes = footprint_bytes(&usage).ok_or_else(missing)?;
     let summary = String::from_utf8_lossy(&output.stderr).into_owned();
-    Ok(Run { elapsed, peak_bytes, report: crate::read(&report)?, summary })
+    Ok(Run { elapsed, peak_bytes, footprint_bytes, report: crate::read(&report)?, summary })
+}
+
+/// Writes the hostile folder into `dir/hostile` and returns its path: every
+/// package one and the same file, which is the worst case for an allocator
+/// that keeps freed blocks.
+fn hostile_folder(dir: &Path) -> Result<PathBuf> {
+    use xs_formats::testkit::{self, ZipBuilder};
+    let folder = dir.join("hostile");
+    fs::create_dir(&folder)
+        .map_err(|error| format!("cannot create {}: {error}", folder.display()))?;
+    let zeros = vec![0u8; HOSTILE_DEX_BYTES];
+    let stream = miniz_oxide::deflate::compress_to_vec(&zeros, 6);
+    let declared = u32::try_from(HOSTILE_DEX_BYTES).map_err(|error| error.to_string())?;
+    let mut package = ZipBuilder::new()
+        .deflated("AndroidManifest.xml", &testkit::manifest("org.example.hostile", "1.0", &[]));
+    for number in 1..=HOSTILE_DEX_FILES {
+        let name =
+            if number == 1 { String::from("classes.dex") } else { format!("classes{number}.dex") };
+        package = package.raw(&name, 8, 0, &stream, declared);
+    }
+    let package = package.finish();
+    for number in 1..=HOSTILE_PACKAGES {
+        let path = folder.join(format!("hostile-{number}.apk"));
+        fs::write(&path, &package)
+            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    }
+    Ok(folder)
 }
 
 /// What the scan behind `report` covered.
@@ -289,6 +357,12 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
         }
     }
 
+    // The hostile folder, at one thread and at one per core.
+    let hostile = hostile_folder(dir)?;
+    let hostile = vec![hostile.to_string_lossy().into_owned()];
+    let hostile_one = run(exposure, &hostile, 1, None, dir)?.footprint_bytes;
+    let hostile_all = run(exposure, &hostile, cores, None, dir)?.footprint_bytes;
+
     let mut failed = Vec::new();
     let mut skipped = Vec::new();
     let mut check = |name: &'static str, passed: Option<bool>, detail: String| {
@@ -328,6 +402,19 @@ fn measure(exposure: &Path, paths: &[String], dir: &Path, strict: bool) -> Resul
             "{} MB at most in any run (gate: under {} MB)",
             megabytes(peak),
             megabytes(MAX_PEAK_BYTES)
+        ),
+    );
+    check(
+        "hostile memory",
+        Some(hostile_one < MAX_HOSTILE_ONE_THREAD && hostile_all < MAX_HOSTILE_ALL_THREADS),
+        format!(
+            "{HOSTILE_PACKAGES} packages of {HOSTILE_DEX_FILES} DEX files that inflate to {} MB \
+             each: {} MB at 1 thread, {} MB at {cores} (gates: under {} MB and {} MB)",
+            megabytes(HOSTILE_DEX_BYTES as u64),
+            megabytes(hostile_one),
+            megabytes(hostile_all),
+            megabytes(MAX_HOSTILE_ONE_THREAD),
+            megabytes(MAX_HOSTILE_ALL_THREADS),
         ),
     );
     let seconds = |elapsed: Duration| hundredths(elapsed.as_millis() / 10);
@@ -422,6 +509,14 @@ mod tests {
         assert_eq!(peak_bytes(usage), Some(43_565_056));
         assert_eq!(peak_bytes(""), None);
         assert_eq!(peak_bytes("no numbers here\n"), None);
+        // The footprint, where there is one and it is the larger.
+        assert_eq!(footprint_bytes(usage), Some(43_565_056));
+        if cfg!(target_os = "macos") {
+            let held = usage
+                .replace("42000000  peak memory footprint", "900000000  peak memory footprint");
+            assert_eq!(footprint_bytes(&held), Some(900_000_000));
+        }
+        assert_eq!(footprint_bytes(""), None);
     }
 
     #[test]

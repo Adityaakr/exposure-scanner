@@ -52,7 +52,8 @@ speed
                           results cache and with nothing changed since the last one,
                           and measure its peak memory; gates: under 60 s cold, 3x at
                           8 threads, under 200 MB, under 5 s when nothing changed,
-                          one report.
+                          one report; and a folder of packages made to cost memory
+                          under 600 MB at 1 thread and 1.5 GB at one per core.
                           Without a PATH: the apps installed on this machine.
                           --strict: no gate may be skipped
 ";

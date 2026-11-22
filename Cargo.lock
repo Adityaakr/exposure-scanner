@@ -956,8 +956,10 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "minisign",
+ "miniz_oxide",
  "object",
  "serde_json",
+ "xs-formats",
  "xs-model",
  "xs-rules",
 ]
