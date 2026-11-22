@@ -49,4 +49,4 @@ pub use pack::Pack;
 pub use path::RelPath;
 pub use permission::Permission;
 pub use record::{Record, RecordId};
-pub use report::{Headline, Report};
+pub use report::{Headline, Report, Uncounted};

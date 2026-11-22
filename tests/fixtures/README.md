@@ -61,6 +61,18 @@ strings and no code. The file is written by `fixture()` in
 `EXPOSURE_BLESS=1 cargo test -p exposure` regenerates it and the committed
 reports.
 
+## `android/Skeleton.aab`
+
+The same app as an app bundle, 1.2 kB: the form a developer uploads to
+Google Play. Its manifest and resource table are the protocol buffers a
+bundle holds (`base/manifest/AndroidManifest.xml`, `base/resources.pb`),
+its code is in `base/dex/`, and its label points at a string resource, so a
+scan names the app from the resource table. Scanning it must yield the
+same two claims as the APK, from the same kinds of witness. It also seeds
+the fuzz targets. The file is written by `bundle_fixture()` in
+`crates/xs-cli/tests/android.rs`, and a test fails if the two disagree;
+`EXPOSURE_BLESS=1 cargo test -p exposure` regenerates it.
+
 ## `report/Fixtures.report.html`
 
 The HTML report of one scan of the three fixtures above (build plan, task

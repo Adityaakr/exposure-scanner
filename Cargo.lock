@@ -214,6 +214,7 @@ name = "exposure"
 version = "0.1.0"
 dependencies = [
  "lexopt",
+ "serde",
  "serde_json",
  "tempfile",
  "xs-collect",

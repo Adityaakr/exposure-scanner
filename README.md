@@ -8,7 +8,8 @@ through which apps, with the evidence for every finding.**
 
 > [!IMPORTANT]
 > **This project is under active development.** Milestone 1 is complete and
-> released as v0.1.0, from source only (see the [changelog](CHANGELOG.md)).
+> released as v0.1.0, from source only (see the [changelog](CHANGELOG.md)):
+> Homebrew builds it for you with one command.
 > Commands, the report format and its output may still change between
 > versions. Suggestions, bug reports and contributions are welcome: open an
 > [issue](https://github.com/Adityaakr/exposure-scanner/issues) or read
@@ -22,6 +23,7 @@ through which apps, with the evidence for every finding.**
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Usage](#usage)
+- [Release gates and comparing builds](#release-gates-and-comparing-builds)
 - [Reading the report](#reading-the-report)
 - [Privacy guarantees](#privacy-guarantees)
 - [What a device-side scan cannot see](#what-a-device-side-scan-cannot-see)
@@ -100,12 +102,12 @@ apps too, is crash reporting: it is in the report and not in the counts.
 
 ```mermaid
 flowchart LR
-    A["Apps on disk<br/>.app bundles, Electron apps,<br/>.apk files, browser extensions"] --> COL
+    A["Apps on disk<br/>.app bundles, Electron apps,<br/>.apk and .aab files, browser extensions"] --> COL
     subgraph COL["Collectors (read only)"]
         direction TB
         M["macOS: Mach-O, Info.plist,<br/>code signature, privacy manifests"]
         EL["Electron: asar archive,<br/>npm packages, scripts"]
-        AN["Android: zip, DEX,<br/>binary manifest"]
+        AN["Android: zip, DEX, manifest,<br/>resource table (APK and bundle)"]
         BX["Browser extensions:<br/>manifest.json"]
     end
     RP[("Signed rule pack<br/>48 SDK rules, company map")] --> MT
@@ -142,10 +144,33 @@ it is a pure function. That split is enforced by the crate layout (see
 
 ## Install
 
-`exposure` is built from source; there are no prebuilt binaries. On a Mac
-with Apple silicon (macOS is the first supported platform):
+**With Homebrew**, on macOS (Apple silicon is the first supported platform)
+or Linux:
 
-1. Install Apple's command-line tools, which hold the linker and `git`:
+```console
+$ brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+$ brew install adityaakr/exposure-scanner/exposure
+```
+
+The repository is its own tap: the formula is
+[`Formula/exposure.rb`](Formula/exposure.rb). It builds `exposure` from the
+source on `main` with `cargo install --locked`, so the build takes a minute
+or two; Homebrew brings the Rust compiler for it. On a Mac, Homebrew builds
+from source only with up-to-date Command Line Tools
+(`xcode-select --install`, or Software Update).
+
+- The full name, `adityaakr/exposure-scanner/exposure`, is what Homebrew 7
+  asks for: it trusts the tap on that install. `brew install exposure` works
+  once the tap is trusted, with `brew trust adityaakr/exposure-scanner`, and
+  on older versions of Homebrew without that step.
+- `brew upgrade` does not see new commits on `main`, since the formula's
+  version only changes with a release. `brew reinstall exposure` builds the
+  latest.
+
+**With cargo**, from source:
+
+1. On a Mac, install Apple's command-line tools, which hold the linker and
+   `git`:
 
    ```console
    $ xcode-select --install
@@ -168,9 +193,8 @@ with Apple silicon (macOS is the first supported platform):
 
    `--locked` builds with the exact dependency versions the project tests.
    The build takes a minute or two, and puts `exposure` in `~/.cargo/bin`.
-   While the repository is private, `git` asks for your GitHub credentials;
-   `gh auth setup-git` lets it use those of the GitHub CLI. To install the
-   release tag rather than the latest commit, add `--tag v0.1.0`.
+   To install the release tag rather than the latest commit, add
+   `--tag v0.1.0`.
 
 To build from a clone instead, `cargo build --release --package exposure`
 gives `target/release/exposure`; the clone's
@@ -215,21 +239,33 @@ the repository's test fixtures is committed.
 
 ```
 exposure scan [PATH...] [--html FILE] [--json FILE] [--no-open] [--threads N] [--no-cache]
-                                                    scan apps, extensions, or folders of them
-exposure report FILE [--html FILE] [--json FILE]    derive the report again from saved evidence
-exposure rules show                                 list the built-in rule pack
+              [--fail-on CONDITION]...              scan apps, extensions, or folders of them
+exposure report FILE [--html FILE] [--json FILE] [--fail-on CONDITION]...
+                                                    derive the report again from saved evidence
+exposure diff OLD NEW [--json FILE] [--fail-on CONDITION]...
+                                                    compare two JSON reports, app by app
+exposure rules show                                 list the built-in rule pack, its categories
+                                                    and its companies
 exposure rules verify PACK --sig SIGNATURE          check a signed pack file offline
 exposure --help | --version
 ```
 
 | Option | Effect |
 |---|---|
-| `PATH` | A macOS `.app` bundle, an Android `.apk` file, a browser extension (a Firefox `.xpi` file, or a Chromium `<id>/<version>` folder), or a folder, searched for all of them (never inside a bundle). When any `PATH` is given, only the `PATH`s are scanned. |
+| `PATH` | A macOS `.app` bundle, an Android `.apk` file or app bundle (`.aab`), a browser extension (a Firefox `.xpi` file, or a Chromium `<id>/<version>` folder), or a folder, searched for all of them (never inside a bundle). When any `PATH` is given, only the `PATH`s are scanned. |
 | `--html FILE` | Write the report for reading: one self-contained page, grouped by company. |
 | `--json FILE` | Write the report a program reads, which `exposure report` can render again. A `FILE` of `-` is standard output. Report files are created readable by their owner only, because the list of apps a person uses is sensitive in itself. |
 | `--no-open` | Do not open the report in the browser. |
 | `--threads N` | Worker threads. Default: one per core. The report does not depend on it. |
 | `--no-cache` | Read every app again, and neither use nor keep the results cache. |
+| `--fail-on CONDITION` | Exit with status 3 when a finding meets `CONDITION`, after the reports are written: `headline` (a finding that counts in the headline), `category:ID` (such as `category:analytics`) or `company:ID` (such as `company:google`). `exposure rules show` lists the ids. Can be given more than once; any match fails. For `diff`, only the findings that newly meet it are checked: those `NEW` adds, and those that meet it in `NEW` but did not in `OLD`, such as a finding of the app's own vendor that moves from `declares` to `contains`. The summary on standard error names each such finding, its app and company, and why it is new: added, a grade change, now third-party, now counted in the headline, a new category or another company, so a finding the comparison does not list is still named. |
+
+| Exit status | Means |
+|---|---|
+| 0 | Done, and no `--fail-on` condition was met |
+| 1 | An error, such as a file that cannot be read or written, or a `--fail-on` id the rule pack does not have |
+| 2 | A command line that is not understood |
+| 3 | Done, and a `--fail-on` condition was met |
 
 **With neither `--html` nor `--json`,** a scan writes the HTML report to
 `report.html` in a folder only you can read (`~/Library/Application
@@ -262,7 +298,53 @@ A path that does not exist is refused before anything is read. After that, an
 app that cannot be read never stops the scan: it is reported as a coverage
 note (`skipped`, `unreadable`, `over_budget`, ...), never as "nothing found".
 
+**Android.** An app is shown under the name its label points at, read from
+the package's resource table, rather than its package id. App bundles
+(`.aab`), the form uploaded to Google Play, are scanned like the APKs they
+stand for.
+
 Details: [What a scan reads](docs/scanning.md).
+
+## Release gates and comparing builds
+
+`exposure diff OLD NEW` compares two JSON reports, such as the scans of two
+builds of one app. An app is followed from one report to the other by its
+platform and app id, and each finding by its claim `key`, so the comparison
+says what a build adds, what it no longer has, and what changed grade. The
+F-Droid and Google Play builds of Bitwarden 2026.9.1:
+
+```console
+$ exposure scan bitwarden-fdroid.apk --json fdroid.json
+$ exposure scan bitwarden-play.apk --json play.json
+$ exposure diff fdroid.json play.json --fail-on company:google
+Bitwarden (Android, com.x8bit.bitwarden), 2026.9.1
+  + Firebase Cloud Messaging (Push messaging, Google LLC): contains
+  + Firebase Crashlytics (Crash reporting, Google LLC): contains
+  + Firebase Installations (Installation identifiers, Google LLC): contains
+  + Google DataTransport (Telemetry transport, Google LLC): contains
+  + Google Play Billing Library (Payments, Google LLC): contains
+
+5 findings added, 0 findings removed, 0 findings changed grade, in 1 of 1 app.
+exposure: fail-on company:google: met by 5 new findings in 1 app
+exposure: fail-on company:google:   Firebase Cloud Messaging (Push messaging, Google LLC) in Bitwarden (Android, com.x8bit.bitwarden): added
+exposure: fail-on company:google:   Firebase Crashlytics (Crash reporting, Google LLC) in Bitwarden (Android, com.x8bit.bitwarden): added
+exposure: fail-on company:google:   Firebase Installations (Installation identifiers, Google LLC) in Bitwarden (Android, com.x8bit.bitwarden): added
+exposure: fail-on company:google:   Google DataTransport (Telemetry transport, Google LLC) in Bitwarden (Android, com.x8bit.bitwarden): added
+exposure: fail-on company:google:   Google Play Billing Library (Payments, Google LLC) in Bitwarden (Android, com.x8bit.bitwarden): added
+exposure: fail-on: a condition was met, so the exit status is 3
+```
+
+`--json FILE` writes the comparison as a document as well
+(`exposure-diff/1`); with `--json -` it is all that goes to standard output.
+When the two reports were made with different rule packs, the summary says
+that a difference may come from the rules rather than from the apps.
+
+`--fail-on` makes any scan a release gate: a CI job that scans the build it
+is about to ship fails when the build ships what the condition names.
+
+```console
+$ exposure scan app-release.aab --json report.json --fail-on headline --fail-on company:meta
+```
 
 ## Reading the report
 
@@ -348,7 +430,7 @@ A report is only as complete as what a device can show. It cannot see:
 |---|---|
 | macOS on Apple silicon | First supported platform. Installed apps are found automatically. Tested in CI on merges and nightly. |
 | Linux | The CI platform for the portable core: every check runs there on every change. Scans the paths you name. |
-| Android packages (`.apk`) | Scanned by path on any OS. |
+| Android packages (`.apk`) and app bundles (`.aab`) | Scanned by path on any OS. |
 | Browser extensions | Chromium-family browsers and Firefox: found automatically in your profiles on macOS, scanned by path elsewhere. |
 | Phones, iOS exports, browser history | Milestone 2. |
 | Windows | Not planned yet. |
@@ -357,7 +439,7 @@ A report is only as complete as what a device can show. It cannot see:
 |---|---|---|
 | **1. Static truth** | Rust core, evidence format, rule pack, collectors for macOS bundles, Electron apps and Android packages, resolver, HTML report | **Done: v0.1.0** |
 | 2. Phone and browser | iOS report import, Android phones over adb, browser join, browser extension audit, OS permission stores | Started: the browser extension audit is done |
-| 3. Fix and diff | Fix recipes with an undo log, snapshots, a diff between scans | Planned |
+| 3. Fix and diff | Fix recipes with an undo log, snapshots, a diff between scans | Started: `exposure diff` between two reports is done |
 | 4. Confirmed | Platform data-archive adapters, lab capture | Planned |
 | 5. Public index | Scans of popular apps published per artifact hash; a signature contribution workflow | Planned |
 
@@ -461,8 +543,9 @@ benchmark on the fixtures for its memory and determinism gates.
 | **Honest** | Every finding shows its grade and the raw record behind it | A report that cites a missing record fails to render; the HTML page is read back to find every claim's grade, confidence and records | Every change |
 
 Parsers also run under property tests with arbitrary and damaged input. The
-zip, DEX, Android manifest and extension manifest parsers and the Android
-collector run under libFuzzer for 60 s per target in CI.
+zip, DEX, Android manifest, Android resource table, app bundle and extension
+manifest parsers and the Android collector run under libFuzzer for 60 s per
+target in CI.
 
 ```console
 $ cargo test --workspace --all-features
@@ -484,7 +567,8 @@ notice without it; see [`tests/fixtures/README.md`](tests/fixtures/README.md).
 
 Releases are tagged commits of source; [CHANGELOG.md](CHANGELOG.md) lists
 what each one changed. There are no prebuilt binaries: a scanner that reads
-the list of your apps is more credible built from source you can read.
+the list of your apps is more credible built from source you can read. The
+Homebrew formula builds from source as well.
 
 Two clean builds of one commit give the same binary, byte for byte.
 `cargo xtask repro [REV]` checks it: it exports the commit twice, to two
@@ -492,7 +576,8 @@ folders at different paths, builds each in release mode with its own target
 folder, and compares the two `exposure` binaries. CI runs it nightly on macOS
 and Linux. A build on another machine gives the same bytes with the same
 toolchain (the one [`rust-toolchain.toml`](rust-toolchain.toml) pins), target
-and cargo home folder.
+and cargo home folder. Homebrew builds with its own Rust, not the pinned one,
+so its binary is not byte for byte the one `cargo xtask repro` checks.
 
 The [threat model](docs/threat-model.md) says what the scanner protects,
 against whom, and where the protection ends. If a report names your app or

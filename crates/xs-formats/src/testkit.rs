@@ -1,5 +1,6 @@
-//! Writers for small synthetic artifacts: zip archives, DEX files and
-//! compiled Android manifests.
+//! Writers for small synthetic artifacts: zip archives, DEX files, compiled
+//! Android manifests and resource tables, in the binary form of an APK and
+//! in the protocol buffer form of an app bundle.
 //!
 //! Real apps are never stored in the repository, so tests build what they
 //! scan. These writers produce files that are well formed enough for the
@@ -473,49 +474,11 @@ impl AxmlBuilder {
         }
 
         let pool = strings.strings;
-        let mut offsets = Vec::new();
-        let mut data = Vec::new();
-        for text in &pool {
-            put32(&mut offsets, len32(data.len()));
-            if self.utf8 {
-                // Both lengths take one byte, or two with the top bit set.
-                for length in [text.encode_utf16().count(), text.len()] {
-                    if length > 0x7f {
-                        data.push(0x80 | (length >> 8) as u8);
-                    }
-                    data.push(length as u8);
-                }
-                data.extend_from_slice(text.as_bytes());
-                data.push(0);
-            } else {
-                let units: Vec<u16> = text.encode_utf16().collect();
-                if units.len() > 0x7fff {
-                    put16(&mut data, 0x8000 | (units.len() >> 16) as u16);
-                }
-                put16(&mut data, units.len() as u16);
-                for unit in units {
-                    put16(&mut data, unit);
-                }
-                put16(&mut data, 0);
-            }
-        }
-        data.resize(data.len().next_multiple_of(4), 0);
-
         let mut out = Vec::new();
         put16(&mut out, 0x0003);
         put16(&mut out, 8);
         put32(&mut out, 0); // patched below
-
-        put16(&mut out, 0x0001);
-        put16(&mut out, 28);
-        put32(&mut out, len32(28 + offsets.len() + data.len()));
-        put32(&mut out, len32(pool.len()));
-        put32(&mut out, 0); // styles
-        put32(&mut out, if self.utf8 { 1 << 8 } else { 0 });
-        put32(&mut out, len32(28 + offsets.len()));
-        put32(&mut out, 0);
-        out.extend_from_slice(&offsets);
-        out.extend_from_slice(&data);
+        out.extend_from_slice(&string_pool(&pool, self.utf8));
 
         put16(&mut out, 0x0180);
         put16(&mut out, 8);
@@ -527,6 +490,531 @@ impl AxmlBuilder {
         out.extend_from_slice(&nodes);
         let size = len32(out.len());
         out[4..8].copy_from_slice(&size.to_le_bytes());
+        out
+    }
+}
+
+/// A string pool chunk of binary XML or of a resource table.
+fn string_pool(pool: &[&str], utf8: bool) -> Vec<u8> {
+    let mut offsets = Vec::new();
+    let mut data = Vec::new();
+    for text in pool {
+        put32(&mut offsets, len32(data.len()));
+        if utf8 {
+            // Both lengths take one byte, or two with the top bit set.
+            for length in [text.encode_utf16().count(), text.len()] {
+                if length > 0x7f {
+                    data.push(0x80 | (length >> 8) as u8);
+                }
+                data.push(length as u8);
+            }
+            data.extend_from_slice(text.as_bytes());
+            data.push(0);
+        } else {
+            let units: Vec<u16> = text.encode_utf16().collect();
+            if units.len() > 0x7fff {
+                put16(&mut data, 0x8000 | (units.len() >> 16) as u16);
+            }
+            put16(&mut data, units.len() as u16);
+            for unit in units {
+                put16(&mut data, unit);
+            }
+            put16(&mut data, 0);
+        }
+    }
+    data.resize(data.len().next_multiple_of(4), 0);
+    let mut out = Vec::new();
+    put16(&mut out, 0x0001);
+    put16(&mut out, 28);
+    put32(&mut out, len32(28 + offsets.len() + data.len()));
+    put32(&mut out, len32(pool.len()));
+    put32(&mut out, 0); // styles
+    put32(&mut out, if utf8 { 1 << 8 } else { 0 });
+    put32(&mut out, len32(28 + offsets.len()));
+    put32(&mut out, 0);
+    out.extend_from_slice(&offsets);
+    out.extend_from_slice(&data);
+    out
+}
+
+/// The value of a resource in a resource table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArscValue {
+    /// A string, in the table's string pool.
+    String(String),
+    /// An integer.
+    Int(u32),
+    /// A reference to another resource.
+    Reference(u32),
+}
+
+/// How the entries of a type chunk are listed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ArscLayout {
+    /// 32-bit offsets, one per entry.
+    #[default]
+    Plain,
+    /// 16-bit offsets in units of four bytes.
+    Offset16,
+    /// (index, offset) pairs for the entries that are there.
+    Sparse,
+    /// 32-bit offsets to entries of the eight-byte compact form.
+    Compact,
+}
+
+/// A configuration of a resource table: `None` for the default one, or a
+/// language code.
+pub type ArscConfig = Option<[u8; 2]>;
+
+/// The entries of one type in one configuration: each entry's kind and data.
+type ArscEntries = BTreeMap<u16, (u8, u32)>;
+
+/// Writes a resource table, `resources.arsc`, of one package.
+#[derive(Debug, Clone, Default)]
+pub struct ArscBuilder {
+    /// Each resource id, with its value in each configuration: `None` for
+    /// the default one, or a language code.
+    values: Vec<(u32, Vec<(ArscConfig, ArscValue)>)>,
+    layout: ArscLayout,
+}
+
+impl ArscBuilder {
+    /// A table with no resources yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A string resource, with its text in each configuration given.
+    #[must_use]
+    pub fn string(self, id: u32, texts: &[(ArscConfig, &str)]) -> Self {
+        let values: Vec<_> = texts
+            .iter()
+            .map(|(language, text)| (*language, ArscValue::String((*text).into())))
+            .collect();
+        self.value(id, &values)
+    }
+
+    /// A resource, with its value in each configuration given.
+    #[must_use]
+    pub fn value(mut self, id: u32, values: &[(ArscConfig, ArscValue)]) -> Self {
+        self.values.push((id, values.to_vec()));
+        self
+    }
+
+    /// Lists entries with 16-bit offsets.
+    #[must_use]
+    pub fn offset16(mut self) -> Self {
+        self.layout = ArscLayout::Offset16;
+        self
+    }
+
+    /// Lists only the entries that are there, as (index, offset) pairs.
+    #[must_use]
+    pub fn sparse(mut self) -> Self {
+        self.layout = ArscLayout::Sparse;
+        self
+    }
+
+    /// Writes entries in the compact form.
+    #[must_use]
+    pub fn compact(mut self) -> Self {
+        self.layout = ArscLayout::Compact;
+        self
+    }
+
+    /// The finished table.
+    #[must_use]
+    pub fn finish(self) -> Vec<u8> {
+        let mut strings: Vec<&str> = Vec::new();
+        for (_, values) in &self.values {
+            for (_, value) in values {
+                if let ArscValue::String(text) = value
+                    && !strings.contains(&text.as_str())
+                {
+                    strings.push(text);
+                }
+            }
+        }
+        let typed = |value: &ArscValue| -> (u8, u32) {
+            match value {
+                ArscValue::String(text) => {
+                    (0x03, len32(strings.iter().position(|s| s == text).unwrap_or(0)))
+                }
+                ArscValue::Int(number) => (0x10, *number),
+                ArscValue::Reference(id) => (0x01, *id),
+            }
+        };
+        // Package, then type, then configuration, then entry.
+        let mut tree: BTreeMap<u8, BTreeMap<u8, BTreeMap<ArscConfig, ArscEntries>>> =
+            BTreeMap::new();
+        for (id, values) in &self.values {
+            let [package, kind, high, low] = id.to_be_bytes();
+            for (language, value) in values {
+                tree.entry(package)
+                    .or_default()
+                    .entry(kind)
+                    .or_default()
+                    .entry(*language)
+                    .or_default()
+                    .insert(u16::from_be_bytes([high, low]), typed(value));
+            }
+        }
+
+        let mut packages = Vec::new();
+        for (package, kinds) in &tree {
+            let mut body = Vec::new();
+            for (kind, configs) in kinds {
+                for (language, entries) in configs {
+                    body.extend_from_slice(&self.type_chunk(*kind, *language, entries));
+                }
+            }
+            put16(&mut packages, 0x0200);
+            put16(&mut packages, 288);
+            put32(&mut packages, len32(288 + body.len()));
+            put32(&mut packages, u32::from(*package));
+            packages.extend_from_slice(&[0; 256]); // name
+            packages.extend_from_slice(&[0; 20]); // type and key pools, offset
+            packages.extend_from_slice(&body);
+        }
+
+        let pool = string_pool(&strings, false);
+        let mut out = Vec::new();
+        put16(&mut out, 0x0002);
+        put16(&mut out, 12);
+        put32(&mut out, len32(12 + pool.len() + packages.len()));
+        put32(&mut out, len32(tree.len()));
+        out.extend_from_slice(&pool);
+        out.extend_from_slice(&packages);
+        out
+    }
+
+    /// One type chunk: the entries of one type in one configuration.
+    fn type_chunk(&self, kind: u8, language: ArscConfig, entries: &ArscEntries) -> Vec<u8> {
+        const CONFIG: usize = 64;
+        let count = entries.keys().max().map_or(0, |last| usize::from(*last) + 1);
+        let mut records = Vec::new();
+        let mut at: BTreeMap<u16, usize> = BTreeMap::new();
+        for (&index, &(data_type, data)) in entries {
+            at.insert(index, records.len());
+            if self.layout == ArscLayout::Compact {
+                put16(&mut records, 0); // key
+                put16(&mut records, 0x0008 | (u16::from(data_type) << 8));
+                put32(&mut records, data);
+            } else {
+                put16(&mut records, 8);
+                put16(&mut records, 0);
+                put32(&mut records, 0); // key
+                put16(&mut records, 8);
+                records.push(0);
+                records.push(data_type);
+                put32(&mut records, data);
+            }
+        }
+        let mut offsets = Vec::new();
+        let listed = match self.layout {
+            ArscLayout::Sparse => {
+                for (&index, &offset) in &at {
+                    put16(&mut offsets, index);
+                    put16(&mut offsets, len16(offset / 4));
+                }
+                at.len()
+            }
+            ArscLayout::Offset16 => {
+                for index in 0..count {
+                    let offset = at.get(&len16(index)).map_or(0xffff, |offset| len16(offset / 4));
+                    put16(&mut offsets, offset);
+                }
+                offsets.resize(offsets.len().next_multiple_of(4), 0);
+                count
+            }
+            ArscLayout::Plain | ArscLayout::Compact => {
+                for index in 0..count {
+                    put32(&mut offsets, at.get(&len16(index)).map_or(u32::MAX, |o| len32(*o)));
+                }
+                count
+            }
+        };
+        let header = 20 + CONFIG;
+        let mut out = Vec::new();
+        put16(&mut out, 0x0201);
+        put16(&mut out, len16(header));
+        put32(&mut out, len32(header + offsets.len() + records.len()));
+        out.push(kind);
+        out.push(match self.layout {
+            ArscLayout::Sparse => 0x01,
+            ArscLayout::Offset16 => 0x02,
+            ArscLayout::Plain | ArscLayout::Compact => 0,
+        });
+        put16(&mut out, 0);
+        put32(&mut out, len32(listed));
+        put32(&mut out, len32(header + offsets.len()));
+        let mut config = vec![0; CONFIG];
+        config[..4].copy_from_slice(&len32(CONFIG).to_le_bytes());
+        if let Some(language) = language {
+            config[8..10].copy_from_slice(&language);
+        }
+        out.extend_from_slice(&config);
+        out.extend_from_slice(&offsets);
+        out.extend_from_slice(&records);
+        out
+    }
+}
+
+/// Appends a varint.
+fn put_varint(out: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+/// Appends a varint field.
+fn proto_varint(out: &mut Vec<u8>, number: u64, value: u64) {
+    put_varint(out, number << 3);
+    put_varint(out, value);
+}
+
+/// Appends a length-delimited field: a string, bytes or a message.
+fn proto_bytes(out: &mut Vec<u8>, number: u64, bytes: &[u8]) {
+    put_varint(out, (number << 3) | 2);
+    put_varint(out, bytes.len() as u64);
+    out.extend_from_slice(bytes);
+}
+
+/// A message that holds one field, `id`, unless it is zero: a `PackageId`,
+/// `TypeId` or `EntryId`.
+fn proto_id(id: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    if id != 0 {
+        proto_varint(&mut out, 1, id);
+    }
+    out
+}
+
+/// An element of [`ProtoXml`] while it is written.
+#[derive(Debug, Clone, Default)]
+struct ProtoElement {
+    name: String,
+    attributes: Vec<Attr>,
+    children: Vec<ProtoElement>,
+}
+
+impl ProtoElement {
+    /// The `XmlElement` message.
+    fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        proto_bytes(&mut out, 3, self.name.as_bytes());
+        for attribute in &self.attributes {
+            let mut message = Vec::new();
+            if attribute.resource.is_some() {
+                proto_bytes(&mut message, 1, b"http://schemas.android.com/apk/res/android");
+            }
+            proto_bytes(&mut message, 2, attribute.name.as_bytes());
+            let (written, compiled) = match &attribute.value {
+                AttrValue::Text(text) => {
+                    let mut string = Vec::new();
+                    proto_bytes(&mut string, 1, text.as_bytes());
+                    let mut item = Vec::new();
+                    proto_bytes(&mut item, 2, &string);
+                    (text.clone(), item)
+                }
+                AttrValue::Int(value) => {
+                    let mut primitive = Vec::new();
+                    proto_varint(&mut primitive, 6, u64::from(*value));
+                    let mut item = Vec::new();
+                    proto_bytes(&mut item, 7, &primitive);
+                    (value.to_string(), item)
+                }
+                AttrValue::Reference(id) => {
+                    let mut reference = Vec::new();
+                    proto_varint(&mut reference, 2, u64::from(*id));
+                    let mut item = Vec::new();
+                    proto_bytes(&mut item, 1, &reference);
+                    (format!("@0x{id:08x}"), item)
+                }
+            };
+            proto_bytes(&mut message, 3, written.as_bytes());
+            // An attribute without a namespace keeps its value as written
+            // only, as the build tool does for `package`.
+            if let Some(id) = attribute.resource {
+                proto_varint(&mut message, 5, u64::from(id));
+                proto_bytes(&mut message, 6, &compiled);
+            }
+            proto_bytes(&mut out, 4, &message);
+        }
+        for child in &self.children {
+            let mut node = Vec::new();
+            proto_bytes(&mut node, 1, &child.encode());
+            proto_bytes(&mut out, 5, &node);
+        }
+        out
+    }
+}
+
+/// Writes the protocol buffer form of a manifest, as an app bundle holds it
+/// in `base/manifest/AndroidManifest.xml`. It takes the calls of
+/// [`AxmlBuilder`], so one test can build a document both ways.
+#[derive(Debug, Clone, Default)]
+pub struct ProtoXml {
+    /// The elements still open, the root first.
+    open: Vec<ProtoElement>,
+    /// The root, once it is closed.
+    root: Option<ProtoElement>,
+}
+
+impl ProtoXml {
+    /// A document with no elements yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Opens an element.
+    #[must_use]
+    pub fn start(mut self, name: &str, attributes: &[Attr]) -> Self {
+        self.open.push(ProtoElement {
+            name: name.into(),
+            attributes: attributes.to_vec(),
+            children: Vec::new(),
+        });
+        self
+    }
+
+    /// Closes the element opened last.
+    #[must_use]
+    pub fn end(mut self) -> Self {
+        if let Some(element) = self.open.pop() {
+            match self.open.last_mut() {
+                Some(parent) => parent.children.push(element),
+                None => self.root = Some(element),
+            }
+        }
+        self
+    }
+
+    /// The finished `XmlNode`. Elements still open are closed.
+    #[must_use]
+    pub fn finish(mut self) -> Vec<u8> {
+        while !self.open.is_empty() {
+            self = self.end();
+        }
+        let mut out = Vec::new();
+        if let Some(root) = &self.root {
+            proto_bytes(&mut out, 1, &root.encode());
+        }
+        out
+    }
+}
+
+/// A value of [`ProtoResources`]: a string, or a reference to a resource.
+#[derive(Debug, Clone)]
+enum ProtoValue {
+    String(String),
+    Reference(u32),
+}
+
+/// The values of one resource of [`ProtoResources`], each in its
+/// configuration: `None` for the default one, or a locale.
+type ProtoConfigValues = Vec<(Option<String>, ProtoValue)>;
+
+/// Writes the protocol buffer form of a resource table, as an app bundle
+/// holds it in `base/resources.pb`.
+#[derive(Debug, Clone, Default)]
+pub struct ProtoResources {
+    /// Each resource id with its value in each configuration: `None` for
+    /// the default one, or a locale.
+    values: Vec<(u32, ProtoConfigValues)>,
+}
+
+impl ProtoResources {
+    /// A table with no resources yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A string resource, with its text in each configuration given.
+    #[must_use]
+    pub fn string(mut self, id: u32, texts: &[(Option<&str>, &str)]) -> Self {
+        let values = texts
+            .iter()
+            .map(|(locale, text)| (locale.map(Into::into), ProtoValue::String((*text).into())))
+            .collect();
+        self.values.push((id, values));
+        self
+    }
+
+    /// A resource that refers to `target`, in the default configuration.
+    #[must_use]
+    pub fn reference(mut self, id: u32, target: u32) -> Self {
+        self.values.push((id, vec![(None, ProtoValue::Reference(target))]));
+        self
+    }
+
+    /// The finished `ResourceTable`.
+    #[must_use]
+    pub fn finish(self) -> Vec<u8> {
+        // Package, then type, then each entry with its values.
+        type Entries<'a> = Vec<(u16, &'a ProtoConfigValues)>;
+        let mut tree: BTreeMap<u8, BTreeMap<u8, Entries<'_>>> = BTreeMap::new();
+        for (id, values) in &self.values {
+            let [package, kind, high, low] = id.to_be_bytes();
+            tree.entry(package)
+                .or_default()
+                .entry(kind)
+                .or_default()
+                .push((u16::from_be_bytes([high, low]), values));
+        }
+        let mut out = Vec::new();
+        for (package, kinds) in tree {
+            let mut message = Vec::new();
+            proto_bytes(&mut message, 1, &proto_id(u64::from(package)));
+            proto_bytes(&mut message, 2, b"com.example.app");
+            for (kind, entries) in kinds {
+                let mut kind_message = Vec::new();
+                proto_bytes(&mut kind_message, 1, &proto_id(u64::from(kind)));
+                proto_bytes(&mut kind_message, 2, b"string");
+                for (entry, values) in entries {
+                    let mut entry_message = Vec::new();
+                    proto_bytes(&mut entry_message, 1, &proto_id(u64::from(entry)));
+                    proto_bytes(&mut entry_message, 2, format!("name_{entry}").as_bytes());
+                    for (locale, value) in values {
+                        let mut config = Vec::new();
+                        if let Some(locale) = locale {
+                            proto_bytes(&mut config, 3, locale.as_bytes());
+                        }
+                        let mut item = Vec::new();
+                        match value {
+                            ProtoValue::String(text) => {
+                                let mut string = Vec::new();
+                                proto_bytes(&mut string, 1, text.as_bytes());
+                                proto_bytes(&mut item, 2, &string);
+                            }
+                            ProtoValue::Reference(target) => {
+                                let mut reference = Vec::new();
+                                proto_varint(&mut reference, 2, u64::from(*target));
+                                proto_bytes(&mut item, 1, &reference);
+                            }
+                        }
+                        let mut value_message = Vec::new();
+                        proto_bytes(&mut value_message, 4, &item);
+                        let mut config_value = Vec::new();
+                        proto_bytes(&mut config_value, 1, &config);
+                        proto_bytes(&mut config_value, 2, &value_message);
+                        proto_bytes(&mut entry_message, 6, &config_value);
+                    }
+                    proto_bytes(&mut kind_message, 3, &entry_message);
+                }
+                proto_bytes(&mut message, 3, &kind_message);
+            }
+            proto_bytes(&mut out, 2, &message);
+        }
         out
     }
 }

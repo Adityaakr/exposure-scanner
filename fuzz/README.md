@@ -10,7 +10,9 @@ reader of browser extension manifests.
 | `zip` | End record, central directory, local headers, inflate | The directory lies inside the file; nothing inflates past the budget or past its declared size |
 | `dex` | Header, string table, type table, class definitions | Neither walk hands out more string bytes than the file holds |
 | `android_manifest` | Chunks, string pool in both encodings, resource map, attributes | Text taken from the string pool stays within its budget |
-| `apk` | The Android collector on a package in memory, with the signed built-in rule pack | The scan succeeds; every record is valid, has an id, and carries the hash of the input; there is exactly one artifact record |
+| `android_resources` | The lookup of a string in `resources.arsc`: chunks, type chunks in every entry layout, plain and compact entries, chains of references | The text it gives stays within its budget |
+| `android_proto` | An app bundle's protocol buffers: the manifest and the lookup of a string in `resources.pb` | Text taken from either stays within its budget |
+| `apk` | The Android collector on a package (an APK or an app bundle) in memory, with the signed built-in rule pack | The scan succeeds; every record is valid, has an id, and carries the hash of the input; there is exactly one artifact record |
 | `extension_manifest` | Comment blanking, the lenient manifest reader, message catalogues, site patterns | What a manifest keeps stays within its entry budget, and a kept locale is one safe path component |
 
 ## Running
@@ -20,8 +22,9 @@ $ cargo install cargo-fuzz --version 0.13.2 --locked
 $ fuzz/run.sh 60        # every target for 60 s
 ```
 
-`run.sh` seeds each target from the committed fixture package
-(`tests/fixtures/android/Skeleton.apk`) and its parts, and the manifest
+`run.sh` seeds each target from the committed fixture package and app
+bundle (`tests/fixtures/android/Skeleton.apk` and `Skeleton.aab`) and their
+parts, and the manifest
 target from the committed extensions (`tests/fixtures/browser/`), and keeps what
 libFuzzer finds in `fuzz/corpus/`, which is not committed. A crash leaves
 its input in `fuzz/artifacts/<target>/`; `cargo fuzz run <target> <file>`

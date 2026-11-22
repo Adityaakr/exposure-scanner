@@ -23,6 +23,8 @@ const FIXTURE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/android/Skeleton.apk");
 const GOLDEN: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/android/Skeleton.report.json");
+const BUNDLE_FIXTURE: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/android/Skeleton.aab");
 const BUNDLE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/macos/Skeleton.app");
 
@@ -342,7 +344,7 @@ fn a_file_that_is_not_a_package_is_reported_not_passed_over() {
     fs::write(&other, "not an app").unwrap();
     let output = exposure(&["scan", text(&other)]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("an Android package (.apk)"), "{}", stderr(&output));
+    assert!(stderr(&output).contains("an Android package (.apk or .aab)"), "{}", stderr(&output));
 }
 
 /// One app that cannot be read does not cost the scan the others (build
@@ -432,5 +434,112 @@ fn the_terminal_summary_names_no_package_and_no_path() {
 
 #[test]
 fn the_usage_text_names_android_packages() {
-    assert!(stdout(&exposure(&["--help"])).contains("an Android .apk"));
+    let usage = stdout(&exposure(&["--help"]));
+    assert!(usage.contains("an Android .apk\n           or .aab file"), "{usage}");
+}
+
+/// The fixture app as an app bundle, the form a developer uploads to
+/// Google Play: the same manifest as a protocol buffer, the same code in
+/// the base module, and its name in the resource table.
+fn bundle_fixture() -> Vec<u8> {
+    let attr = |name: &str| Attr::android(testkit::ANDROID_NAME, "name", name);
+    let manifest = testkit::ProtoXml::new()
+        .start(
+            "manifest",
+            &[
+                Attr::android(testkit::ANDROID_VERSION_NAME, "versionName", "1.0.0"),
+                Attr::plain("package", "org.example.exposure.skeleton"),
+            ],
+        )
+        .start("application", &[Attr::reference(testkit::ANDROID_LABEL, "label", 0x7f0f_0000)])
+        .start("activity", &[attr(".MainActivity")])
+        .end()
+        .start("provider", &[attr("io.sentry.android.core.SentryInitProvider")])
+        .end()
+        .end()
+        .end()
+        .finish();
+    let table = testkit::ProtoResources::new().string(0x7f0f_0000, &[(None, "Skeleton")]).finish();
+    let classes = DexBuilder::new()
+        .class("org.example.exposure.skeleton.MainActivity")
+        .class("io.sentry.Sentry")
+        .class("io.sentry.android.core.SentryInitProvider")
+        .finish();
+    let classes2 = DexBuilder::new()
+        .class("com.posthog.android.PostHogAndroid")
+        .string("https://us.i.posthog.com")
+        .finish();
+    ZipBuilder::new()
+        .stored("BundleConfig.pb", b"")
+        .deflated("base/manifest/AndroidManifest.xml", &manifest)
+        .stored("base/resources.pb", &table)
+        .deflated("base/dex/classes.dex", &classes)
+        .deflated("base/dex/classes2.dex", &classes2)
+        .finish()
+}
+
+/// The committed app bundle, which seeds the fuzz targets, is exactly what
+/// the writer above produces.
+#[test]
+fn the_bundle_fixture_is_what_its_writer_produces() {
+    let bytes = bundle_fixture();
+    if blessing() {
+        fs::write(BUNDLE_FIXTURE, &bytes).unwrap();
+    }
+    assert!(
+        fs::read(BUNDLE_FIXTURE).unwrap() == bytes,
+        "tests/fixtures/android/Skeleton.aab is not what `bundle_fixture()` writes. \
+         If the change is intended, run: EXPOSURE_BLESS=1 cargo test -p exposure"
+    );
+}
+
+/// `exposure scan app-release.aab` reports what the APK it stands for
+/// ships, from the same kinds of witness, with each record naming the
+/// entry of the bundle it is in, and `--fail-on` gates it like any scan.
+#[test]
+fn an_app_bundle_is_scanned_like_the_apk_it_stands_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("app-release.aab");
+    fs::write(&path, bundle_fixture()).unwrap();
+    let report: Report = serde_json::from_str(&scan(&[&path], 2)).unwrap();
+    let found: Vec<(&str, Option<&str>, u32)> = report
+        .claims
+        .iter()
+        .map(|claim| (claim.object.id.as_str(), claim.company.as_deref(), claim.witnesses))
+        .collect();
+    assert_eq!(found, [("sdk/posthog", Some("posthog"), 2), ("sdk/sentry", Some("sentry"), 2)]);
+    let mut places: Vec<String> = report
+        .evidence
+        .iter()
+        .filter_map(|(_, record)| match record {
+            Record::Edge(edge) => Some(format!("{} {}", edge.proof.matcher, edge.proof.location)),
+            _ => None,
+        })
+        .collect();
+    places.sort();
+    assert_eq!(
+        places,
+        [
+            "android_class_prefix base/dex/classes.dex",
+            "android_class_prefix base/dex/classes2.dex",
+            "dex_string base/dex/classes2.dex",
+            "manifest_component base/manifest/AndroidManifest.xml",
+        ]
+    );
+    let names: Vec<Option<&str>> = report
+        .evidence
+        .iter()
+        .filter_map(|(_, record)| match record {
+            Record::Artifact(artifact) => Some(artifact.facts.name.as_deref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, [Some("Skeleton")]);
+
+    // A folder that holds the bundle yields it too.
+    let again: Report = serde_json::from_str(&scan(&[dir.path()], 1)).unwrap();
+    assert_eq!(again.claims, report.claims);
+
+    let output = exposure(&["scan", text(&path), "--json", "/dev/null", "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
 }

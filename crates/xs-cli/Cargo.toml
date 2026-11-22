@@ -19,6 +19,7 @@ xs-rules.workspace = true
 xs-derive.workspace = true
 xs-render.workspace = true
 xs-collect.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 lexopt.workspace = true
 

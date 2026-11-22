@@ -717,8 +717,15 @@ fn checklist<'v, 'a>(view: &'v View<'a>) -> Vec<(Priority, String, Entry<'v, 'a>
                     let id = &finding.claim.object.id;
                     let Place::Privacy(pane) = macos_place(id) else { continue };
                     panes.entry(pane).or_default().entry(group.app).or_default().push(finding);
+                    // Electron's own wording is no purpose of the app's:
+                    // it ranks the entry no higher than the rest it can do.
+                    let asked = if view.states_only_electron_s_purpose(finding.claim) {
+                        Priority::Low
+                    } else {
+                        access_priority(id)
+                    };
                     let priority = pane_priority.entry(pane).or_insert(Priority::Low);
-                    *priority = (*priority).min(access_priority(id));
+                    *priority = (*priority).min(asked);
                 }
             }
         }
@@ -1002,7 +1009,26 @@ fn pane_entry(
     page.raw(" · ");
     page.text(&plural(apps.len() as u64, "app may ask", "apps may ask"));
     page.close();
-    page.raw("\n<ul class=\"steps\">\n");
+    page.raw("\n");
+    let defaults = electron_s_purpose_only(view, apps);
+    if defaults > 0 {
+        page.open_class("p", "note");
+        if defaults == apps.len() {
+            page.raw(if defaults == 1 { "It states" } else { "Each states" });
+        } else {
+            page.number(defaults as u64);
+            page.raw(if defaults == 1 { " of them states" } else { " of them state" });
+        }
+        page.raw(
+            " only Electron's default purpose, such as \"This app needs access to the \
+             camera\". Electron writes it into every app built with it unless the app states \
+             its own, so it says nothing about what the app does with the permission, and \
+             this entry is ranked by the other apps alone.",
+        );
+        page.close();
+        page.raw("\n");
+    }
+    page.raw("<ul class=\"steps\">\n");
     step(page, |page| {
         page.raw("Open ");
         privacy_path(page, pane);
@@ -1020,6 +1046,19 @@ fn pane_entry(
         page.raw(pane_note(pane));
     });
     page.raw("</ul>\n");
+}
+
+/// How many of the apps of a pane entry ask for what it controls in
+/// Electron's own words only.
+pub(crate) fn electron_s_purpose_only(
+    view: &View<'_>,
+    apps: &[(usize, Vec<&Finding<'_>>)],
+) -> usize {
+    apps.iter()
+        .filter(|(_, findings)| {
+            findings.iter().all(|finding| view.states_only_electron_s_purpose(finding.claim))
+        })
+        .count()
 }
 
 fn android_entry(

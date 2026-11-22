@@ -4,6 +4,48 @@ All notable changes to `exposure` are listed here. The project follows
 [Semantic Versioning](https://semver.org); while the version is 0.x, a minor
 version can change commands, the report format or the evidence format.
 
+## Unreleased
+
+### Added
+
+- **Homebrew**: `brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner`
+  and `brew install adityaakr/exposure-scanner/exposure`. The repository is
+  its own tap (`Formula/exposure.rb`), and the formula builds `main` from
+  source with `cargo install --locked`.
+- **`--fail-on CONDITION`** for `scan` and `report`: exit status 3 when a
+  finding counts in the headline (`headline`), is in a category
+  (`category:analytics`) or names a company (`company:google`), after the
+  reports are written. A condition the rule pack does not know is refused
+  before anything is read. `exposure rules show` now lists the category and
+  company ids.
+- **`exposure diff OLD NEW`**: which findings a report adds, no longer has, or
+  has at another grade, app by app, following an app by its platform and app
+  id and a finding by its claim key. `--json FILE` writes the comparison as an
+  `exposure-diff/1` document, and `--fail-on` checks the findings that newly
+  meet a condition: those added, and those that meet it in NEW but did not in
+  OLD.
+- **Android app bundles (`.aab`)**: scanned like the APKs they stand for,
+  with their protocol buffer manifest and resource table and the code of
+  every module. The layout comes from the archive's directory, never from the
+  file name.
+- **Android app names**: the label an app's manifest points at is looked up
+  in the resource table (`resources.arsc`, or `resources.pb` in a bundle), in
+  its default configuration, so the report shows "Bitwarden" rather than
+  `com.x8bit.bitwarden`.
+- **Beside the headline, for Android**: the SDKs of companies in categories
+  the headline does not count, such as the five Google SDKs of Bitwarden's
+  Play build, in the terminal summary and the HTML report, so a scan whose
+  counts are zero does not read as "nothing found".
+- Fuzz targets for the resource table and the app bundle readers.
+
+### Changed
+
+- **Electron's default usage descriptions rank low** in the "What you can do"
+  checklist. A System Settings entry that rests only on "This app needs access
+  to the camera" and Electron's other default wording is `Low`, and an entry
+  that rests on it in part says how many of its apps state only that.
+- The README no longer says the repository is private.
+
 ## 0.1.0 (2026-11-18)
 
 The first release: milestone 1, "static truth". Source only; there are no

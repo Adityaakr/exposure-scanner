@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::claim::{Claim, Party};
 use crate::evidence::EvidenceSet;
 use crate::pack::PackRef;
-use crate::record::{Browser, EdgeType, Grade};
+use crate::record::{Browser, EdgeType, Grade, ObjectKind, Platform};
 
 /// The schema tag of a report file. Serializes as `"exposure-report/1"` and
 /// refuses to read anything else.
@@ -173,6 +173,59 @@ impl Headline {
     }
 }
 
+/// What an Android scan ships beside the headline: the SDKs of companies in
+/// categories the headline does not count, such as crash reporting, push
+/// messaging and payments.
+///
+/// On Android most of what ships is a large company's infrastructure, which
+/// the headline leaves out on principle (hosting is not receiving). Shown
+/// beside the three counts, it keeps a scan whose counts are zero from
+/// reading as "nothing found". It is a tally of claims like the headline,
+/// is never stored in a report, and is no score.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Uncounted<'a> {
+    /// For each company, the SDKs of it that the Android apps ship, by
+    /// object id.
+    pub by_company: BTreeMap<&'a str, BTreeSet<&'a str>>,
+}
+
+impl<'a> Uncounted<'a> {
+    /// Tallies the claims about Android apps: SDK channels at `contains`
+    /// or above that name a company and do not count in the headline.
+    #[must_use]
+    pub fn android(claims: &'a [Claim]) -> Self {
+        let mut by_company: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for claim in claims {
+            let (Platform::Android, EdgeType::Channel, ObjectKind::Sdk, false, Some(company)) = (
+                claim.subject.platform,
+                claim.edge,
+                claim.object.kind,
+                claim.headline,
+                claim.company.as_deref(),
+            ) else {
+                continue;
+            };
+            if claim.grade >= Grade::Contains {
+                by_company.entry(company).or_default().insert(&claim.object.id);
+            }
+        }
+        Self { by_company }
+    }
+
+    /// How many SDKs.
+    #[must_use]
+    pub fn sdks(&self) -> u32 {
+        let count: usize = self.by_company.values().map(BTreeSet::len).sum();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
+    /// How many companies.
+    #[must_use]
+    pub fn companies(&self) -> u32 {
+        u32::try_from(self.by_company.len()).unwrap_or(u32::MAX)
+    }
+}
+
 /// The program that produced a report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -299,6 +352,44 @@ mod tests {
         let mut access = claim("com.example.a", 1, "acme", Grade::Used);
         access.edge = EdgeType::Access;
         assert_eq!(counts(Headline::of(&[access])), (0, 0, 0));
+    }
+
+    #[test]
+    fn beside_the_headline_android_counts_the_sdks_it_leaves_out() {
+        let android = |app: &str, sdk: &str, company: &str, category: &str| {
+            let mut claim = claim(app, 1, company, Grade::Contains);
+            claim.subject.platform = Platform::Android;
+            claim.object.id = alloc::format!("sdk/{sdk}");
+            claim.category = category.into();
+            claim.headline = category == "analytics";
+            claim
+        };
+        let claims = [
+            android("com.example.a", "crashlytics", "google", "crash_reporting"),
+            android("com.example.b", "crashlytics", "google", "crash_reporting"),
+            android("com.example.a", "fcm", "google", "push_messaging"),
+            android("com.example.a", "billing", "google", "payments"),
+            android("com.example.a", "sentry", "sentry", "crash_reporting"),
+            // Counted in the headline, so not beside it.
+            android("com.example.a", "posthog", "posthog", "analytics"),
+        ];
+        let uncounted = Uncounted::android(&claims);
+        assert_eq!((uncounted.sdks(), uncounted.companies()), (4, 2));
+        assert_eq!(
+            uncounted.by_company.get("google").map(|sdks| sdks.iter().copied().collect()),
+            Some(vec!["sdk/billing", "sdk/crashlytics", "sdk/fcm"])
+        );
+
+        // Only Android, only SDKs that ship, only claims that name somebody.
+        let mut macos = android("com.example.c", "x", "acme", "crash_reporting");
+        macos.subject.platform = Platform::Macos;
+        let mut declared = android("com.example.c", "y", "acme", "crash_reporting");
+        declared.grade = Grade::Declares;
+        let mut component = android("com.example.c", "z", "acme", "crash_reporting");
+        component.company = None;
+        let mut host = android("com.example.c", "w", "acme", "crash_reporting");
+        host.object.kind = ObjectKind::Host;
+        assert_eq!(Uncounted::android(&[macos, declared, component, host]), Uncounted::default());
     }
 
     /// A report as `scope` makes it, with nothing else in it.

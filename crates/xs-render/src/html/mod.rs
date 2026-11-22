@@ -53,7 +53,7 @@ use crate::{RenderError, ReportMeta, check_honest};
 /// it from the stylesheet.
 macro_rules! style_source {
     () => {
-        "'sha256-5OjasZD0iUXLT0sEVi0QpfCWEPt0sJvAa3WV1FeQ8+U='"
+        "'sha256-Tld4UI1dnEZpmcgNJQFrML+4BYY0W5thNJnRXMj7cqI='"
     };
 }
 
@@ -465,6 +465,34 @@ fn headline(page: &mut Markup, view: &View<'_>) {
         "A counted finding names a company that is not the app's own publisher.",
     );
     page.raw("</div>\n");
+    beside_the_headline(page, view);
+}
+
+/// What the Android apps ship in categories the headline leaves out, so a
+/// scan of them does not read as "nothing found" when the counts are zero.
+fn beside_the_headline(page: &mut Markup, view: &View<'_>) {
+    if view.uncounted.is_empty() {
+        return;
+    }
+    let sdks = view.uncounted.iter().map(|(_, names)| names.len() as u64).sum();
+    page.open_class("p", "beside");
+    page.raw("Beside these counts, the Android apps ship ");
+    page.text(&plural(sdks, "SDK", "SDKs"));
+    page.raw(" of ");
+    page.text(&plural(view.uncounted.len() as u64, "company", "companies"));
+    page.raw(" in categories the counts leave out: ");
+    for (at, (company, names)) in view.uncounted.iter().enumerate() {
+        if at > 0 {
+            page.raw("; ");
+        }
+        page.element("strong", &[], &company.name);
+        page.raw(" (");
+        page.text(&list_words(names));
+        page.raw(")");
+    }
+    page.raw(". They are in the list above and in the findings below.");
+    page.close();
+    page.raw("\n");
 }
 
 fn count(page: &mut Markup, number: u32, label: (&str, &str), sub: &'static str) {
