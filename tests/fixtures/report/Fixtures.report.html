@@ -318,7 +318,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <ol class="first">
 <li class="first-high">
 <p class="todo-head"><span class="prio p-high">High</span> <strong>PostHog</strong></p>
-<p>Analytics by PostHog Inc., in ElectronSkeleton and Skeleton.</p>
+<p>Analytics by PostHog Inc., in ElectronSkeleton and Skeleton. In ElectronSkeleton: found as text in the app&#39;s code (one kind of evidence), not as a name read from a table the app declares.</p>
 <p class="do"><span class="do-label">First step:</span> Block app.posthog.com, eu.i.posthog.com, i.posthog.com and us.i.posthog.com with an outbound firewall such as LuLu (free) or Little Snitch. <a href="#t-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">Every step</a></p>
 </li>
 </ol>
@@ -377,6 +377,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <li class="todo" id="t-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">
 <p class="todo-head"><span class="prio p-high">High</span> <strong>PostHog</strong> <span class="tag">Analytics</span></p>
 <p class="meta">PostHog Inc. · 2 apps</p>
+<p class="note">In ElectronSkeleton: found as text in the app&#39;s code (one kind of evidence), not as a name read from a table the app declares.</p>
 <ul class="steps">
 <li>Block these hosts for <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a> with an outbound firewall such as LuLu (free) or Little Snitch: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
 <li>Block these hosts for <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a> with a firewall app that works without root, such as NetGuard: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
@@ -777,7 +778,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <h2>About this report</h2>
 <dl class="facts">
 <dt>Scanner</dt><dd>exposure 0.1.0</dd>
-<dt>Rule pack</dt><dd>core version 7, SHA-256 <code>6798f6f85a4b5bd5e7477c90f9d2cf018f263e661365e3bf353961c42c2fabfd</code></dd>
+<dt>Rule pack</dt><dd>core version 8, SHA-256 <code>aaa99753f94b788dcdca9ec08d1a198dc5b74b8ece3c52ed9d03d86abae3c9ee</code></dd>
 </dl>
 <p>The same evidence, the same rule pack and the same scan scope always give this same file, byte for byte. It holds no date, no device name and no path outside an app.</p>
 </section>

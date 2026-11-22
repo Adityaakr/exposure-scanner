@@ -7,7 +7,7 @@ use core::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::claim::{Claim, Party};
+use crate::claim::Claim;
 use crate::evidence::EvidenceSet;
 use crate::pack::PackRef;
 use crate::record::{Browser, EdgeType, Grade, ObjectKind, Platform};
@@ -94,21 +94,46 @@ pub enum ScanScope {
 
 impl fmt::Display for ScanScope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write(f, &[])
+    }
+}
+
+impl ScanScope {
+    /// Where the scan looked, as [`Display`](fmt::Display) words it, with
+    /// the browsers in `unread` taken out of those whose extensions were
+    /// searched: none of their extensions could be read, so the scan did
+    /// not cover them, and the words must not say it did.
+    #[must_use]
+    pub fn words(self, unread: &[Browser]) -> String {
+        struct Words<'a>(ScanScope, &'a [Browser]);
+        impl fmt::Display for Words<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.write(f, self.1)
+            }
+        }
+        alloc::format!("{}", Words(self, unread))
+    }
+
+    fn write(self, f: &mut fmt::Formatter<'_>, unread: &[Browser]) -> fmt::Result {
         match self {
             Self::Installed => {
                 f.write_str(
                     "the apps installed in /Applications and ~/Applications; \
                      /System/Applications (Apple's own apps on the sealed system volume) was \
-                     not searched: name the folder to scan it; the extensions installed in your \
-                     profiles of ",
+                     not searched: name the folder to scan it",
                 )?;
-                for (index, browser) in Browser::ALL.iter().enumerate() {
-                    if index + 1 == Browser::ALL.len() {
-                        f.write_str(" and ")?;
-                    } else if index > 0 {
-                        f.write_str(", ")?;
-                    }
-                    f.write_str(browser.name())?;
+                let read: Vec<Browser> =
+                    Browser::ALL.into_iter().filter(|browser| !unread.contains(browser)).collect();
+                if !read.is_empty() {
+                    f.write_str("; the extensions installed in your profiles of ")?;
+                    list(f, &read)?;
+                }
+                let not_read: Vec<Browser> =
+                    Browser::ALL.into_iter().filter(|browser| unread.contains(browser)).collect();
+                if !not_read.is_empty() {
+                    f.write_str("; not the extensions of ")?;
+                    list(f, &not_read)?;
+                    f.write_str(", which could not be read")?;
                 }
                 Ok(())
             }
@@ -117,6 +142,19 @@ impl fmt::Display for ScanScope {
             ),
         }
     }
+}
+
+/// `browsers` by name, as `A, B and C`.
+fn list(f: &mut fmt::Formatter<'_>, browsers: &[Browser]) -> fmt::Result {
+    for (index, browser) in browsers.iter().enumerate() {
+        if index > 0 && index + 1 == browsers.len() {
+            f.write_str(" and ")?;
+        } else if index > 0 {
+            f.write_str(", ")?;
+        }
+        f.write_str(browser.name())?;
+    }
+    Ok(())
 }
 
 /// The headline of a report: three counts, and no score (project spec,
@@ -137,7 +175,9 @@ pub struct Headline {
     /// channel is `declares` is in neither count.
     pub companies_contains: u32,
     /// Apps with at least one third-party channel, at any grade. Two builds
-    /// of one app id are one app.
+    /// of one app id are one app. An app that only claims to be a company's
+    /// own counts for that company's channels too
+    /// ([`Claim::counts_as_third_party`]).
     pub apps_third_party: u32,
 }
 
@@ -157,7 +197,7 @@ impl Headline {
             };
             let grade = strongest.entry(company).or_insert(claim.grade);
             *grade = claim.grade.max(*grade);
-            if claim.party == Party::Third {
+            if claim.counts_as_third_party() {
                 apps.insert((claim.subject.platform, claim.subject.id.as_str()));
             }
         }
@@ -241,7 +281,7 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::claim::{ClaimId, ClaimKey, ClaimObject, Confidence};
+    use crate::claim::{ClaimId, ClaimKey, ClaimObject, Confidence, Party};
     use crate::record::{ObjectKind, ObjectRef, Platform, Subject, SubjectKind};
     use crate::{Sha256Digest, SubjectDigest};
 

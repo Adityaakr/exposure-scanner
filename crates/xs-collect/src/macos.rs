@@ -867,11 +867,18 @@ pub(crate) fn finish(
     // The main executable the property list names was not read as a Mach-O
     // file: it is a link, which is never followed, a script, or not there.
     // Then its signature was not looked at, and what it asks for is not
-    // known. A file that was set aside already has its record.
+    // known. A file that was set aside already has its record. A file that
+    // is there is in a format this version does not read as an executable;
+    // anything else is not there as a file.
     if let (None, Some(path)) = (main, declared_main)
         && !plan.gaps.located.keys().any(|(place, ..)| *place == path)
     {
-        plan.gaps.skipped(CoverageReason::UnsupportedFormat, Some(path));
+        let reason = if plan.files.iter().any(|(file, _)| *file == path) {
+            CoverageReason::UnsupportedFormat
+        } else {
+            CoverageReason::Missing
+        };
+        plan.gaps.skipped(reason, Some(path));
     }
     let team_id = match main {
         Some((path, found)) if found.team_ids.len() > 1 => {
@@ -928,8 +935,13 @@ pub(crate) fn finish(
             plan.gaps.add(status, reason, Some(location.clone()), None, count);
         }
     }
-    let name = stated(info.display_name, text::MAX_NAME_BYTES)
-        .or_else(|| stated(info.name, text::MAX_NAME_BYTES));
+    // A display name keeps its letters and loses its directional marks.
+    let named = |value: Option<String>| {
+        value
+            .map(|value| text::clean_name(&value, text::MAX_NAME_BYTES))
+            .filter(|value| !value.is_empty())
+    };
+    let name = named(info.display_name).or_else(|| named(info.name));
     records.push(Record::Artifact(ArtifactRecord {
         v: V1,
         collector: Collector::MacosBundle,

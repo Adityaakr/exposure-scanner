@@ -882,6 +882,14 @@ pub enum CoverageReason {
     Unreadable,
     /// The format is known but this build has no reader for it.
     UnsupportedFormat,
+    /// A file the artifact's own declarations name is not in it as a file:
+    /// nothing is there, or a link, which is never followed. An app's
+    /// `Info.plist` names its main executable, for one.
+    Missing,
+    /// JavaScript compiled to V8 bytecode (`.jsc`). Its literals are not
+    /// stored as contiguous text, so it is not searched, and an SDK inside it
+    /// would not be found. The count is how many files.
+    CompiledScript,
 }
 
 #[cfg(test)]

@@ -46,9 +46,10 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use xs_model::claim::{Party, VendorBasis};
-use xs_model::pack::Pack;
+use xs_model::pack::{Entity, Pack};
 use xs_model::record::{
-    CoverageRecord, EdgeRecord, EdgeType, Grade, ObjectKind, Record, RecordId, Subject,
+    CoverageReason, CoverageRecord, EdgeRecord, EdgeType, Grade, ObjectKind, Platform, Record,
+    RecordId, Subject,
 };
 use xs_model::{Claim, EvidenceSet, Headline};
 use xs_model::{canon, permission};
@@ -283,6 +284,7 @@ fn document(sections: &[Section], input: &Input<'_>) -> Result<String, RenderErr
 fn summary(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
     let view = input.view;
     lead(page, view);
+    not_checked(page, input.evidence);
     if view.claims > 0 {
         attention(page, input);
     }
@@ -308,6 +310,20 @@ fn lead(page: &mut Markup, view: &View<'_>) {
     page.raw(".");
     page.close();
     page.raw("\n");
+}
+
+/// What the scan could not look at at all, each in one sentence with what
+/// would let it (security review, M7). A reader who uses a browser the scan
+/// could not read must not take the page as covering its extensions.
+fn not_checked(page: &mut Markup, evidence: &EvidenceSet) {
+    for item in crate::not_checked(evidence) {
+        page.open_class("p", "status");
+        page.element("strong", &[], "Not checked:");
+        page.raw(" ");
+        page.text(&item.sentence());
+        page.close();
+        page.raw("\n");
+    }
 }
 
 /// The first entries of the checklist, each in one sentence with its first
@@ -828,7 +844,13 @@ fn publisher(page: &mut Markup, finding: &Finding<'_>) {
     page.open_class("p", "publisher");
     page.raw("Publisher: ");
     match (&finding.claim.vendor, finding.publisher) {
-        (None, _) => page.raw("not established from the app's files."),
+        (None, _) => match finding.claimed {
+            Some(company) => {
+                page.raw("not established. ");
+                claimed_words(page, finding.claim.subject.platform, company);
+            }
+            None => page.raw("not established from the app's files."),
+        },
         (Some(vendor), Some(company)) => {
             page.text(&company.name);
             match vendor.by {
@@ -854,6 +876,29 @@ fn publisher(page: &mut Markup, finding: &Finding<'_>) {
     }
     page.close();
     page.raw("\n");
+}
+
+/// Why the company an app names itself after is not taken to be its
+/// publisher (security review, M2).
+fn claimed_words(page: &mut Markup, platform: Platform, company: &Entity) {
+    page.raw("Its app id says it is ");
+    page.text(&company.name);
+    page.raw("'s, ");
+    match platform {
+        Platform::Macos => {
+            page.raw("but its code signature names no Team ID ");
+            page.text(&company.name);
+            page.raw(" signs with");
+        }
+        Platform::Android | Platform::Chromium | Platform::Firefox => page.raw(
+            "and the scan did not check its signature: this version does not read an Android \
+             package's signing certificate",
+        ),
+    }
+    page.raw(
+        ". Any developer can give an app any id, so the company's code in it is not treated as \
+         the publisher's own.",
+    );
 }
 
 /// A link to a record in the last section of the document.
@@ -944,6 +989,10 @@ fn finding_block(page: &mut Markup, input: &Input<'_>, finding: &Finding<'_>) {
                 "Optional: the extension does not hold this until it asks while it runs and \
                  the person agrees.",
             ),
+            None if claim.claimed_vendor().is_some() => match finding.claimed {
+                Some(company) => claimed_words(page, claim.subject.platform, company),
+                None => page.text(note),
+            },
             None => page.text(note),
         });
     }
@@ -995,6 +1044,10 @@ fn party(page: &mut Markup, finding: &Finding<'_>) {
             page.raw(" is not this app's publisher.");
         }
         (Party::Third, None) => page.raw("Third party."),
+        (Party::Unknown, Some(_)) if finding.claimed.is_some() => page.raw(
+            "Not established: the app names itself after a company the scan could not confirm \
+             as its publisher. The summary counts it as a third-party channel.",
+        ),
         (Party::Unknown, Some(_)) => page.raw(
             "Not established: nothing in the app's files identifies its publisher, or what \
              does contradicts itself.",
@@ -1052,7 +1105,7 @@ fn coverage(page: &mut Markup, input: &Input<'_>) -> Result<(), RenderError> {
          looked, lists every app it read, and lists everything it set aside or could not \
          interpret.</p>\n",
     );
-    scope(page, input.meta);
+    scope(page, input.meta, input.evidence);
     apps_scanned(page, input.view);
     set_aside(page, input.view);
     Ok(())
@@ -1068,13 +1121,14 @@ fn limits(page: &mut Markup, _: &Input<'_>) -> Result<(), RenderError> {
 ///
 /// The scan states this when it runs and the JSON report carries it. A
 /// report saved before it did has no scope, and its page says so.
-fn scope(page: &mut Markup, meta: &ReportMeta) {
+fn scope(page: &mut Markup, meta: &ReportMeta, evidence: &EvidenceSet) {
     page.raw("<h3>Where the scan looked</h3>\n");
     page.open_class("p", "scope");
     match &meta.scope {
         Some(scope) => {
+            let unread = crate::unread_browsers(&crate::not_checked(evidence));
             page.raw("This scan covered ");
-            page.text(&scope.to_string());
+            page.text(&scope.words(&unread));
             page.raw(".");
         }
         None => page.raw(
@@ -1184,8 +1238,12 @@ fn coverage_row(page: &mut Markup, app: &App<'_>, id: &RecordId, note: &Coverage
         page.raw(".");
     }
     if note.count > 1 {
+        let (one, many) = match note.reason {
+            CoverageReason::CompiledScript => ("file", "files"),
+            _ => ("item", "items"),
+        };
         page.raw(" ");
-        page.text(&plural(note.count.into(), "item", "items"));
+        page.text(&plural(note.count.into(), one, many));
         page.raw(".");
     }
     page.close();

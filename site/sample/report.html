@@ -318,18 +318,18 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <ol class="first">
 <li class="first-high">
 <p class="todo-head"><span class="prio p-high">High</span> <strong>PostHog</strong></p>
-<p>Analytics by PostHog Inc., in ElectronSkeleton and Skeleton.</p>
+<p>Analytics by PostHog Inc., in ElectronSkeleton and Skeleton. In ElectronSkeleton: found as text in the app&#39;s code (one kind of evidence), not as a name read from a table the app declares.</p>
 <p class="do"><span class="do-label">First step:</span> Block app.posthog.com, eu.i.posthog.com, i.posthog.com and us.i.posthog.com with an outbound firewall such as LuLu (free) or Little Snitch. <a href="#t-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">Every step</a></p>
 </li>
 <li class="first-high">
 <p class="todo-head"><span class="prio p-high">High</span> <strong>Example Helper</strong></p>
 <p>Browser extension. It may read and change data on every website you visit, read what you copy, read and change the cookies of the sites it can reach and see the address and title of every tab you have open.</p>
-<p class="do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open chrome://extensions in your browser. <a href="#t-10a2ec3ab64002c2f89bc6dc05b196db601310b7e7622053a42a0534c641bf2c">Every step</a></p>
+<p class="do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open chrome://extensions in your browser. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first. <a href="#t-10a2ec3ab64002c2f89bc6dc05b196db601310b7e7622053a42a0534c641bf2c">Every step</a></p>
 </li>
 <li class="first-high">
 <p class="todo-head"><span class="prio p-high">High</span> <strong>Example Proxy</strong></p>
 <p>Browser extension. It may read and change data on every website you visit, read and change your browsing history, exchange messages with a program installed on this computer, route the browser&#39;s traffic through a proxy it chooses and watch the network requests of the sites it can reach.</p>
-<p class="do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open about:addons in your browser. <a href="#t-5576e6af8335a86234c7a35f2ab5413b35d069c5d5a676abafa80aa4354e4660">Every step</a></p>
+<p class="do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open about:addons in your browser. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first. <a href="#t-5576e6af8335a86234c7a35f2ab5413b35d069c5d5a676abafa80aa4354e4660">Every step</a></p>
 </li>
 </ol>
 <details class="more">
@@ -443,6 +443,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <li class="todo" id="t-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">
 <p class="todo-head"><span class="prio p-high">High</span> <strong>PostHog</strong> <span class="tag">Analytics</span></p>
 <p class="meta">PostHog Inc. · 2 apps</p>
+<p class="note">In ElectronSkeleton: found as text in the app&#39;s code (one kind of evidence), not as a name read from a table the app declares.</p>
 <ul class="steps">
 <li>Block these hosts for <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a> with an outbound firewall such as LuLu (free) or Little Snitch: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
 <li>Block these hosts for <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a> with a firewall app that works without root, such as NetGuard: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
@@ -456,7 +457,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <ul class="steps">
 <li>Limit the sites it can read: open <code>chrome://extensions</code> in the browser, choose Details under the extension, and under Site access choose On click or On specific sites. It then reads a site only when you allow it.</li>
 <li>The browser has no switch for its other permissions: they stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension.</li>
+<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 <li><a href="#f-10a2ec3ab64002c2f89bc6dc05b196db601310b7e7622053a42a0534c641bf2c">The findings</a> show the manifest keys it asks in.</li>
 </ul>
 </li>
@@ -466,7 +467,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <ul class="steps">
 <li>Limit the sites it can read: open <code>about:addons</code> in the browser, choose the extension, then its Permissions tab, and turn off access to your data for all websites. Firefox has this switch for extensions built to the current format; for an older one, removing it is the way.</li>
 <li>A permission it asks for as optional can be turned off in the same Permissions tab. The others stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove.</li>
+<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 <li><a href="#f-5576e6af8335a86234c7a35f2ab5413b35d069c5d5a676abafa80aa4354e4660">The findings</a> show the manifest keys it asks in.</li>
 </ul>
 </li>
@@ -786,7 +787,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>Limit the sites it can read: open <code>chrome://extensions</code> in the browser, choose Details under the extension, and under Site access choose On click or On specific sites. It then reads a site only when you allow it.</li>
-<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension.</li>
+<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 2 records</p>
 <ul class="evidence">
@@ -830,7 +831,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>The browser has no switch for these permissions: they stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension.</li>
+<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
@@ -862,7 +863,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>The browser has no switch for these permissions: they stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension.</li>
+<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
@@ -894,7 +895,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>The browser has no switch for these permissions: they stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension.</li>
+<li>Or remove it: open <code>chrome://extensions</code> in the browser and choose Remove under the extension. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
@@ -931,7 +932,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>Limit the sites it can read: open <code>about:addons</code> in the browser, choose the extension, then its Permissions tab, and turn off access to your data for all websites. Firefox has this switch for extensions built to the current format; for an older one, removing it is the way.</li>
-<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove.</li>
+<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
@@ -964,7 +965,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>A permission it asks for as optional can be turned off in the same Permissions tab. The others stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove.</li>
+<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
@@ -996,7 +997,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>A permission it asks for as optional can be turned off in the same Permissions tab. The others stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove.</li>
+<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
@@ -1028,7 +1029,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>A permission it asks for as optional can be turned off in the same Permissions tab. The others stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove.</li>
+<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
@@ -1060,7 +1061,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p class="todo-head">What you can do</p>
 <ul class="steps">
 <li>A permission it asks for as optional can be turned off in the same Permissions tab. The others stay as long as the extension is installed.</li>
-<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove.</li>
+<li>Or remove it: open <code>about:addons</code> in the browser, open the menu of the extension and choose Remove. Removing an extension deletes what it keeps in this browser. For a wallet or a password manager, make sure you have its recovery phrase or an export first.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
 <ul class="evidence">
@@ -1242,7 +1243,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <h2>About this report</h2>
 <dl class="facts">
 <dt>Scanner</dt><dd>exposure 0.1.0</dd>
-<dt>Rule pack</dt><dd>core version 7, SHA-256 <code>6798f6f85a4b5bd5e7477c90f9d2cf018f263e661365e3bf353961c42c2fabfd</code></dd>
+<dt>Rule pack</dt><dd>core version 8, SHA-256 <code>aaa99753f94b788dcdca9ec08d1a198dc5b74b8ece3c52ed9d03d86abae3c9ee</code></dd>
 </dl>
 <p>The same evidence, the same rule pack and the same scan scope always give this same file, byte for byte. It holds no date, no device name and no path outside an app.</p>
 </section>

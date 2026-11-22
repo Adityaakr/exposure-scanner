@@ -166,7 +166,42 @@ pub struct Claim {
     /// Remarks carried over from the rule, such as `retired:2025-03-31`.
     /// A claim about a permission that rests on optional manifest keys
     /// alone carries [`permission::NOTE_OPTIONAL`](crate::permission::NOTE_OPTIONAL).
+    /// A claim about an app that names itself after a listed company the
+    /// scan could not confirm as its vendor carries [`NOTE_CLAIMED_VENDOR`]
+    /// with the company's id.
     pub notes: Vec<String>,
+}
+
+/// The note, followed by a company id, of every claim about an app whose
+/// app id is listed under that company while nothing the scan read confirms
+/// that the app is the company's, as in `claims-vendor:google`. The app's
+/// vendor is then none and the party `unknown`.
+///
+/// Any developer can give an app any id, so the id alone never makes a
+/// company's SDK first party. Such a claim still counts as an app's
+/// third-party channel in the headline: naming an app after a company must
+/// not hide what it ships.
+pub const NOTE_CLAIMED_VENDOR: &str = "claims-vendor";
+
+impl Claim {
+    /// The company the app names itself after without being confirmed as
+    /// its vendor: the id after [`NOTE_CLAIMED_VENDOR`], if the claim carries
+    /// that note.
+    #[must_use]
+    pub fn claimed_vendor(&self) -> Option<&str> {
+        self.notes.iter().find_map(|note| {
+            note.strip_prefix(NOTE_CLAIMED_VENDOR).and_then(|rest| rest.strip_prefix(':'))
+        })
+    }
+
+    /// Whether the claim is a third-party channel of its app for the
+    /// headline: its party is `third`, or the app only claims to be the
+    /// company's own (see [`NOTE_CLAIMED_VENDOR`]).
+    #[must_use]
+    pub fn counts_as_third_party(&self) -> bool {
+        self.party == Party::Third
+            || (self.party == Party::Unknown && self.claimed_vendor().is_some())
+    }
 }
 
 /// The object of a claim, with the name a reader recognizes.

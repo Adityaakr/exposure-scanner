@@ -224,9 +224,13 @@ fn an_app_signed_by_a_listed_team_is_first_party_to_that_company() {
     assert_eq!(other.vendor, own.vendor);
 }
 
-/// The app id comes second, and is not believed against a signature.
+/// Security review M2: an app id is a name any developer can give an app.
+/// The pack lists Microsoft's Team ID, so an app that calls itself
+/// `com.microsoft.*` and is unsigned, or signed by another team, only claims
+/// to be Microsoft's: nobody is named as its publisher, and Microsoft's SDK
+/// in it still makes it an app with a third-party channel.
 #[test]
-fn the_app_id_names_the_vendor_only_when_no_signature_says_otherwise() {
+fn an_app_id_is_not_believed_without_the_company_s_team_id() {
     let app = |team| Bundle {
         id: "com.microsoft.Example",
         team,
@@ -234,25 +238,21 @@ fn the_app_id_names_the_vendor_only_when_no_signature_says_otherwise() {
         frameworks: &["AppCenter.framework"],
     };
 
-    let unsigned = scan_one(&app(None));
-    let own = claim(&unsigned, "sdk/appcenter");
-    assert_eq!(own.party, Party::First);
-    assert_eq!(
-        own.vendor,
-        Some(Vendor {
-            company: Some("microsoft".into()),
-            by: Some(VendorBasis::AppId),
-            domain: Some("microsoft.com".into()),
-            evidence: vec![],
-        })
-    );
+    for team in [None, Some(UNLISTED_TEAM)] {
+        let report = scan_one(&app(team));
+        let claim = claim(&report, "sdk/appcenter");
+        assert_eq!(claim.vendor, None, "{team:?}");
+        assert_eq!(claim.party, Party::Unknown, "{team:?}");
+        assert_eq!(claim.claimed_vendor(), Some("microsoft"), "{team:?}");
+        assert_eq!(claim.notes.last().map(String::as_str), Some("claims-vendor:microsoft"));
+    }
 
-    // The pack lists Microsoft's Team ID, and this signature names another:
-    // the app does not become Microsoft's by calling itself so.
-    let lookalike = scan_one(&app(Some(UNLISTED_TEAM)));
-    let claim = claim(&lookalike, "sdk/appcenter");
-    assert_eq!(claim.vendor, None);
-    assert_eq!(claim.party, Party::Unknown);
+    // With Microsoft's Team ID the app is Microsoft's, by the signature.
+    let signed = scan_one(&app(Some(MICROSOFT_TEAM)));
+    let own = claim(&signed, "sdk/appcenter");
+    assert_eq!(own.party, Party::First);
+    assert_eq!(own.vendor.as_ref().unwrap().by, Some(VendorBasis::TeamId));
+    assert!(own.claimed_vendor().is_none());
 }
 
 /// Design report, section 3, A7: of the fixed list of categories only

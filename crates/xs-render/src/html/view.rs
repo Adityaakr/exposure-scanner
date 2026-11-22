@@ -127,6 +127,9 @@ pub(crate) struct Finding<'a> {
     pub(crate) operator: Option<&'a Entity>,
     /// The company that publishes the app, when the pack lists it.
     pub(crate) publisher: Option<&'a Entity>,
+    /// The company the app names itself after without being confirmed as
+    /// its publisher ([`Claim::claimed_vendor`]).
+    pub(crate) claimed: Option<&'a Entity>,
 }
 
 /// The findings about one app, under one heading.
@@ -251,10 +254,24 @@ impl<'a> View<'a> {
         let mut unnamed: BTreeMap<usize, Vec<Finding<'a>>> = BTreeMap::new();
         let mut access: BTreeMap<usize, Vec<Finding<'a>>> = BTreeMap::new();
         let mut things: BTreeMap<_, Found<'a>> = BTreeMap::new();
+        // The company a build names itself after is a fact of the build: a
+        // finding that names no company, such as a permission, is about the
+        // same app and has the same publisher.
+        let mut claimed: BTreeMap<Build<'a>, &'a str> = BTreeMap::new();
+        for claim in claims {
+            if let Some(company) = claim.claimed_vendor() {
+                claimed.entry(Build::of(&claim.subject)).or_insert(company);
+            }
+        }
         let mut ordered: Vec<&Claim> = claims.iter().collect();
         ordered.sort_by_key(|&claim| (claim.object.kind, &claim.object.id, claim.edge, claim.id));
         for claim in ordered {
-            let finding = finding(claim, pack)?;
+            let mut finding = finding(claim, pack)?;
+            if finding.claimed.is_none() && claim.vendor.is_none() {
+                finding.claimed = claimed
+                    .get(&Build::of(&claim.subject))
+                    .and_then(|&company| pack.entity(company));
+            }
             let Some(&app) = index.get(&Build::of(&claim.subject)) else { continue };
             let company = claim.company.as_deref();
             things
@@ -405,6 +422,7 @@ fn finding<'a>(claim: &'a Claim, pack: &'a Pack) -> Result<Finding<'a>, RenderEr
         .and_then(|vendor| vendor.company.as_deref())
         .map(entity)
         .transpose()?;
+    let claimed = claim.claimed_vendor().map(entity).transpose()?;
     let operator = match claim.object.kind {
         ObjectKind::Sdk => pack
             .rule(&claim.object.id)
@@ -414,5 +432,5 @@ fn finding<'a>(claim: &'a Claim, pack: &'a Pack) -> Result<Finding<'a>, RenderEr
         ObjectKind::Permission => None,
     }
     .filter(|operator| company.is_some_and(|company| company.id != operator.id));
-    Ok(Finding { claim, category, company, operator, publisher })
+    Ok(Finding { claim, category, company, operator, publisher, claimed })
 }

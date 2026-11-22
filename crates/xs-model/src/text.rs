@@ -96,6 +96,33 @@ pub fn clean(text: &str, max_bytes: usize) -> String {
     out
 }
 
+/// Whether `character` is an implicit directional mark: U+200E LEFT-TO-RIGHT
+/// MARK, U+200F RIGHT-TO-LEFT MARK or U+061C ARABIC LETTER MARK. A mark is an
+/// invisible letter of one direction. Unlike the embeddings, overrides and
+/// isolates it opens no run, so taking it out of a name leaves nothing to
+/// reorder.
+const fn is_implicit_mark(character: char) -> bool {
+    matches!(character, '\u{061c}' | '\u{200e}' | '\u{200f}')
+}
+
+/// [`clean`] for a display name, such as an app's or an extension's.
+///
+/// Publishers put directional marks in names to keep them in order next to
+/// text of the other direction: WhatsApp's `CFBundleDisplayName` starts with
+/// U+200E. A mark cannot reorder what a reader sees, so it is dropped rather
+/// than shown as U+FFFD, and the name reads as the publisher wrote it. The
+/// controls that can reorder text (U+202A to U+202E, U+2066 to U+2069) are
+/// still replaced, as is every control character. Identifiers are never
+/// cleaned this way: two ids that differ by a mark stay two ids.
+#[must_use]
+pub fn clean_name(text: &str, max_bytes: usize) -> String {
+    if !text.chars().any(is_implicit_mark) {
+        return clean(text, max_bytes);
+    }
+    let kept: String = text.chars().filter(|&character| !is_implicit_mark(character)).collect();
+    clean(&kept, max_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
@@ -123,6 +150,20 @@ mod tests {
             assert!(!is_storable(control), "U+{:04X}", control as u32);
             assert_eq!(clean(&alloc::format!("Safe{control}1.0"), 255), "Safe\u{fffd}1.0");
         }
+    }
+
+    /// Security review S1: WhatsApp's name starts with a left-to-right mark.
+    #[test]
+    fn a_name_loses_its_directional_marks_and_keeps_its_overrides_replaced() {
+        assert_eq!(clean_name("\u{200e}WhatsApp", 255), "WhatsApp");
+        assert_eq!(clean_name("Notes\u{200f}\u{061c}", 255), "Notes");
+        assert_eq!(clean_name("evil\u{202e}txt.exe", 255), "evil\u{fffd}txt.exe");
+        assert_eq!(clean_name("a\u{2066}b\u{2069}\u{1b}[2J", 255), "a\u{fffd}b\u{fffd}\u{fffd}[2J");
+        assert_eq!(clean_name("\u{200e}", 255), "");
+        // The budget is counted after the marks are gone.
+        assert_eq!(clean_name("\u{200e}abcdef", 6), "abcdef");
+        // An identifier keeps the mark visible.
+        assert_eq!(clean("\u{200e}WhatsApp", 255), "\u{fffd}WhatsApp");
     }
 
     #[test]
@@ -168,6 +209,14 @@ mod tests {
         fn output_is_clean_and_stable(text in any::<String>(), max in 0usize..64) {
             let once = clean(&text, max);
             prop_assert!(is_clean(&once, max));
+            prop_assert_eq!(clean(&once, max), once);
+        }
+
+        #[test]
+        fn a_cleaned_name_is_clean_and_stable(text in any::<String>(), max in 0usize..64) {
+            let once = clean_name(&text, max);
+            prop_assert!(is_clean(&once, max));
+            prop_assert_eq!(clean_name(&once, max), once.clone());
             prop_assert_eq!(clean(&once, max), once);
         }
     }

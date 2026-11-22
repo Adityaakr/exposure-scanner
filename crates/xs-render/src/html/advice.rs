@@ -24,13 +24,14 @@
 pub(crate) mod text;
 
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp::Reverse;
 
 use xs_model::Claim;
 use xs_model::access;
-use xs_model::claim::Party;
+use xs_model::claim::{Confidence, Party};
 use xs_model::fix::{AppFix, NoSetting, Setting};
 use xs_model::matcher::Boundary;
 use xs_model::pack::Pack;
@@ -636,6 +637,8 @@ fn extension_steps(page: &mut Markup, app: &App<'_>, findings: &[&Finding<'_>]) 
         } else {
             " and choose Remove under the extension."
         });
+        page.raw(" ");
+        page.raw(REMOVE_WARNING);
     });
     if let Some(browser) = app.browser.filter(|&browser| !names_its_extensions_page(browser)) {
         step(page, |page| {
@@ -647,6 +650,15 @@ fn extension_steps(page: &mut Markup, app: &App<'_>, findings: &[&Finding<'_>]) 
         });
     }
 }
+
+/// What follows every step that removes an extension (security review, M6).
+/// Removing one deletes the data it keeps in the browser: for a wallet that
+/// is the vault, and without the recovery phrase the funds in it are gone.
+/// A wallet's or a password manager's access to every site is how it works,
+/// so the report cannot tell one from an extension that does not need it.
+pub(crate) const REMOVE_WARNING: &str = "Removing an extension deletes what it keeps in this \
+    browser. For a wallet or a password manager, make sure you have its recovery phrase or an \
+    export first.";
 
 /// Whether the browser's own help names the page [`extensions_page`] gives
 /// for it. Arc and Dia are built on Chromium, whose page that is, but their
@@ -726,9 +738,17 @@ fn checklist<'v, 'a>(view: &'v View<'a>) -> Vec<(Priority, String, Entry<'v, 'a>
         if !outside || is_update_feed(category_id(found)) {
             continue;
         }
-        let priority = if found.category.headline {
+        // Text inside a library the app ships is the weakest evidence the
+        // scan has (security review, S2): an entry that rests on nothing
+        // else, in every app, ranks one step down.
+        let only_low = found
+            .apps
+            .values()
+            .filter(|app| app.claim.party != Party::First)
+            .all(|app| app.claim.confidence == Confidence::Low);
+        let priority = if found.category.headline && !only_low {
             Priority::High
-        } else if is_tracking_domain(category_id(found)) {
+        } else if found.category.headline || is_tracking_domain(category_id(found)) {
             Priority::Medium
         } else {
             Priority::Low
@@ -935,6 +955,60 @@ fn app_link(page: &mut Markup, app: &App<'_>, claim: &Claim) {
     page.element("a", &[("href", Value::Link("f-", claim.id.digest()))], app.title());
 }
 
+/// The apps of a channel entry that are not the company's own, each with
+/// the finding that puts it there.
+fn outside_apps<'v, 'a>(view: &'v View<'a>, found: &'v Found<'a>) -> Vec<(&'v App<'a>, &'a Claim)> {
+    found
+        .apps
+        .iter()
+        .filter(|(_, found_in)| found_in.claim.party != Party::First)
+        .filter_map(|(&index, found_in)| Some((view.apps.get(index)?, found_in.claim)))
+        .collect()
+}
+
+/// How many app names [`how_found`] lists before it says how many more.
+const NAMED_WEAK: usize = 3;
+
+/// How the code of a channel entry was found, where it rests on text alone
+/// (security review, S2): a name read from a table an app declares is high
+/// confidence, and text in its code or in a library it ships is not. The
+/// sentence is there for each entry whose finding, in some app, is of
+/// medium or low confidence, and names those apps when they are not all of
+/// them. `None` when every app's finding is high confidence.
+pub(crate) fn how_found(view: &View<'_>, found: &Found<'_>) -> Option<String> {
+    let apps = outside_apps(view, found);
+    let weak: Vec<&(&App<'_>, &Claim)> =
+        apps.iter().filter(|(_, claim)| claim.confidence < Confidence::High).collect();
+    if weak.is_empty() {
+        return None;
+    }
+    let low = weak.iter().filter(|(_, claim)| claim.confidence == Confidence::Low).count();
+    let place = if low == 0 {
+        "in the app's code"
+    } else if low == weak.len() {
+        "inside a library or a file the app ships"
+    } else {
+        "in the app's code or in a library it ships"
+    };
+    let one_kind = weak.iter().all(|(_, claim)| claim.witnesses <= 1);
+    let kinds = if one_kind { " (one kind of evidence)" } else { "" };
+    let sentence =
+        format!("found as text {place}{kinds}, not as a name read from a table the app declares.");
+    if weak.len() == apps.len() {
+        let mut first = String::from("F");
+        first.push_str(sentence.get(1..).unwrap_or_default());
+        return Some(first);
+    }
+    let names: Vec<&str> = weak.iter().map(|(app, _)| app.title()).collect();
+    let named = if names.len() <= NAMED_WEAK + 1 {
+        list_words(&names)
+    } else {
+        let shown = names.get(..NAMED_WEAK).unwrap_or(&names).join(", ");
+        format!("{shown} and {} more", names.len() - NAMED_WEAK)
+    };
+    Some(format!("In {named}: {sentence}"))
+}
+
 fn channel_entry(
     page: &mut Markup,
     pack: &Pack,
@@ -950,7 +1024,14 @@ fn channel_entry(
     }
     page.text(&plural(found.apps.len() as u64, "app", "apps"));
     page.close();
-    page.raw("\n<ul class=\"steps\">\n");
+    page.raw("\n");
+    if let Some(how) = how_found(view, found) {
+        page.open_class("p", "note");
+        page.text(&how);
+        page.close();
+        page.raw("\n");
+    }
+    page.raw("<ul class=\"steps\">\n");
     // What can be done comes first: each app's own setting, then the block
     // lists. Then what publishers say cannot be done, and the apps for
     // which nothing is on record.

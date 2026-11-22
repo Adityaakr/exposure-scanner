@@ -479,6 +479,14 @@ fn clean(value: Option<&str>, max_bytes: usize) -> Option<String> {
     value.map(|value| text::clean(value, max_bytes)).filter(|value| !value.is_empty())
 }
 
+/// A display name made safe to store ([`text::clean_name`]), or nothing if
+/// nothing is left of it.
+fn clean_name(value: Option<&str>) -> Option<String> {
+    value
+        .map(|value| text::clean_name(value, text::MAX_NAME_BYTES))
+        .filter(|value| !value.is_empty())
+}
+
 /// The place of the message catalogue of `locale` inside an extension.
 fn catalogue_path(locale: &str) -> String {
     format!("{LOCALES}/{locale}/{MESSAGES}")
@@ -911,11 +919,8 @@ fn records(reading: Reading) -> Vec<Record> {
         collector: Collector::BrowserExtension,
         subject: subject.clone(),
         facts: Facts {
-            name: clean(reading.name.as_deref(), text::MAX_NAME_BYTES),
-            publisher: clean(
-                manifest.and_then(|manifest| manifest.author.as_deref()),
-                text::MAX_NAME_BYTES,
-            ),
+            name: clean_name(reading.name.as_deref()),
+            publisher: clean_name(manifest.and_then(|manifest| manifest.author.as_deref())),
             homepage,
             browser: reading.browser,
             files_scanned: reading.files,

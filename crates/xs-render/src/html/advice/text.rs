@@ -104,6 +104,10 @@ fn channel(
     }
     about.push_str(&app_names(apps.iter().map(|(app, _)| app.title())));
     about.push('.');
+    if let Some(how) = super::how_found(view, found) {
+        about.push(' ');
+        about.push_str(&how);
+    }
     let title = String::from(found.name);
 
     // The first step that does something: an app's own setting, then a
@@ -166,9 +170,15 @@ fn extension(app: &App<'_>, findings: &[&Finding<'_>]) -> (String, String, Strin
     let sites =
         permissions.iter().any(|&p| matches!(p, Permission::AllSites | Permission::BroadSites));
     let step = if sites {
-        format!("Limit the sites it can read, or remove it: open {page} in {browser}.")
+        format!(
+            "Limit the sites it can read, or remove it: open {page} in {browser}. {}",
+            super::REMOVE_WARNING
+        )
     } else {
-        format!("Remove it if you do not use it: open {page} in {browser}.")
+        format!(
+            "Remove it if you do not use it: open {page} in {browser}. {}",
+            super::REMOVE_WARNING
+        )
     };
     (String::from(app.title()), about, step)
 }

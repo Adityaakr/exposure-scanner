@@ -697,7 +697,7 @@ fn bytecode_is_reported_as_not_searched() {
         .map(|gap| {
             assert_eq!(
                 (gap.status, gap.reason),
-                (CoverageStatus::Skipped, CoverageReason::UnsupportedFormat)
+                (CoverageStatus::Skipped, CoverageReason::CompiledScript)
             );
             (gap.location.as_ref().unwrap().as_str(), gap.count)
         })

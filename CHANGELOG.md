@@ -60,6 +60,46 @@ version can change commands, the report format or the evidence format.
   to the camera" and Electron's other default wording is `Low`, and an entry
   that rests on it in part says how many of its apps state only that.
 - The README no longer says the repository is private.
+- **The attention entries say when a finding rests on text alone**: "Found as
+  text in the app's code (one kind of evidence), not as a name read from a
+  table the app declares", on the page and in the terminal, naming the apps it
+  holds for when it does not hold for all of them. An advertising or analytics
+  entry that rests only on text inside a library the app ships, in every app,
+  ranks `Medium` instead of `High`.
+- **Clearer coverage notes**: a main executable `Info.plist` names that is not
+  there as a file is `missing`, no longer `unsupported_format`, and V8
+  bytecode files are `compiled_script`, counted in files, with what not
+  searching them means.
+- Rule pack version 8.
+
+### Fixed
+
+- **Google Mobile Ads (AdMob) was reported for apps that only use Firebase
+  Analytics.** The rule matched the whole `com.google.android.gms.ads.`
+  package, which also holds `play-services-ads-identifier`, the advertising-ID
+  library Firebase Analytics and many attribution SDKs depend on. It now names
+  classes of the ads SDK itself (`AdRequest`, `AdView`, `MobileAds`,
+  `admanager.`, `com.google.android.gms.internal.ads.`), besides its manifest
+  entries and property files.
+- **An app could hide its trackers by naming itself after a company.** An app
+  id is now believed only for a macOS app and a company that lists no Team
+  ID: an Android package called `com.google.*`, or a Mac app with Google's or
+  Microsoft's app id and without their Team ID, has no known publisher. Its
+  findings carry the note `claims-vendor:<company>`, the report says the app
+  only claims the company, and its channels still count in the headline and
+  in what needs attention.
+- **Removing a browser extension now comes with a warning**: every "remove
+  it" step adds that removing an extension deletes what it keeps in the
+  browser, so for a wallet or a password manager the recovery phrase or an
+  export comes first.
+- **A browser the scan could not read is said where you look**: "Not checked:
+  Google Chrome's extensions", with the Full Disk Access step and a note to
+  turn it off again, at the top of the page, in the summary `exposure scan`
+  prints and on standard error. Where the scan looked no longer names a
+  browser none of whose extensions could be read.
+- **App names keep their letters**: a left-to-right or right-to-left mark in a
+  name, as WhatsApp's starts with, is dropped instead of shown as U+FFFD. The
+  controls that can reorder text still are.
 
 ## 0.1.0 (2026-11-18)
 

@@ -8,13 +8,26 @@
 //! | The Team ID the signature names | The app id | The vendor |
 //! |---|---|---|
 //! | listed under a company | anything | that company, by `team_id` |
-//! | none, or not listed | listed under a company that lists no Team ID, or the app is unsigned | that company, by `app_id` |
-//! | not listed | listed under a company that does list Team IDs | none: the signature contradicts the app id |
+//! | none, or not listed | of a macOS app, listed under a company that lists no Team ID | that company, by `app_id` |
+//! | none, or not listed | of a macOS app, listed under a company that lists Team IDs | none: the app only claims the company |
+//! | — | of an Android package, listed under a company | none: the app only claims the company |
 //! | none, or not listed | not listed, and it spells a registrable domain | nobody the pack lists; the domain is kept |
 //! | none, or not listed | not listed, and it spells no domain | none |
 //!
 //! Two records of one build that name Team IDs of different owners also give
 //! no vendor.
+//!
+//! An app id is a name the app gives itself, and any developer can give an
+//! app any name (security review, M2). It is believed only where the pack
+//! has nothing to check it against: on macOS, for a company that lists no
+//! Team ID. A company that
+//! lists Team IDs signs its apps, so an app that has its app id and not one
+//! of its Team IDs is not believed to be its. Android packages carry a
+//! signing certificate this version does not read, so an Android app id is
+//! never believed: an app called `com.google.x` could be anyone's. Such an
+//! app [`claims`] the company, and every claim about it carries the note
+//! [`claim::NOTE_CLAIMED_VENDOR`](xs_model::claim::NOTE_CLAIMED_VENDOR)
+//! with the company's id, so that the report can say so.
 //!
 //! **Party.** Only companies that own an SDK can be first party to one, so
 //! the pack only has to list those companies (design report, section 3, A6):
@@ -38,7 +51,7 @@ use alloc::vec::Vec;
 
 use xs_model::claim::{Party, Vendor, VendorBasis};
 use xs_model::pack::{Entity, Pack};
-use xs_model::record::{ObjectKind, ObjectRef, RecordId, Subject};
+use xs_model::record::{ObjectKind, ObjectRef, Platform, RecordId, Subject};
 use xs_model::text;
 
 /// The Team IDs the artifact records of one build name, each with the ids of
@@ -111,11 +124,11 @@ pub(crate) fn vendor(
         }
     }
 
-    if let Some(company) = pack.entity_by_app_id(&subject.id).and_then(|entity| top(pack, entity)) {
-        // The app says it is this company's. If the company's Team IDs are
-        // known and the signature names another team, it is not believed,
-        // and nothing else is known about who made it.
-        if signers.is_some() && pack.lists_team_ids(&company) {
+    if let Some(company) = app_id_company(subject, pack) {
+        // The app says it is this company's. That is believed only where the
+        // platform gives nothing to check it against; otherwise nothing else
+        // is known about who made it.
+        if !believes_app_id(subject.platform, &company, pack) {
             return None;
         }
         return Some(Vendor {
@@ -132,6 +145,39 @@ pub(crate) fn vendor(
         domain: Some(domain),
         evidence: Vec::new(),
     })
+}
+
+/// The company the app id of `subject` is listed under, if any.
+fn app_id_company(subject: &Subject, pack: &Pack) -> Option<String> {
+    pack.entity_by_app_id(&subject.id).and_then(|entity| top(pack, entity))
+}
+
+/// Whether an app id listed under `company` is enough to name the vendor on
+/// `platform`, when no Team ID of a listed company does.
+fn believes_app_id(platform: Platform, company: &str, pack: &Pack) -> bool {
+    match platform {
+        // A company that lists Team IDs signs its apps with one of them.
+        Platform::Macos => !pack.lists_team_ids(company),
+        // The signing certificate of an Android package is not read, and an
+        // extension's id is no reversed domain: nothing ties the name to the
+        // company.
+        Platform::Android | Platform::Chromium | Platform::Firefox => false,
+    }
+}
+
+/// The company the build `subject` names itself after while [`vendor`]
+/// names nobody: its app id is listed under the company, and nothing the
+/// scan read confirms that the app is the company's. `None` when the app id
+/// names no listed company, or when a vendor is named, by the app id or by
+/// a signature.
+pub(crate) fn claims(
+    subject: &Subject,
+    signers: Option<&Signers<'_>>,
+    pack: &Pack,
+) -> Option<String> {
+    let company = app_id_company(subject, pack)?;
+    let named = vendor(subject, signers, pack).is_some_and(|vendor| vendor.company.is_some());
+    (!named).then_some(company)
 }
 
 /// Whether `company`, the company behind `object`, is the app's vendor. See

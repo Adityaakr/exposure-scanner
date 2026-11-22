@@ -53,7 +53,7 @@ A channel claim:
 | `confidence` | The highest confidence any single witness earns: `high` for a name read from a parsed table, `medium` for a literal in app code or a binary, `low` for a literal inside a dependency or resource |
 | `witnesses` | How many distinct kinds of evidence (matchers) agree |
 | `evidence` | The ids of the records the claim rests on, each present in the same file |
-| `notes` | Remarks carried over from the rule, such as `retired:2025-03-31` |
+| `notes` | Remarks carried over from the rule, such as `retired:2025-03-31`; `claims-vendor:<company>` when the app's id names a listed company the scan could not confirm as its publisher (see [Whose it is](#whose-it-is)) |
 
 ## Grades
 
@@ -90,8 +90,8 @@ same.
 |---|---|
 | Who is behind an SDK? | The rule names the entity that operates it; the claim names the company at the top of that entity's ownership chain. A library with no network side of its own, such as an updater, is a component and names no company. |
 | Who is behind a host? | The company whose listed domain the host is under. A host under no listed domain is **unmapped**: it is shown as itself, nobody is named as its owner, and it is counted nowhere. There is no generic table of host owners. |
-| Who publishes the app? | First the Apple Team ID its code signature names, then its app id, each looked up among the identifiers the rule pack lists per company. Reversing an app id proves nothing about ownership, so an app id is not believed against a signature: an app that calls itself `com.microsoft.x` and is signed by a team the pack does not list for Microsoft has no known vendor. |
-| First or third party? | `first` when a listed identifier says the app is the company's own, or when a host that belongs to no listed company is under the domain the app id spells (`ranchero.com` for `com.ranchero.NetNewsWire-Evergreen`). `third` when the app belongs to another listed company or to nobody the pack lists. `unknown` otherwise: no company is named, or nothing identifies the vendor. |
+| Who publishes the app? | First the Apple Team ID its code signature names, then its app id, each looked up among the identifiers the rule pack lists per company. Any developer can give an app any id, so an app id alone is believed only for a macOS app and a company that lists no Team ID. An app that calls itself `com.microsoft.x` and is unsigned, or signed by a team the pack does not list for Microsoft, has no known vendor. So has every Android package named after a listed company, since this version does not read Android signing certificates: `com.google.x` could be anyone's. Such a claim carries the note `claims-vendor:microsoft` or `claims-vendor:google`, and the report says the app only claims the company. |
+| First or third party? | `first` when a listed identifier says the app is the company's own, or when a host that belongs to no listed company is under the domain the app id spells (`ranchero.com` for `com.ranchero.NetNewsWire-Evergreen`). `third` when the app belongs to another listed company or to nobody the pack lists. `unknown` otherwise: no company is named, or nothing identifies the vendor, including an app that only claims a company by its id. |
 
 Only companies that own an SDK can be first party to one, so the pack lists
 identifiers for those companies and no others. A vendor known by its
@@ -105,7 +105,7 @@ The headline is three counts. There is no score.
 |---|---|
 | `companies_contacts` | Companies with a channel at `contacts` or above. Always 0 in the current build: nothing observes a connection yet. |
 | `companies_contains` | Companies whose strongest channel is `contains`. |
-| `apps_third_party` | Apps with at least one third-party channel in a counted category. |
+| `apps_third_party` | Apps with at least one third-party channel in a counted category. A channel of an app that only claims to be the company's own (`claims-vendor`) counts here too, so naming an app after a company does not hide what it ships. |
 
 Only claims in five categories are counted, and only when they name a
 company: **advertising, analytics, attribution, profiling and session
@@ -235,12 +235,21 @@ The checklist lists what exposes the most first:
 | Priority | What it covers |
 |---|---|
 | **High** | Code of a company in a counted category (advertising, analytics, attribution, profiling, session replay) in an app it does not publish; and a browser extension that may read the pages you visit or what you do in the browser, unless that access is only optional. |
-| **Medium** | What an app may reach of you and your surroundings: the camera, the microphone, the screen, location, personal data and communications. A domain an app itself declares it tracks through. Any other browser extension. |
+| **Medium** | What an app may reach of you and your surroundings: the camera, the microphone, the screen, location, personal data and communications. A domain an app itself declares it tracks through. Any other browser extension. Code of a company in a counted category that, in every app, was found only as text inside a library or file the app ships (low confidence). |
 | **Low** | The rest you can act on: other services of a company in an app, such as crash reporting, and access to files, nearby devices or other apps. |
 
 Within a priority, services come first, then extensions, System Settings
 panes and Android apps. An update feed and a service of the app's own
 publisher get no entry.
+
+An entry for a service says how it was found where that is weaker than a
+name read from a table the app declares: "Found as text in the app's code
+(one kind of evidence)", naming the apps it holds for when it does not hold
+for all of them. The terminal says the same.
+
+Every step that removes a browser extension adds that removing it deletes
+what it keeps in the browser: for a wallet or a password manager, have its
+recovery phrase or an export first.
 
 A permission an app asks for only in Electron's own wording ("This app needs
 access to the camera", and the like for the microphone, Bluetooth and audio
