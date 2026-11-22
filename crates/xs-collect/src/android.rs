@@ -82,6 +82,23 @@
 //! entries held at one time cannot add up either. Nothing is extracted to
 //! disk and nothing is executed.
 //!
+//! Those budgets bound one package; what bounds the scan is where entries
+//! are read into. Each worker thread reads every entry into buffers it
+//! keeps, and an entry too large for those into one of a few buffers the
+//! whole scan shares, so memory is bounded by the number of threads, not
+//! by the number of packages (see the `buffers` module).
+//!
+//! # Read the way Android reads
+//!
+//! What Android reads, the collector reads. The "encrypted" flag of an
+//! entry is ignored, as Android ignores it, and the manifest and the
+//! resource table are read the way Android's resource loader reads them,
+//! which takes any method but DEFLATE for stored; a DEX file is read the
+//! way the code loader reads it, which refuses a method it does not know
+//! ([`zip::Reader`]). Malware marks its manifest encrypted or stores it
+//! under an unknown method so that tools stricter than Android see neither
+//! the app nor what it asks for.
+//!
 //! # What is not read
 //!
 //! Only the DEX files Android itself loads from a package are read: the
