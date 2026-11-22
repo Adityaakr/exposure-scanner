@@ -77,7 +77,8 @@ options:
                 Exit with status 3 when a finding meets CONDITION, after the
                 reports are written. For `diff`, only the findings that
                 newly meet it are checked: those NEW adds, and those that
-                meet it in NEW but did not in OLD. CONDITION is one of:
+                meet it in NEW but did not in OLD, and each one is named.
+                CONDITION is one of:
                   headline      a finding that counts in the headline
                   category:ID   a finding in the category ID, such as
                                 category:analytics or category:camera

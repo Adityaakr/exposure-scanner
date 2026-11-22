@@ -43,17 +43,17 @@ pub(crate) enum Gate {
 }
 
 /// Checks `claims` against `conditions`, says on standard error what each
-/// condition met, and returns the gate. `kind` says which findings were
-/// checked, for the summary.
+/// condition met, and returns the gate. `describe`, of a diff, names each
+/// finding that met a condition, for the summary.
 fn close_on<'a>(
     conditions: &[gate::Condition],
     claims: impl Iterator<Item = (&'a xs_model::Claim, Option<&'a xs_model::Claim>)> + Clone,
-    kind: &str,
+    describe: Option<gate::Describe<'_>>,
 ) -> Gate {
     if conditions.is_empty() {
         return Gate::Open;
     }
-    let (summary, met) = gate::summary(&gate::check(conditions, claims), kind);
+    let (summary, met) = gate::summary(&gate::check(conditions, claims), describe);
     let _ = std::io::stderr().write_all(summary.as_bytes());
     if met { Gate::Closed } else { Gate::Open }
 }
@@ -272,7 +272,7 @@ pub(crate) fn scan(args: &args::Scan) -> Result<Gate> {
         let opened = args.open && std::io::stdout().is_terminal() && open_in_browser(&page);
         print(&summary(&report, &scanned, &page, opened))?;
     }
-    Ok(close_on(&conditions, report.findings.iter().map(|claim| (claim, None)), ""))
+    Ok(close_on(&conditions, report.findings.iter().map(|claim| (claim, None)), None))
 }
 
 /// What Android apps ship beside the headline, in a few words, or nothing
@@ -477,7 +477,7 @@ pub(crate) fn report(args: &args::Report) -> Result<Gate> {
         Outputs { html: args.html.as_deref(), json: args.json.as_deref(), checklist: false };
     let report = render(&saved.evidence, &pack, saved.scanner, saved.scope, outputs)?;
     deliver_all(&report, outputs)?;
-    Ok(close_on(&conditions, report.findings.iter().map(|claim| (claim, None)), ""))
+    Ok(close_on(&conditions, report.findings.iter().map(|claim| (claim, None)), None))
 }
 
 /// `exposure diff`: what the findings of NEW add to and take from those of
@@ -507,7 +507,9 @@ pub(crate) fn diff(args: &args::Diff) -> Result<Gate> {
              may come from the rules rather than from the apps"
         );
     }
-    Ok(close_on(&conditions, diff.pairs(), "new "))
+    let describe =
+        |claim: &xs_model::Claim, was: Option<&xs_model::Claim>| diff.describe(&pack, claim, was);
+    Ok(close_on(&conditions, diff.pairs(), Some(&describe)))
 }
 
 /// `exposure rules show`

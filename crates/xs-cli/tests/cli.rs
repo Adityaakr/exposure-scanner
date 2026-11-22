@@ -631,6 +631,7 @@ fn diff_fail_on_closes_on_a_finding_that_newly_meets_the_condition() {
         String::from_utf8_lossy(&output.stdout)
     );
     assert!(stderr(&output).contains("fail-on headline: met by 1 new finding in 1 app"));
+    assert!(stderr(&output).contains(": grade declares → contains\n"), "{}", stderr(&output));
 
     let output = exposure(&["diff", text(&contains), text(&declares), "--fail-on", "headline"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
@@ -639,6 +640,51 @@ fn diff_fail_on_closes_on_a_finding_that_newly_meets_the_condition() {
     // Counted in both, as the third-party finding of the fixture is.
     let output = exposure(&["diff", text(&android), text(&contains), "--fail-on", "headline"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+}
+
+/// A finding whose grade stays the same can newly meet a condition, and
+/// the diff lists only what was added, removed or changed grade: the gate
+/// summary names each finding it closed on, and why it is new. A
+/// `declares` finding counts in the headline only when it is third-party.
+#[test]
+fn diff_fail_on_names_a_finding_that_became_third_party() {
+    let dir = tempfile::tempdir().unwrap();
+    let android = dir.path().join("android.json");
+    exposure(&["scan", ANDROID_FIXTURE, "--json", text(&android)]);
+    let report: Report = serde_json::from_slice(&fs::read(&android).unwrap()).unwrap();
+    let as_party = |party: Party| {
+        let mut edited = report.clone();
+        let posthog =
+            edited.claims.iter_mut().find(|claim| claim.object.id == "sdk/posthog").unwrap();
+        posthog.party = party;
+        posthog.grade = Grade::Declares;
+        posthog.rungs = vec![Grade::Declares];
+        let path = dir.path().join(format!("{party:?}.json"));
+        fs::write(&path, serde_json::to_vec(&edited).unwrap()).unwrap();
+        (path, report.claims.first().unwrap().subject.id.clone())
+    };
+    let ((first, id), (third, _)) = (as_party(Party::First), as_party(Party::Third));
+
+    let output = exposure(&["diff", text(&first), text(&third), "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "No finding was added, removed or changed grade, in 1 app.\n"
+    );
+    let err = stderr(&output);
+    assert!(err.contains("exposure: fail-on headline: met by 1 new finding in 1 app\n"), "{err}");
+    let named = err
+        .lines()
+        .find(|line| {
+            line.starts_with("exposure: fail-on headline:   PostHog (Analytics, PostHog Inc.) in ")
+        })
+        .unwrap_or_else(|| panic!("{err}"));
+    assert!(named.ends_with(&format!("(Android, {id}): now third-party")), "{named}");
+
+    let output = exposure(&["diff", text(&third), text(&first), "--fail-on", "headline"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(stderr(&output).contains("fail-on headline: not met\n"), "{}", stderr(&output));
+    assert!(!stderr(&output).contains("PostHog"), "{}", stderr(&output));
 }
 
 /// Beside the headline, the summary counts what the Android apps ship in

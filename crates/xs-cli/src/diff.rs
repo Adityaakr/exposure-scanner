@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
-use xs_model::claim::{ClaimKey, ClaimObject};
+use xs_model::claim::{ClaimKey, ClaimObject, Party};
 use xs_model::pack::PackRef;
 use xs_model::record::{EdgeType, Grade, Platform, Record};
 use xs_model::report::Scanner;
@@ -177,6 +177,9 @@ pub(crate) struct Diff<'a> {
     /// one, if it has it, for `--fail-on`.
     #[serde(skip)]
     pairs: Vec<(&'a Claim, Option<&'a Claim>)>,
+    /// The name of each app that declares one, for `--fail-on`.
+    #[serde(skip)]
+    names: BTreeMap<AppKey<'a>, &'a str>,
 }
 
 /// Compares `old` with `new`.
@@ -187,6 +190,7 @@ pub(crate) fn compare<'a>(old: &'a Report, new: &'a Report) -> Diff<'a> {
     let mut totals = Totals { apps: keys.len(), ..Totals::default() };
     let mut apps = Vec::new();
     let mut pairs = Vec::new();
+    let mut names = BTreeMap::new();
     for key in keys {
         let (old_side, new_side) = (before.remove(&key), after.remove(&key));
         let presence = match (&old_side, &new_side) {
@@ -196,6 +200,9 @@ pub(crate) fn compare<'a>(old: &'a Report, new: &'a Report) -> Diff<'a> {
         };
         let old_side = old_side.unwrap_or_default();
         let new_side = new_side.unwrap_or_default();
+        if let Some(name) = new_side.name.or(old_side.name) {
+            names.insert(key, name);
+        }
         let mut app = AppDiff {
             platform: key.0,
             id: key.1,
@@ -248,6 +255,7 @@ pub(crate) fn compare<'a>(old: &'a Report, new: &'a Report) -> Diff<'a> {
         totals,
         apps,
         pairs,
+        names,
     }
 }
 
@@ -256,6 +264,58 @@ impl<'a> Diff<'a> {
     /// one, if it has it, for `--fail-on`.
     pub(crate) fn pairs(&self) -> impl Iterator<Item = (&'a Claim, Option<&'a Claim>)> + Clone {
         self.pairs.iter().copied()
+    }
+
+    /// A finding of the new report that newly meets a `--fail-on`
+    /// condition, with what makes it new: it was added, or what changed
+    /// from `was`, the same finding in the old report.
+    pub(crate) fn describe(&self, pack: &Pack, claim: &Claim, was: Option<&Claim>) -> String {
+        let subject = &claim.subject;
+        let name = self.names.get(&(subject.platform, subject.id.as_str())).copied();
+        let app = title(subject.platform, &subject.id, name);
+        let about = about(pack, &claim.category, claim.company.as_deref());
+        let why = match was {
+            None => String::from("added"),
+            Some(was) => {
+                let mut why = Vec::new();
+                if was.grade != claim.grade {
+                    why.push(format!("grade {} → {}", grade_id(was.grade), grade_id(claim.grade)));
+                }
+                if was.category != claim.category {
+                    let old = category_name(pack, &was.category);
+                    why.push(format!("new category, was {old}"));
+                }
+                if was.company != claim.company {
+                    why.push(String::from("names another company"));
+                }
+                if was.party != Party::Third && claim.party == Party::Third {
+                    why.push(String::from("now third-party"));
+                }
+                if !was.headline && claim.headline {
+                    why.push(String::from("now counted in the headline"));
+                }
+                why.join(", ")
+            }
+        };
+        format!("{} ({about}) in {app}: {why}", claim.object.name)
+    }
+}
+
+/// An app as a line of the comparison names it.
+fn title(platform: Platform, id: &str, name: Option<&str>) -> String {
+    let platform = platform_name(platform);
+    match name {
+        Some(name) => format!("{name} ({platform}, {id})"),
+        None => format!("{id} ({platform})"),
+    }
+}
+
+/// A finding's category and the company it names, if it names one.
+fn about(pack: &Pack, category: &str, company: Option<&str>) -> String {
+    let category = category_name(pack, category);
+    match company.map(|id| pack.entity(id).map_or(id, |entity| entity.name.as_str())) {
+        Some(company) => format!("{category}, {company}"),
+        None => format!("{category}, no company"),
     }
 }
 
@@ -290,11 +350,7 @@ fn versions(list: &[&str]) -> String {
 pub(crate) fn text(diff: &Diff<'_>, pack: &Pack) -> String {
     let mut out = String::new();
     for app in &diff.apps {
-        let platform = platform_name(app.platform);
-        let title = match app.name {
-            Some(name) => format!("{name} ({platform}, {})", app.id),
-            None => format!("{} ({platform})", app.id),
-        };
+        let title = title(app.platform, app.id, app.name);
         let heading = match app.presence {
             Presence::Both if app.old_versions == app.new_versions => {
                 format!("{title}, {}", versions(&app.new_versions))
