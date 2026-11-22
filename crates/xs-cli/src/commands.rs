@@ -95,20 +95,19 @@ pub(crate) fn print(text: &str) -> Result<()> {
 ///   scan that stops half way leaves the old report, not half of a new one.
 /// - A `path` that is not a regular file, such as `/dev/null`, is written
 ///   to and otherwise left as it is: it is opened without being truncated or
-///   created, and only if it is the very thing that was looked at and still
-///   not a regular file. Through a link, whose device the system may report
-///   under another number once opened (macOS does for `/dev/fd/N`), it must
-///   be of the kind that was looked at and not a regular file, so a link
-///   re-pointed at a file meanwhile is refused.
+///   created, and only if what was opened is of the kind that was looked at
+///   and not a regular file, so a name re-pointed at a file meanwhile is
+///   refused. The kind, not the device and inode, is compared: the system
+///   may report what was opened under other numbers than the name it was
+///   opened by. macOS does for `/dev/fd/N`, which there is a node of its
+///   own and not a link, while what is opened through it is the pipe.
 fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
     let Some(path) = path.filter(|path| *path != Path::new(STDOUT)) else { return print(report) };
     let fail = |error| format!("cannot write {}: {error}", path.display());
     match fs::symlink_metadata(path) {
         Ok(found) if found.file_type().is_symlink() => match fs::metadata(path) {
             Ok(target) if !target.is_file() && !target.is_dir() => {
-                let kind = target.file_type();
-                write_into(path, report, |opened| opened.file_type() == kind && !opened.is_file())
-                    .map_err(fail)
+                write_into(path, report, |opened| same_kind(&target, opened)).map_err(fail)
             }
             _ => Err(format!(
                 "cannot write {}: it is a symbolic link that does not lead to a device or \
@@ -118,7 +117,7 @@ fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
             )),
         },
         Ok(found) if !found.is_file() && !found.is_dir() => {
-            write_into(path, report, |opened| same_file(&found, opened)).map_err(fail)
+            write_into(path, report, |opened| same_kind(&found, opened)).map_err(fail)
         }
         _ => replace(path, report.as_bytes()).map_err(fail),
     }
@@ -138,17 +137,10 @@ fn write_into(
     file.write_all(report.as_bytes())
 }
 
-/// Whether two looks at a path saw the same file.
-fn same_file(one: &fs::Metadata, other: &fs::Metadata) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        one.dev() == other.dev() && one.ino() == other.ino() && !other.is_file()
-    }
-    #[cfg(not(unix))]
-    {
-        one.file_type() == other.file_type() && !other.is_file()
-    }
+/// Whether what was opened is of the kind that was looked at, and is not a
+/// regular file.
+fn same_kind(looked_at: &fs::Metadata, opened: &fs::Metadata) -> bool {
+    looked_at.file_type() == opened.file_type() && !opened.is_file()
 }
 
 /// Writes `bytes` to a new file in the folder of `path`, readable by its

@@ -313,6 +313,19 @@ fn the_json_option_writes_through_a_link_to_standard_output() {
     assert!(String::from_utf8(output.stdout).unwrap() == scan(&[Path::new(FIXTURE)], 1));
 }
 
+/// A shell's process substitution, `--json >(jq .)`, passes `/dev/fd/N`.
+/// On macOS that is not a link but a node of its own, which the system
+/// reports under another device and inode once opened: it is the pipe
+/// that is opened. `/dev/fd/1` is that node for standard output, a pipe
+/// here, so the report has to arrive on standard output, as it did before
+/// reports were written without following links.
+#[test]
+fn the_json_option_writes_to_the_dev_fd_node_of_a_pipe() {
+    let output = exposure(&["scan", FIXTURE, "--json", "/dev/fd/1"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8(output.stdout).unwrap() == scan(&[Path::new(FIXTURE)], 1));
+}
+
 /// A link to a device is written to as the device is; the link and the
 /// device stay as they were.
 #[test]
