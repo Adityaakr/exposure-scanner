@@ -1,13 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <style>
-    .frame { fill: #ffffff; stroke: #1b1f24; }
-    .line { stroke: #1b1f24; }
-    @media (prefers-color-scheme: dark) {
-      .frame { fill: #14171b; stroke: #e6e9ed; }
-      .line { stroke: #e6e9ed; }
-    }
-  </style>
-  <rect class="frame" x="3" y="3" width="26" height="26" rx="7" stroke-width="2.5"/>
-  <path class="line" d="M9 11h8M9 15.5h4" stroke-width="2.5" stroke-linecap="round"/>
-  <rect x="16" y="16" width="8" height="8" rx="2" fill="#f0b429"/>
+  <rect x="2" y="2" width="28" height="28" rx="3" fill="#020403" stroke="#3dff8c" stroke-width="2"/>
+  <path d="M8 11h9M8 15.5h5" stroke="#3dff8c" stroke-width="2.5" stroke-linecap="square"/>
+  <rect x="17" y="17" width="8" height="8" fill="#3dff8c"/>
 </svg>

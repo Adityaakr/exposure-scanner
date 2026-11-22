@@ -1,22 +1,35 @@
 # The exposure website
 
-A static site: three pages of hand-written HTML, one stylesheet, two small
+A static site: three pages of hand-written HTML, one stylesheet, three small
 scripts and self-hosted fonts. There is no build framework, no tracker, no
 analytics, and nothing is loaded from another server. A content security
 policy on every page holds it to that.
 
+The look is a terminal's: black and green, the content in one centred
+column, headings in a pixel typeface, and a wireframe terrain drawn behind
+the column. Headings and terminal output type themselves out as they come
+into view. A visitor who asks for reduced motion gets none of that motion:
+every word is there from the start, and the terrain is one still frame.
+
 | Path | What it is |
 |---|---|
-| `index.html` | The landing page |
+| `index.html` | The landing page. Its "How to use it" steps show the commands for the system picked above them: macOS, Linux, Windows (not supported, and it says so) or Android packages |
 | `sample/index.html` | The sample report page, which frames the report below |
 | `sample/report.html`, `sample/report.json` | The report `exposure` writes for the synthetic fixtures in `tests/fixtures`. Generated, never edited by hand |
 | `docs/index.html` | Install and docs |
-| `assets/site.css` | The one stylesheet. Its colours follow the HTML report (`crates/xs-render/src/html/report.css`) |
-| `assets/theme.js`, `assets/site.js` | The only scripts: the light and dark switch, copy buttons on commands, and figures that settle in as they scroll into view. They make no request, and the page is complete without them |
-| `assets/fonts/` | Geist and Geist Mono, under the SIL Open Font License (`OFL.txt`) |
+| `assets/site.css` | The one stylesheet. Black and green only: a grade is told apart by fill and outline, `contains` filled and `declares` outlined |
+| `assets/boot.js` | Runs before the page paints, to mark that script runs and whether motion is welcome |
+| `assets/site.js` | Copy buttons on commands, a guess at the visitor's system for the steps, the typing, and figures that settle in as they scroll into view |
+| `assets/terrain.js` | Draws the wireframe terrain on a canvas behind the column |
+| `assets/fonts/` | Geist and Geist Mono (`Geist-OFL.txt`) and Departure Mono (`DepartureMono-OFL.txt`), all under the SIL Open Font License |
 | `assets/og.png` | The image shown when a link to the site is shared |
 | `build.sh` | Builds the site into a folder, writing the sample report afresh |
 | `check.py` | Checks a built site before it is published |
+
+The scripts make no request and store nothing, and every page is complete
+without them. The system picker is plain CSS: without script it opens on
+macOS, and a browser without `:has()` shows the commands for every system,
+each labelled.
 
 ## Preview
 
@@ -90,7 +103,10 @@ Three things to know:
 Every sentence must be true of exposure 0.1.0, the current release, unless
 it is marked **Next release** (merged on `main` and listed as unreleased in
 the changelog) or **Planned** (not built). A command that does not work in
-the current release is faded and has no copy button. Findings are about the
+the current release is faded and has no copy button. Terminal output on the
+pages is real: what 0.1.0 prints for the fixtures, or, for a command marked
+**Next release**, what `main` prints, and said so; where a scan of your own
+Mac is shown, only its shape is, with placeholders. Findings are about the
 synthetic fixtures or are company-level counts; the site names no
 third-party app as a finding. Wording states graded facts, as the report
 does: "ships", "may access", never "spies".
