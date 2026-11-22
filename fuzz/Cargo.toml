@@ -72,3 +72,31 @@ path = "fuzz_targets/android_proto.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "macho"
+path = "fuzz_targets/macho.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codesign"
+path = "fuzz_targets/codesign.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "plist"
+path = "fuzz_targets/plist.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "asar"
+path = "fuzz_targets/asar.rs"
+test = false
+doc = false
+bench = false
