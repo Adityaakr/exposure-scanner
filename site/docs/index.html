@@ -79,12 +79,6 @@
         <h2 id="install-title">Install</h2>
         <p>exposure is one command-line binary. It is built from source on your machine, so you can read the code it runs.</p>
 
-        <h3>Homebrew <span class="planned">Planned</span></h3>
-        <p>The repository will carry its own Homebrew tap, with a formula that builds from source:</p>
-        <div class="code" data-copy><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
-<span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
-        <div class="callout amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><p>The formula lands with the CLI v1 release. Until it is in the repository, these commands do not work yet; install from source below.</p></div>
-
         <h3>From source <span class="planned today">Works today</span></h3>
         <p>On a Mac with Apple silicon, or on Linux:</p>
         <ol class="steps-list">
@@ -104,6 +98,12 @@
             <p class="small soft"><code>--locked</code> builds with the exact dependency versions the project tests. The build takes a minute or two and puts <code>exposure</code> in <code>~/.cargo/bin</code>. Leave out <code>--tag v0.1.0</code> to install the latest commit instead of the release.</p>
           </li>
         </ol>
+
+        <h3>Homebrew <span class="planned">Planned</span></h3>
+        <p>The repository will carry its own Homebrew tap, with a formula that builds from source:</p>
+        <div class="code is-planned" role="group" aria-label="Planned commands, not available yet"><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+<span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
+        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg>Not available yet. It works once the CLI v1 release adds the Homebrew formula to the repository; until then, install from source above.</p>
 
         <h3>From a clone</h3>
         <p>The clone's <code>rust-toolchain.toml</code> pins the exact toolchain.</p>

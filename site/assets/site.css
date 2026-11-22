@@ -415,6 +415,37 @@ strong { font-weight: 600; }
 }
 .code .p { color: var(--term-soft); user-select: none; }
 .code .c, .code .o { color: var(--term-soft); }
+/* A command that does not work yet: no copy button, no fill, muted text,
+   a dashed outline, and a line under it that says when it will work. */
+.code.is-planned {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
+  opacity: 0.72;
+}
+.code.is-planned pre {
+  padding-right: 1.1rem;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.code.is-planned .p { color: var(--faint); }
+code.is-planned {
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  opacity: 0.8;
+}
+.code-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.code-note svg { width: 0.95rem; height: 0.95rem; flex: none; margin-top: 0.12rem; }
+.code + .code-note, .prose .code + .code-note { margin-top: 0.6rem; }
 .copy {
   position: absolute;
   top: 0.55rem;

@@ -337,9 +337,10 @@
       </div>
       <div>
         <p class="label">Homebrew <span class="planned">Planned</span></p>
-        <p>From the repository's own tap, building from source. It lands with the CLI v1 release, which adds the formula.</p>
-        <div class="code" data-copy><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+        <p>From the repository's own tap, building from source.</p>
+        <div class="code is-planned" role="group" aria-label="Planned commands, not available yet"><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
 <span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
+        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg>Not available yet. It works once the CLI v1 release adds the Homebrew formula to the repository; until then, install from source above.</p>
       </div>
       <div>
         <p class="label">Then scan</p>
@@ -362,7 +363,7 @@
     <h2 class="display" id="next-title">From a scan to <span class="em">a release gate</span>.</h2>
     <p>None of this is built yet. It is listed so you know where the project is going.</p>
     <ul class="uses">
-      <li><h3>Compare two builds <span class="planned">Planned</span></h3><p><code>exposure diff</code>: the SDKs a release added or dropped, per app.</p></li>
+      <li><h3>Compare two builds <span class="planned">Planned</span></h3><p><code class="is-planned">exposure diff</code>: the SDKs a release added or dropped, per app.</p></li>
       <li><h3>A release gate <span class="planned">Planned</span></h3><p>A non-zero exit when a build ships an SDK your policy does not allow.</p></li>
       <li><h3>A GitHub Action <span class="planned">Planned</span></h3><p>Scans each build, comments the SDK difference against your last release, and fails on a policy breach.</p></li>
       <li><h3>A browser APK check <span class="planned">Planned</span></h3><p>Drop an <code>.apk</code> on a page. It is scanned in your browser, and nothing is uploaded.</p></li>

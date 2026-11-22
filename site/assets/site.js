@@ -33,7 +33,8 @@
   var copyIcon =
     '<svg class="idle" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>' +
     '<svg class="done" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>';
-  var blocks = document.querySelectorAll(".code[data-copy] pre");
+  // A command that does not work yet gets no button, whatever its markup says.
+  var blocks = document.querySelectorAll(".code[data-copy]:not(.is-planned) pre");
   Array.prototype.forEach.call(blocks, function (pre) {
     if (!navigator.clipboard) return;
     var button = document.createElement("button");
