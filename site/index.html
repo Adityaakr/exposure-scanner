@@ -243,7 +243,7 @@
 
     <li class="step" data-os="mac linux android">
       <h3>Read the report</h3>
-      <p>One HTML page that runs no script and loads nothing, grouped by company: three counts and no score, a checklist of what you can do, each finding with its grade and confidence, and every evidence record behind it, by its SHA-256 id. It lists the apps you use, so keep it private.</p>
+      <p>One HTML page that runs no script and loads nothing, grouped by company: three counts and no score, a checklist of what you can do, each finding with its grade and confidence, and every evidence record behind it, by its SHA-256 id. It lists the apps you use, so keep it private. <a href="#report">What it gives you</a> is just below.</p>
       <div class="try">
         <a class="btn btn-primary btn-sm" href="sample/">Open a sample report</a>
         <a class="link-more" href="docs/#reading">How to read a finding</a>
@@ -254,9 +254,72 @@
   </ol>
 </section>
 
+<!-- What the report gives you -->
+<section class="sec story" id="report" aria-labelledby="report-title">
+  <div class="sec-head"><span class="idx">03</span>What the report gives you</div>
+  <h2 id="report-title" data-type>It starts with <span class="em">what needs your attention</span>.</h2>
+  <p>A report can hold dozens of findings. It opens with the few that matter most, each in one sentence with its first step, and keeps the rest a click away: the counts, everything found, each finding and its evidence. This is the top of the sample report, word for word.</p>
+  <figure class="scene">
+    <div class="attn" role="group" aria-label="The opening of the sample report">
+      <p class="attn-head"><span>What needs your attention</span><a href="sample/report.html#summary">sample report</a></p>
+      <div class="attn-body">
+        <p class="attn-lead">14 findings in 5 of 6 apps scanned.</p>
+        <p class="attn-status">Start with these 3. What you can do has every step, for all 4 entries: 3 high and 1 low priority.</p>
+        <ol class="attn-list">
+          <li>
+            <p class="attn-what"><span class="prio">High</span> <strong>PostHog</strong></p>
+            <p>Analytics by PostHog Inc., in ElectronSkeleton and Skeleton.</p>
+            <p class="attn-do"><span class="do-label">First step:</span> Block app.posthog.com, eu.i.posthog.com, i.posthog.com and us.i.posthog.com with an outbound firewall such as LuLu (free) or Little Snitch. <a href="sample/report.html#t-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">Every step</a></p>
+          </li>
+          <li>
+            <p class="attn-what"><span class="prio">High</span> <strong>Example Helper</strong></p>
+            <p>Browser extension. It may read and change data on every website you visit, read what you copy, read and change the cookies of the sites it can reach and see the address and title of every tab you have open.</p>
+            <p class="attn-do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open chrome://extensions in your browser. <a href="sample/report.html#t-10a2ec3ab64002c2f89bc6dc05b196db601310b7e7622053a42a0534c641bf2c">Every step</a></p>
+          </li>
+          <li>
+            <p class="attn-what"><span class="prio">High</span> <strong>Example Proxy</strong></p>
+            <p>Browser extension. It may read and change data on every website you visit, read and change your browsing history, exchange messages with a program installed on this computer, route the browser's traffic through a proxy it chooses and watch the network requests of the sites it can reach.</p>
+            <p class="attn-do"><span class="do-label">First step:</span> Limit the sites it can read, or remove it: open about:addons in your browser. <a href="sample/report.html#t-5576e6af8335a86234c7a35f2ab5413b35d069c5d5a676abafa80aa4354e4660">Every step</a></p>
+          </li>
+        </ol>
+      </div>
+    </div>
+    <figcaption class="cap">the sample report: a scan of the repository's test apps and extensions, which name no real app</figcaption>
+  </figure>
+
+  <h3>Every step, app by app</h3>
+  <p>Further down, What you can do has the steps of each entry for each app it is in, in the order a person can take them: the app's own setting where its publisher documents one, then the hosts to block, and only then a note that no setting is on record. A step names what to use on that platform: an outbound firewall on a Mac, a firewall app that works without root on Android, the browser's own extensions page for an extension.</p>
+  <div class="fixes">
+    <article class="fix" aria-label="The steps for PostHog, from the sample report">
+      <p class="attn-what"><span class="prio">High</span> <strong>PostHog</strong> <span class="tag">Analytics</span></p>
+      <p class="fix-sub">PostHog Inc. · 2 apps</p>
+      <ol class="fix-steps">
+        <li>Block these hosts for <strong>ElectronSkeleton</strong> with an outbound firewall such as LuLu (free) or Little Snitch: app.posthog.com, eu.i.posthog.com, i.posthog.com, us.i.posthog.com. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
+        <li>Block these hosts for <strong>Skeleton</strong> with a firewall app that works without root, such as NetGuard: app.posthog.com, eu.i.posthog.com, i.posthog.com, us.i.posthog.com. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
+        <li>No setting that turns it off is on record for ElectronSkeleton, Skeleton.</li>
+        <li>Or remove the apps you can do without.</li>
+      </ol>
+    </article>
+    <article class="fix" aria-label="The steps for Example Helper, from the sample report">
+      <p class="attn-what"><span class="prio">High</span> <strong>Example Helper</strong> <span class="tag">Browser extension</span></p>
+      <ol class="fix-steps">
+        <li>Limit the sites it can read: open chrome://extensions in the browser, choose Details under the extension, and under Site access choose On click or On specific sites. It then reads a site only when you allow it.</li>
+        <li>The browser has no switch for its other permissions: they stay as long as the extension is installed.</li>
+        <li>Or remove it: open chrome://extensions in the browser and choose Remove under the extension.</li>
+      </ol>
+    </article>
+  </div>
+  <p>The test apps have no setting on record, so their first step is a block list. For an app whose publisher documents a setting, the report puts that setting first; the rule pack has such steps on record for a number of common apps, browsers among them. A step is as current as the publisher's documentation, and a scan of files cannot show what an app sends once a setting is off. Nothing is changed for you: you decide.</p>
+  <p class="fine"><span class="planned next">Next release</span> This opening and the added app steps are merged on main and ship with the next release. A report from 0.1.0 opens with its summary counts, then its checklist, What you can do.</p>
+  <div class="try">
+    <a class="btn btn-primary btn-sm" href="sample/">Open the sample report</a>
+    <a class="link-more" href="sample/report.html#actions">Every step in it</a>
+  </div>
+</section>
+
 <!-- A real scan -->
 <section class="sec story" id="proof" aria-labelledby="real-title">
-  <div class="sec-head"><span class="idx">03</span>A real scan</div>
+  <div class="sec-head"><span class="idx">04</span>A real scan</div>
   <h2 id="real-title" data-type>One Mac, sixteen apps, <span class="em">2.2 seconds</span>.</h2>
   <p>The maintainer's Mac, scanned on 22 November 2026 with exposure 0.1.0: 16 apps and 8 browser extensions, 10,756 files and 6.8 GB, with the cache off. Nothing left the machine. These are the companies it named, and in how many apps.</p>
   <figure class="scene">
@@ -297,7 +360,7 @@
 
 <!-- How it works -->
 <section class="sec story" id="how" aria-labelledby="how-title">
-  <div class="sec-head"><span class="idx">04</span>How it works</div>
+  <div class="sec-head"><span class="idx">05</span>How it works</div>
   <h2 id="how-title" data-type>Three steps, and <span class="em">none of them runs the app</span>.</h2>
   <p>No guessing from names, and no lookup in anyone's cloud. A finding exists only when the app's own files hold a marker that an SDK cannot avoid leaving.</p>
   <figure class="scene">
@@ -328,7 +391,7 @@
 
 <!-- Grades -->
 <section class="sec story" aria-labelledby="grades-title">
-  <div class="sec-head"><span class="idx">05</span>Every finding is graded</div>
+  <div class="sec-head"><span class="idx">06</span>Every finding is graded</div>
   <h2 id="grades-title" data-type>Graded facts, and <span class="em">never a score</span>.</h2>
   <p>The grade says what kind of evidence there is, and a finding takes the highest grade its evidence reaches. No finding says what an app or a company intends.</p>
   <figure class="scene">
@@ -344,7 +407,7 @@
 
 <!-- Trust and privacy -->
 <section class="sec story" id="trust" aria-labelledby="trust-title">
-  <div class="sec-head"><span class="idx">06</span>Trust and privacy</div>
+  <div class="sec-head"><span class="idx">07</span>Trust and privacy</div>
   <h2 id="trust-title" data-type>Safer than <span class="em">the apps it reports on</span>.</h2>
   <p>A tool that reads the list of apps you use has to be. These are mechanisms, checked in CI, not promises.</p>
   <ul class="uses">
@@ -379,7 +442,7 @@
 
 <!-- Who it is for -->
 <section class="sec story" aria-labelledby="who-title">
-  <div class="sec-head"><span class="idx">07</span>Who it is for</div>
+  <div class="sec-head"><span class="idx">08</span>Who it is for</div>
   <h2 id="who-title" data-type>For people who ship apps, use them, <span class="em">and write about them</span>.</h2>
   <ul class="uses">
     <li>
@@ -401,7 +464,7 @@
 
 <!-- What's next -->
 <section class="sec story" id="next" aria-labelledby="next-title">
-  <div class="sec-head"><span class="idx">08</span>What's next</div>
+  <div class="sec-head"><span class="idx">09</span>What's next</div>
   <h2 id="next-title" data-type>From a scan to <span class="em">a release gate</span>.</h2>
   <p>The Homebrew formula and three of these are merged and listed as unreleased in the changelog: they ship with the next release. The rest is planned.</p>
   <ul class="uses">
@@ -416,7 +479,7 @@
 
 <!-- Questions -->
 <section class="sec story" id="faq" aria-labelledby="faq-title">
-  <div class="sec-head"><span class="idx">09</span>Questions</div>
+  <div class="sec-head"><span class="idx">10</span>Questions</div>
   <h2 id="faq-title" data-type>The things people <span class="em">ask first</span>.</h2>
   <div class="faq">
     <details>
