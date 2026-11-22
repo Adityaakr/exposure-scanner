@@ -4,14 +4,19 @@ All notable changes to `exposure` are listed here. The project follows
 [Semantic Versioning](https://semver.org); while the version is 0.x, a minor
 version can change commands, the report format or the evidence format.
 
-## Unreleased
+## 0.2.0 (2026-11-22)
+
+Source only, as before; there are no prebuilt binaries. Install with
+Homebrew, or with
+`cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.2.0 exposure`.
 
 ### Added
 
 - **Homebrew**: `brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner`
   and `brew install adityaakr/exposure-scanner/exposure`. The repository is
-  its own tap (`Formula/exposure.rb`), and the formula builds `main` from
-  source with `cargo install --locked`.
+  its own tap (`Formula/exposure.rb`), and the formula builds the latest
+  release tag from source with `cargo install --locked`; `brew install
+  --HEAD` builds `main`.
 - **`--fail-on CONDITION`** for `scan` and `report`: exit status 3 when a
   finding counts in the headline (`headline`), is in a category
   (`category:analytics`) or names a company (`company:google`), after the

@@ -1,16 +1,16 @@
 # The Homebrew formula for exposure. It builds the scanner from source, from
-# the main branch of this repository, which is its own tap:
+# the latest release tag of this repository, which is its own tap:
 #
 #   brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
 #   brew install exposure
 #
-# `brew upgrade` does not see new commits on main, since the version below
-# only changes with a release: `brew reinstall exposure` builds the latest.
+# A release changes `tag` and `revision` below (the full commit the tag
+# points at, so a moved tag fails the install), and `brew upgrade` sees it.
+# `brew install --HEAD exposure` builds the latest commit on main instead.
 class Exposure < Formula
   desc "Show which companies' SDKs your apps ship, with the evidence for each"
   homepage "https://github.com/Adityaakr/exposure-scanner"
-  url "https://github.com/Adityaakr/exposure-scanner.git", branch: "main"
-  version "0.1.0"
+  url "https://github.com/Adityaakr/exposure-scanner.git", tag: "v0.2.0"
   # The code, and the rule pack compiled into the binary.
   license all_of: ["Apache-2.0", "CC-BY-4.0"]
   head "https://github.com/Adityaakr/exposure-scanner.git", branch: "main"

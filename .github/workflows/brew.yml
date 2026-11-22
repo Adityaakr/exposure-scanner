@@ -1,0 +1,68 @@
+name: brew
+
+# Installs exposure with Homebrew, the way the README says, and checks the
+# binary it builds. On a pull request that changes the formula, the tap is
+# this checkout. Once the release tag the formula names exists, that tag is
+# audited, built and tested. Before then, as on the pull request that cuts a
+# release, the formula is built from this commit under that tag instead, so
+# the version and the test it runs are the release's. On demand, the tap is
+# the repository on GitHub, exactly as a user taps it.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "Formula/**"
+      - ".github/workflows/brew.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brew-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_ANALYTICS: "1"
+
+jobs:
+  install:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Tap the repository
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # A local tap is a clone, so it holds this branch's formula.
+            git branch --force brew-check HEAD
+            brew tap adityaakr/exposure-scanner "$GITHUB_WORKSPACE"
+            git -C "$(brew --repository adityaakr/exposure-scanner)" checkout --quiet brew-check
+          else
+            brew tap adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+          fi
+          # Homebrew 7 asks for a tap to be trusted before it loads it.
+          brew trust adityaakr/exposure-scanner 2>/dev/null || true
+
+      - name: Install, audit and test
+        run: |
+          formula=adityaakr/exposure-scanner/exposure
+          tap=$(brew --repository adityaakr/exposure-scanner)
+          tag=$(sed -n 's/^  url .*tag: "\([^"]*\)".*/\1/p' "$tap/Formula/exposure.rb")
+          if git ls-remote --exit-code --tags https://github.com/Adityaakr/exposure-scanner "refs/tags/$tag" >/dev/null; then
+            brew audit --strict --formula "$formula"
+          else
+            echo "::notice::$tag is not tagged yet: building this commit under that tag"
+            git tag "$tag" HEAD
+            sed -i '' "s|^  url \"https://github.com/Adityaakr/exposure-scanner.git\"|  url \"file://$GITHUB_WORKSPACE\", using: :git|" "$tap/Formula/exposure.rb"
+            grep -n '^  url' "$tap/Formula/exposure.rb"
+          fi
+          brew install --build-from-source "$formula"
+          brew test "$formula"
+          got=$("$(brew --prefix)/bin/exposure" --version)
+          echo "$got"
+          [ "$got" = "exposure ${tag#v}" ] || { echo "::error::expected 'exposure ${tag#v}', got '$got'"; exit 1; }

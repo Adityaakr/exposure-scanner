@@ -51,7 +51,7 @@
   <section class="page-head" aria-labelledby="page-title">
     <div class="sec-head"><span class="idx">//</span>Docs</div>
     <h1 id="page-title" data-type>Install exposure and read your first report.</h1>
-    <p class="lede">Everything here is true of exposure 0.1.0, the current release. What is merged but not released yet is marked <span class="planned next">Next release</span>; what is not built yet is marked <span class="planned">Planned</span>. The full reference lives in the <a href="https://github.com/Adityaakr/exposure-scanner/tree/main/docs">repository's docs</a>.</p>
+    <p class="lede">Everything here is true of exposure 0.2.0, the current release. What is not built yet is marked <span class="planned">Planned</span>. The full reference lives in the <a href="https://github.com/Adityaakr/exposure-scanner/tree/main/docs">repository's docs</a>.</p>
   </section>
 
   <div class="docs">
@@ -92,16 +92,16 @@
           </li>
           <li>
             <p>Install exposure.</p>
-            <div class="code" data-copy><pre><span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.1.0 exposure</pre></div>
-            <p class="small soft"><code>--locked</code> builds with the exact dependency versions the project tests. The build takes a minute or two and puts <code>exposure</code> in <code>~/.cargo/bin</code>. Leave out <code>--tag v0.1.0</code> to install the latest commit instead of the release.</p>
+            <div class="code" data-copy><pre><span class="p">$ </span>cargo install --git https://github.com/Adityaakr/exposure-scanner --locked --tag v0.2.0 exposure</pre></div>
+            <p class="small soft"><code>--locked</code> builds with the exact dependency versions the project tests. The build takes a minute or two and puts <code>exposure</code> in <code>~/.cargo/bin</code>. Leave out <code>--tag v0.2.0</code> to install the latest commit instead of the release.</p>
           </li>
         </ol>
 
-        <h3>Homebrew <span class="planned next">Next release</span></h3>
-        <p>The repository is its own Homebrew tap, with a formula that builds from source:</p>
-        <div class="code is-planned" role="group" aria-label="Commands for the next release, not available yet"><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
+        <h3>Homebrew <span class="planned today">Works today</span></h3>
+        <p>On macOS or Linux. The repository is its own Homebrew tap, with a formula that builds the latest release from source and brings the Rust compiler for it:</p>
+        <div class="code" data-copy><pre><span class="p">$ </span>brew tap Adityaakr/exposure-scanner https://github.com/Adityaakr/exposure-scanner
 <span class="p">$ </span>brew install adityaakr/exposure-scanner/exposure</pre></div>
-        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg>Not available yet. The formula is merged and ships with the next release; until then, install from source above.</p>
+        <p class="code-note"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2 1.5"/></svg><code>brew upgrade</code> installs a new release once the formula names it; <code>brew install --HEAD adityaakr/exposure-scanner/exposure</code> builds the latest commit on main. On a Mac, Homebrew builds from source only with up-to-date Command Line Tools.</p>
 
         <h3>From a clone</h3>
         <p>The clone's <code>rust-toolchain.toml</code> pins the exact toolchain.</p>
@@ -117,7 +117,7 @@
         <p>That is all. On macOS it reads the apps in <code>/Applications</code> and <code>~/Applications</code> and the extensions in your browser profiles. It writes the report to a folder only you can read, opens it in your browser, and prints what to do first. Apple's own apps in <code>/System/Applications</code> are not scanned unless you name that folder.</p>
         <p>To scan something else, name it. When you name any path, only what you name is scanned:</p>
         <div class="code" data-copy><pre><span class="p">$ </span>exposure scan /Applications/Some.app app-release.apk</pre></div>
-        <p>This is what a scan of two of the repository's test apps prints, built from main. <span class="planned next">Next release</span> This summary ships with the next release; 0.1.0 prints the headline counts first, then "What you can do first".</p>
+        <p>This is what a scan of two of the repository's test apps prints:</p>
         <div class="code"><pre><span class="p">$ </span>exposure scan android/Skeleton.apk macos/ElectronSkeleton.app
 <span class="o">…
 Your report: /Users/you/Library/Application Support/exposure/report.html
@@ -128,7 +128,9 @@ Scanned 2 apps.
 What needs your attention first (1 of 2 things you can do):
 
   1. [High] PostHog
-       Analytics by PostHog Inc., in ElectronSkeleton and Skeleton.
+       Analytics by PostHog Inc., in ElectronSkeleton and Skeleton. In
+       ElectronSkeleton: found as text in the app's code (one kind of evidence),
+       not as a name read from a table the app declares.
        Block app.posthog.com, eu.i.posthog.com, i.posthog.com and
        us.i.posthog.com with an outbound firewall such as LuLu (free) or Little
        Snitch.
@@ -145,7 +147,9 @@ The headline counts:
       <section id="commands" aria-labelledby="commands-title">
         <h2 id="commands-title">Commands and options</h2>
         <div class="code"><pre>exposure scan [PATH...] [--html FILE] [--json FILE] [--no-open] [--threads N] [--no-cache]
-exposure report FILE [--html FILE] [--json FILE]
+              [--fail-on CONDITION]...
+exposure report FILE [--html FILE] [--json FILE] [--fail-on CONDITION]...
+exposure diff OLD NEW [--json FILE] [--fail-on CONDITION]...
 exposure rules show
 exposure rules verify PACK --sig SIGNATURE
 exposure --help | --version</pre></div>
@@ -155,6 +159,7 @@ exposure --help | --version</pre></div>
             <tbody>
               <tr><td><code>scan</code></td><td>Scans apps, extensions, or folders of them, and writes the report.</td></tr>
               <tr><td><code>report</code></td><td>Derives the report again from a saved JSON report.</td></tr>
+              <tr><td><code>diff</code></td><td>Compares two JSON reports: the findings the new one adds, no longer has, or has at another grade, app by app.</td></tr>
               <tr><td><code>rules show</code></td><td>Lists the built-in rule pack.</td></tr>
               <tr><td><code>rules verify</code></td><td>Checks a signed rule pack file, offline.</td></tr>
             </tbody>
@@ -164,17 +169,18 @@ exposure --help | --version</pre></div>
           <table>
             <thead><tr><th scope="col">Option</th><th scope="col">Effect</th></tr></thead>
             <tbody>
-              <tr><td><code>PATH</code></td><td>A macOS <code>.app</code> bundle, an Android <code>.apk</code> file, a browser extension (a Firefox <code>.xpi</code> file, or a Chromium <code>&lt;id&gt;/&lt;version&gt;</code> folder), or a folder searched for all of them, never inside a bundle.</td></tr>
+              <tr><td><code>PATH</code></td><td>A macOS <code>.app</code> bundle, an Android <code>.apk</code> or <code>.aab</code> file, a browser extension (a Firefox <code>.xpi</code> file, or a Chromium <code>&lt;id&gt;/&lt;version&gt;</code> folder), or a folder searched for all of them, never inside a bundle.</td></tr>
               <tr><td><code>--html FILE</code></td><td>Write the report for reading: one self-contained page, grouped by company.</td></tr>
               <tr><td><code>--json FILE</code></td><td>Write the report a program reads, which <code>exposure report</code> can render again. A <code>FILE</code> of <code>-</code> is standard output.</td></tr>
               <tr><td><code>--no-open</code></td><td>Do not open the report in the browser.</td></tr>
               <tr><td><code>--threads N</code></td><td>Worker threads. Default: one per core. The report does not depend on it.</td></tr>
               <tr><td><code>--no-cache</code></td><td>Read every app again, and neither use nor keep the results cache.</td></tr>
+              <tr><td><code>--fail-on CONDITION</code></td><td>Exit with status 3, after the reports are written, when a finding counts in the headline (<code>headline</code>), is in a category (<code>category:analytics</code>) or names a company (<code>company:google</code>). <code>exposure rules show</code> lists the ids. It can be given more than once.</td></tr>
             </tbody>
           </table>
         </div>
         <p>For scripts, <code>exposure scan app-release.apk --json -</code> prints the JSON report on standard output. A summary goes to standard error, ending with a scope line that says where the scan looked; it names no app and no path.</p>
-        <p>A path that does not exist is refused before anything is read. After that, an app that cannot be read never stops the scan: it is reported as a coverage note, never as "nothing found". In 0.1.0 a scan that completes exits with status 0, whatever it finds. <span class="planned next">Next release</span> <code>--fail-on</code> exits with status 3 when a finding meets a condition, such as a company or a category, and <code>exposure diff OLD NEW</code> compares two JSON reports.</p>
+        <p>A path that does not exist is refused before anything is read. After that, an app that cannot be read never stops the scan: it is reported as a coverage note, never as "nothing found". A scan that completes exits with status 0, whatever it finds, unless you ask otherwise: <code>--fail-on</code> exits with status 3 when a finding meets a condition, such as a company or a category, and <code>exposure diff OLD NEW</code> compares two JSON reports.</p>
       </section>
 
       <section id="files" aria-labelledby="files-title">
@@ -216,7 +222,7 @@ exposure --help | --version</pre></div>
         </ul>
         <p>Only claims that name a company in five categories count: advertising, analytics, attribution, profiling and session replay. Crash reporting, push delivery, payments, customer messaging, update feeds, components and every access claim are listed in the report but not counted. Each claim in the JSON says whether it counts, so the numbers can be recounted.</p>
         <h3>What you can do</h3>
-        <p><span class="planned next">Next release</span> The report opens with what needs your attention: the few checklist entries that matter most, each with its first step. In 0.1.0 it opens with the summary counts. The whole checklist follows, and each finding has its own steps: an app's own opt-out where its publisher documents one; hosts to block with an outbound firewall such as LuLu or Little Snitch, for the counted categories; the System Settings pane, or the Android Settings page, of each permission; and how to narrow or remove a browser extension. The scanner applies none of it.</p>
+        <p>The report opens with what needs your attention: the few checklist entries that matter most, each with its first step. The whole checklist follows, and each finding has its own steps: an app's own opt-out where its publisher documents one; hosts to block with an outbound firewall such as LuLu or Little Snitch, for the counted categories; the System Settings pane, or the Android Settings page, of each permission; and how to narrow or remove a browser extension. The scanner applies none of it.</p>
       </section>
 
       <section id="reads" aria-labelledby="reads-title">
@@ -246,7 +252,7 @@ exposure --help | --version</pre></div>
               <tr><td>Linux</td><td>Every check runs there on every change. Scans the paths you name.</td></tr>
               <tr><td>Android packages (<code>.apk</code>)</td><td>Scanned by path on either.</td></tr>
               <tr><td>Browser extensions</td><td>Found in your profiles on macOS, scanned by path elsewhere.</td></tr>
-              <tr><td>Android App Bundles (<code>.aab</code>)</td><td><span class="planned next">Next release</span></td></tr>
+              <tr><td>Android App Bundles (<code>.aab</code>)</td><td>Scanned by path on either, like the APKs they stand for.</td></tr>
               <tr><td>Phones, iOS exports</td><td><span class="planned">Planned</span></td></tr>
               <tr><td>Windows</td><td>Not planned yet.</td></tr>
             </tbody>
