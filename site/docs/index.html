@@ -114,10 +114,10 @@
       <section id="first-scan" aria-labelledby="first-title">
         <h2 id="first-title">Your first scan</h2>
         <div class="code" data-copy><pre><span class="p">$ </span>exposure scan</pre></div>
-        <p>That is all. On macOS it reads the apps in <code>/Applications</code> and <code>~/Applications</code> and the extensions in your browser profiles. It writes the report to a folder only you can read, opens it in your browser, and prints what needs your attention first. Apple's own apps in <code>/System/Applications</code> are not scanned unless you name that folder.</p>
+        <p>That is all. On macOS it reads the apps in <code>/Applications</code> and <code>~/Applications</code> and the extensions in your browser profiles. It writes the report to a folder only you can read, opens it in your browser, and prints what to do first. Apple's own apps in <code>/System/Applications</code> are not scanned unless you name that folder.</p>
         <p>To scan something else, name it. When you name any path, only what you name is scanned:</p>
         <div class="code" data-copy><pre><span class="p">$ </span>exposure scan /Applications/Some.app app-release.apk</pre></div>
-        <p>This is what a scan of two of the repository's test apps prints:</p>
+        <p>This is what a scan of two of the repository's test apps prints, built from main. <span class="planned next">Next release</span> This summary ships with the next release; 0.1.0 prints the headline counts first, then "What you can do first".</p>
         <div class="code"><pre><span class="p">$ </span>exposure scan android/Skeleton.apk macos/ElectronSkeleton.app
 <span class="o">…
 Your report: /Users/you/Library/Application Support/exposure/report.html
@@ -216,7 +216,7 @@ exposure --help | --version</pre></div>
         </ul>
         <p>Only claims that name a company in five categories count: advertising, analytics, attribution, profiling and session replay. Crash reporting, push delivery, payments, customer messaging, update feeds, components and every access claim are listed in the report but not counted. Each claim in the JSON says whether it counts, so the numbers can be recounted.</p>
         <h3>What you can do</h3>
-        <p>The report opens with what needs your attention: the few checklist entries that matter most, each with its first step. The whole checklist follows, and each finding has its own steps: an app's own opt-out where its publisher documents one; hosts to block with an outbound firewall such as LuLu or Little Snitch, for the counted categories; the System Settings pane, or the Android Settings page, of each permission; and how to narrow or remove a browser extension. The scanner applies none of it.</p>
+        <p><span class="planned next">Next release</span> The report opens with what needs your attention: the few checklist entries that matter most, each with its first step. In 0.1.0 it opens with the summary counts. The whole checklist follows, and each finding has its own steps: an app's own opt-out where its publisher documents one; hosts to block with an outbound firewall such as LuLu or Little Snitch, for the counted categories; the System Settings pane, or the Android Settings page, of each permission; and how to narrow or remove a browser extension. The scanner applies none of it.</p>
       </section>
 
       <section id="reads" aria-labelledby="reads-title">
