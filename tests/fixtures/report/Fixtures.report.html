@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-Tld4UI1dnEZpmcgNJQFrML+4BYY0W5thNJnRXMj7cqI='; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-jh6LY3j9ajrAIb6lcb57XCIFPyyelrBK1+K1RRIWOO8='; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
@@ -91,8 +91,33 @@ section { margin-top: 2.5rem; }
 .count .n { font-size: 2.4rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .count .label { font-weight: 600; margin-top: 0.25rem; }
 .count .sub { color: var(--soft-ink); font-size: 0.85rem; margin-top: 0.35rem; }
-#summary h3 { margin-top: 1.5rem; margin-bottom: 0.5rem; }
+#summary h3 { margin-top: 1rem; margin-bottom: 0.5rem; }
 .lead { font-size: 1.25rem; font-weight: 600; }
+.status { font-size: 1rem; }
+.first { list-style: none; margin-top: 0.9rem; padding: 0; }
+.first > li {
+  border: 1px solid var(--rule);
+  border-left: 0.3rem solid var(--rule);
+  border-radius: 0.5rem;
+  padding: 0.7rem 1rem 0.8rem;
+}
+.first > li.first-high { border-left-color: var(--high-ink); }
+.first > li.first-medium { border-left-color: var(--medium-ink); }
+.first > li + li { margin-top: 0.5rem; }
+.first p + p { margin-top: 0.3rem; }
+.do { font-size: 0.95rem; }
+.do-label { font-weight: 600; }
+details.more { margin-top: 0.9rem; }
+details.more > summary, details.hosts > summary {
+  color: var(--link);
+  cursor: pointer;
+  font-weight: 600;
+}
+details.more > summary:hover, details.hosts > summary:hover { text-decoration: underline; }
+details.more[open] > summary { margin-bottom: 0.6rem; }
+details.hosts { margin-top: 0.3rem; }
+details.hosts > summary { font-size: 0.9rem; font-weight: 500; }
+details.hosts p { margin-top: 0.3rem; }
 .found { list-style: none; margin-top: 0.75rem; padding: 0; }
 .found li { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 0.7rem 1rem 0.8rem; }
 .found li + li { margin-top: 0.5rem; }
@@ -188,6 +213,16 @@ th { color: var(--soft-ink); font-size: 0.8rem; font-weight: 600; white-space: n
   text-transform: uppercase;
   vertical-align: 0.1em;
 }
+#actions {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 0.75rem;
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+#actions > h2 { padding-top: 0; }
+#actions .checklist > li, #actions .none { background: var(--page); }
+#actions code { background: var(--panel); }
+#actions .checklist > li:target { background: var(--mark); }
 .p-high { background: var(--high-bg); color: var(--high-ink); }
 .p-medium { background: var(--medium-bg); color: var(--medium-ink); }
 .p-low { background: var(--low-bg); color: var(--low-ink); }
@@ -201,6 +236,9 @@ th { color: var(--soft-ink); font-size: 0.8rem; font-weight: 600; white-space: n
 .todo-head { font-weight: 600; }
 .todo-head strong { font-size: 1.05rem; }
 .finding .todo-head { font-size: 0.9rem; margin-top: 0.9rem; }
+.finding details.more { margin-top: 0.5rem; }
+.finding details.more > summary { font-size: 0.9rem; }
+.finding details.more[open] > summary { margin-bottom: 0; }
 .steps { margin-top: 0.4rem; padding-left: 1.3rem; font-size: 0.925rem; }
 .steps li { list-style: "☐  "; }
 .steps li + li { margin-top: 0.3rem; }
@@ -218,6 +256,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 @media (max-width: 34rem) {
   body { padding: 1.25rem 0.9rem 3rem; }
   h1 { font-size: 1.7rem; }
+  #actions { border-radius: 0.5rem; margin-left: -0.4rem; margin-right: -0.4rem; padding: 0.9rem 0.75rem 1rem; }
+  .checklist > li, .first > li { padding: 0.65rem 0.8rem 0.75rem; }
   .facts { grid-template-columns: 1fr; gap: 0; }
   .facts dt { margin-top: 0.4rem; }
 }
@@ -241,9 +281,15 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
   a { text-decoration: none; }
   section { margin-top: 1.6rem; }
   h2, h3, h4, h5 { break-after: avoid; }
-  .count, .finding, .record, .evidence li, .found li, .checklist > li, tr { break-inside: avoid; }
+  .count, .finding, .record, .evidence li, .found li, .checklist > li, .first > li, tr { break-inside: avoid; }
   .scroll { overflow: visible; }
   .grade, .tag, .prio { border: 1px solid #888888; }
+  #actions { border: none; padding: 0; }
+}
+/* On paper nothing can be opened, so what is closed prints open. A browser
+   that does not know the pseudo-element drops this rule and no other. */
+@media print {
+  details::details-content { content-visibility: visible; display: block; }
 }
 </style>
 </head>
@@ -251,7 +297,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <header class="top">
 <p class="kicker">Device exposure scan</p>
 <h1>Exposure report</h1>
-<p class="lede">Which companies have a channel to your data through the apps that were scanned, and the evidence for each one. Every finding states how strong its evidence is and links to the raw record behind it.</p>
+<p class="lede">What the scanned apps ship and may access, what needs your attention, and what you can do about it. The evidence behind each finding is further down, for when you want it.</p>
 <p class="private">This file was made on your device and lists apps you use, so treat it as private. It loads nothing from the network and runs no script.</p>
 </header>
 <nav class="toc">
@@ -266,9 +312,37 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </nav>
 <main>
 <section id="summary">
-<h2>Summary</h2>
-<h3>What was found</h3>
+<h2>What needs your attention</h2>
 <p class="lead">5 findings in 3 of 3 apps scanned.</p>
+<p class="status">Start with this one. <a href="#actions">What you can do</a> has every step, for all 2 entries: 1 high and 1 low priority.</p>
+<ol class="first">
+<li class="first-high">
+<p class="todo-head"><span class="prio p-high">High</span> <strong>PostHog</strong></p>
+<p>Analytics by PostHog Inc., in ElectronSkeleton and Skeleton.</p>
+<p class="do"><span class="do-label">First step:</span> Block app.posthog.com, eu.i.posthog.com, i.posthog.com and us.i.posthog.com with an outbound firewall such as LuLu (free) or Little Snitch. <a href="#t-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">Every step</a></p>
+</li>
+</ol>
+<details class="more">
+<summary>The three headline counts: 0 companies with a recorded connection, 1 company whose code the apps ship and 2 apps with a third-party channel.</summary>
+<h3>The three headline counts</h3>
+<p class="note">These three numbers do not count every finding. They count the findings that name a company in the categories Advertising, Analytics, Attribution, Profiling and Session replay. Every other finding, such as crash reporting or an update feed, is in the list of what was found and in the findings below, and in none of these numbers. There is no score.</p>
+<div class="counts">
+<div class="count"><p class="n">0</p><p class="label">companies with a recorded connection</p><p class="sub">Grade <code>contacts</code> or above: a connection to the company was recorded.</p></div>
+<div class="count"><p class="n">1</p><p class="label">company whose code the scanned apps ship</p><p class="sub">Strongest grade <code>contains</code>: the code is present. Presence is not use.</p></div>
+<div class="count"><p class="n">2</p><p class="label">apps with a third-party channel</p><p class="sub">A counted finding names a company that is not the app's own publisher.</p></div>
+</div>
+<p class="beside">Beside these counts, the Android apps ship 1 SDK of 1 company in categories the counts leave out: <strong>Functional Software, Inc. (Sentry)</strong> (Sentry). They are in the list of what was found and in the findings below.</p>
+<ul class="totals">
+<li>3 apps scanned</li>
+<li>5 findings</li>
+<li>2 companies named</li>
+<li>0 coverage notes</li>
+<li>12 evidence records</li>
+</ul>
+</details>
+<details class="more">
+<summary>Everything the scan found: 2 things, each with the apps it is in</summary>
+<h3>What was found</h3>
 <p class="note">Each entry is one thing the scan found and the apps it is in, with what is in the most apps first. An app's name links to its finding further down, which shows the evidence.</p>
 <ul class="found">
 <li>
@@ -286,42 +360,35 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <p><span class="tag counted">counted</span></p>
 </li>
 </ul>
-<h3>The three headline counts</h3>
-<p class="note">These three numbers do not count every finding. They count the findings that name a company in the categories Advertising, Analytics, Attribution, Profiling and Session replay. Every other finding, such as crash reporting or an update feed, is in the list above and in the findings below, and in none of these numbers. There is no score.</p>
-<div class="counts">
-<div class="count"><p class="n">0</p><p class="label">companies with a recorded connection</p><p class="sub">Grade <code>contacts</code> or above: a connection to the company was recorded.</p></div>
-<div class="count"><p class="n">1</p><p class="label">company whose code the scanned apps ship</p><p class="sub">Strongest grade <code>contains</code>: the code is present. Presence is not use.</p></div>
-<div class="count"><p class="n">2</p><p class="label">apps with a third-party channel</p><p class="sub">A counted finding names a company that is not the app's own publisher.</p></div>
-</div>
-<p class="beside">Beside these counts, the Android apps ship 1 SDK of 1 company in categories the counts leave out: <strong>Functional Software, Inc. (Sentry)</strong> (Sentry). They are in the list above and in the findings below.</p>
-<ul class="totals">
-<li>3 apps scanned</li>
-<li>5 findings</li>
-<li>2 companies named</li>
-<li>0 coverage notes</li>
-<li>12 evidence records</li>
-</ul>
+</details>
 </section>
 <section id="actions">
 <h2>What you can do</h2>
-<p>What you can do about what was found, with what exposes the most first. Nothing here is done for you: the scanner changes nothing on this device. Each entry links to the findings it is about, which show the evidence.</p>
+<p class="intro">Every step for what was found, with what exposes the most first. Nothing here is done for you: the scanner changes nothing on this device. Each entry links to the findings it is about, which show the evidence.</p>
+<details class="more">
+<summary>What High, Medium and Low mean</summary>
 <ul class="priorities">
 <li><span class="prio p-high">High</span> Code of a company that does advertising, analytics, attribution, profiling or session replay, in an app that company does not publish; and a browser extension that may read the pages you visit or what you do in the browser.</li>
 <li><span class="prio p-medium">Medium</span> What apps may reach of you and your surroundings: camera, microphone, screen, location and personal data; and a domain an app declares for tracking.</li>
 <li><span class="prio p-low">Low</span> Other services of a company in an app, such as crash reporting, and access to files, nearby devices and other apps.</li>
 </ul>
+</details>
 <ul class="checklist">
-<li class="todo">
+<li class="todo" id="t-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">
 <p class="todo-head"><span class="prio p-high">High</span> <strong>PostHog</strong> <span class="tag">Analytics</span></p>
 <p class="meta">PostHog Inc. · 2 apps</p>
 <ul class="steps">
-<li>No setting that turns it off is on record for <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a>, <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a>.</li>
 <li>Block these hosts for <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a> with an outbound firewall such as LuLu (free) or Little Snitch: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
 <li>Block these hosts for <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a> with a firewall app that works without root, such as NetGuard: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
+<li>No setting that turns it off is on record for <a href="#f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">ElectronSkeleton</a>, <a href="#f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">Skeleton</a>.</li>
 <li>Or remove the apps you can do without.</li>
 </ul>
 </li>
-<li class="todo">
+</ul>
+<details class="more low">
+<summary>1 lower-priority entry: Sentry</summary>
+<ul class="checklist">
+<li class="todo" id="t-c606554f70326e31474b5a98b99c610cec1d381190e534fa355e06e528ce30ac">
 <p class="todo-head"><span class="prio p-low">Low</span> <strong>Sentry</strong> <span class="tag">Crash reporting</span></p>
 <p class="meta">Functional Software, Inc. (Sentry) · 3 apps</p>
 <ul class="steps">
@@ -330,11 +397,14 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </ul>
 </li>
 </ul>
+</details>
 <p class="note">The steps name menus as the publishers and the operating systems name them. A setting can move between versions of an app, and what a setting covers is what its publisher documents: a scan of files cannot show what an app sends once it is turned off. Block lists name only hosts of advertising, analytics, attribution, profiling and session replay, and domains an app declares for tracking: blocking a crash reporter or an app's own servers breaks more than it protects.</p>
 </section>
 <section id="reading">
 <h2>How to read this report</h2>
 <p>Each finding is a graded fact about what an app's files hold. The grade says what kind of evidence there is, and a finding takes the highest grade its evidence reaches. No finding says what an app or a company intends.</p>
+<details class="more">
+<summary>What each grade shows, and the other terms of a finding</summary>
 <div class="scroll">
 <table class="ladder">
 <thead><tr><th scope="col">Grade</th><th scope="col">In a word</th><th scope="col">What it shows</th></tr></thead>
@@ -358,10 +428,11 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <dt>Unmapped host</dt>
 <dd>A host the app declares that the rule pack lists under no company. It is shown as itself and nobody is named as its owner.</dd>
 </dl>
+</details>
 </section>
 <section id="findings">
 <h2>Findings by company</h2>
-<p>Companies with a finding that counts in the summary come first, then the others, each in alphabetical order.</p>
+<p>Companies with a finding that counts in the summary come first, then the others, each in alphabetical order. Open a finding to see what you can do about it and the evidence it rests on.</p>
 <section class="company">
 <h3>PostHog Inc. <span class="tag counted">counted in the summary</span></h3>
 <p class="meta">2 apps · 2 findings · strongest grade <span class="grade g-contains">contains</span></p>
@@ -372,6 +443,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <div class="finding" id="f-ea69a89aa3a0e556995b4d2027291f8e2083fc5e39da54f0c106f63cd8b3c53e">
 <h5>PostHog <span class="tag">Analytics</span></h5>
 <p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<details class="more">
+<summary>What you can do, and the evidence: 1 record</summary>
 <dl class="facts">
 <dt>Rule</dt><dd><code>sdk/posthog</code></dd>
 <dt>Confidence</dt><dd>medium: text found in the app's own code or in a binary's data.</dd>
@@ -381,8 +454,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </dl>
 <p class="todo-head">What you can do</p>
 <ul class="steps">
-<li>No setting of this app that turns it off is on record.</li>
 <li>Block these hosts for ElectronSkeleton with an outbound firewall such as LuLu (free) or Little Snitch: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
+<li>No setting of this app that turns it off is on record.</li>
 <li>Or remove ElectronSkeleton if you can do without it.</li>
 </ul>
 <p class="evidence-head">Evidence: 1 record</p>
@@ -399,6 +472,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </dl>
 </li>
 </ul>
+</details>
 </div>
 </div>
 <div class="app">
@@ -408,6 +482,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <div class="finding" id="f-a84875c94f7c3d08cd77478523c4ce6b9a6c4956913ebc9dbadd907c1eed826e">
 <h5>PostHog <span class="tag">Analytics</span></h5>
 <p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<details class="more">
+<summary>What you can do, and the evidence: 2 records</summary>
 <dl class="facts">
 <dt>Rule</dt><dd><code>sdk/posthog</code></dd>
 <dt>Confidence</dt><dd>high: a name read from a structured table, or the app's own declaration.</dd>
@@ -417,8 +493,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </dl>
 <p class="todo-head">What you can do</p>
 <ul class="steps">
-<li>No setting of this app that turns it off is on record.</li>
 <li>Block these hosts for Skeleton with a firewall app that works without root, such as NetGuard: <code>app.posthog.com</code>, <code>eu.i.posthog.com</code>, <code>i.posthog.com</code>, <code>us.i.posthog.com</code>. Blocking can stop features that rely on the service, and does not reach what the app sends through its own servers.</li>
+<li>No setting of this app that turns it off is on record.</li>
 <li>Or remove Skeleton if you can do without it.</li>
 </ul>
 <p class="evidence-head">Evidence: 2 records</p>
@@ -445,6 +521,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </dl>
 </li>
 </ul>
+</details>
 </div>
 </div>
 </section>
@@ -458,6 +535,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <div class="finding" id="f-c606554f70326e31474b5a98b99c610cec1d381190e534fa355e06e528ce30ac">
 <h5>Sentry <span class="tag">Crash reporting</span></h5>
 <p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<details class="more">
+<summary>What you can do, and the evidence: 3 records</summary>
 <dl class="facts">
 <dt>Rule</dt><dd><code>sdk/sentry</code></dd>
 <dt>Confidence</dt><dd>high: a name read from a structured table, or the app's own declaration.</dd>
@@ -506,6 +585,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </dl>
 </li>
 </ul>
+</details>
 </div>
 </div>
 <div class="app">
@@ -515,6 +595,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <div class="finding" id="f-898645fdb677a58f33e217cd971a0611720c3194cacbf704edf996890c7403db">
 <h5>Sentry <span class="tag">Crash reporting</span></h5>
 <p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<details class="more">
+<summary>What you can do, and the evidence: 2 records</summary>
 <dl class="facts">
 <dt>Rule</dt><dd><code>sdk/sentry</code></dd>
 <dt>Confidence</dt><dd>high: a name read from a structured table, or the app's own declaration.</dd>
@@ -552,6 +634,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </dl>
 </li>
 </ul>
+</details>
 </div>
 </div>
 <div class="app">
@@ -561,6 +644,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <div class="finding" id="f-2fc3cee02feee2e8db8c7eaa9879b54c28ac4f8e6ac3783a84be89276050b8a6">
 <h5>Sentry <span class="tag">Crash reporting</span></h5>
 <p class="graded"><span class="grade g-contains">contains</span> The app ships this code. That shows the code is present, not that it runs or sends anything.</p>
+<details class="more">
+<summary>What you can do, and the evidence: 1 record</summary>
 <dl class="facts">
 <dt>Rule</dt><dd><code>sdk/sentry</code></dd>
 <dt>Confidence</dt><dd>high: a name read from a structured table, or the app's own declaration.</dd>
@@ -587,6 +672,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </dl>
 </li>
 </ul>
+</details>
 </div>
 </div>
 </section>
@@ -597,6 +683,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <h3>Where the scan looked</h3>
 <p class="scope">This scan covered the paths given and nothing else; the installed-app folders were not searched.</p>
 <h3>Apps scanned</h3>
+<details class="more">
+<summary>3 apps, with what was read of each and how many findings it has</summary>
 <div class="scroll">
 <table>
 <thead><tr><th scope="col">App</th><th scope="col">App id</th><th scope="col">Version</th><th scope="col">Build</th><th scope="col">Platform</th><th scope="col">Read</th><th scope="col">Findings</th><th scope="col">Not covered</th></tr></thead>
@@ -607,6 +695,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 </tbody>
 </table>
 </div>
+</details>
 <h3>Set aside, and why</h3>
 <p class="none">The scan recorded nothing it skipped and nothing it could not interpret in these apps.</p>
 </section>
@@ -688,7 +777,7 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 <h2>About this report</h2>
 <dl class="facts">
 <dt>Scanner</dt><dd>exposure 0.1.0</dd>
-<dt>Rule pack</dt><dd>core version 6, SHA-256 <code>b18b99f2d2bd8d78d04af94700e87bec6efe93c60e3e9242ea0d07e169b70044</code></dd>
+<dt>Rule pack</dt><dd>core version 7, SHA-256 <code>79253a5131387d50f475da65be7cb0d3d463c859703bb12276785df50eee5c5a</code></dd>
 </dl>
 <p>The same evidence, the same rule pack and the same scan scope always give this same file, byte for byte. It holds no date, no device name and no path outside an app.</p>
 </section>

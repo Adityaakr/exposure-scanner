@@ -176,20 +176,25 @@ $ exposure report report.json --html again.html   # the same page, from the save
 program reads; both can be asked for at once. With neither, `exposure scan`
 writes the page to `report.html` in a folder only you can read
 (`~/Library/Application Support/exposure` on macOS), opens it in your
-browser when it runs in a terminal, and prints the first entries of
-[What you can do](#what-you-can-do). The HTML report is one file
+browser when it runs in a terminal, and prints what needs your attention
+first: the entries of [What you can do](#what-you-can-do) of high and medium
+priority, as the page's summary lists them. The HTML report is one file
 that opens in any browser, also on a phone, and has a layout for print. A
 sample, the page for the fixtures of this repository, is
 [`tests/fixtures/report/Fixtures.report.html`](../tests/fixtures/report/Fixtures.report.html).
-It holds:
+It leads with what needs your attention and keeps the detail one click
+away: what is opened on demand is in a `details` element, which the browser
+opens and closes with no script. Its content is in the file whether it is
+open or not, printing opens it, and no link on the page leads into one that
+is closed. It holds:
 
 | Part | What it says |
 |---|---|
-| Summary | What was found, first: one sentence with the totals, then each thing found once (an SDK or a declared host, under its company or under none) with its category, its grade as a fact with a count (`ships in 10 of 16 apps`), the apps as links to their findings, and whether it is counted. Then the three headline counts, said to count the counted categories only; when findings exist and all three counts are zero, the page says why; beside them, for Android, the SDKs of companies outside the counted categories. Then the totals. No score. |
-| What you can do | A checklist with what exposes the most first, one entry per service with the apps it is in, per System Settings pane with the apps that may ask for it, per extension and per Android app. Each entry links to the findings it is about. See [What you can do](#what-you-can-do). |
-| How to read it | What each grade shows and does not show, in one word each: declares, ships, contacted, confirmed; and, when the scan found what an app may access, the access grades too (may access). |
-| Findings by company | Companies with a counted finding first, then the others by name. Under each, the apps, and for each finding its grade, its confidence, how many kinds of evidence agree, whether the company is the app's publisher, and each record it rests on in words: the marker, the file, the table, an example, a count. Components and unmapped hosts come after the companies, under no company. Findings about what an app may access have a part of their own, by app. A company with no counted finding is tagged as outside the counted categories, as visibly as a counted one. |
-| Coverage | Where the scan looked, and where it deliberately did not. Every app that was read, with what was read of it, also the apps with no finding. Then everything that was skipped or not understood, and why. |
+| What needs your attention | One sentence with how much was found. Then the first entries of [What you can do](#what-you-can-do) of high and medium priority, at most five, each in one sentence with its first step and a link to the entry with every step; with none of them, the first low-priority entries, said to be low priority. The terminal summary of `exposure scan` prints the same entries. Under it, opened on demand: the three headline counts, whose line states the three numbers, said to count the counted categories only; when findings exist and all three counts are zero, the page says why; beside them, for Android, the SDKs of companies outside the counted categories; and the totals. Then everything that was found, each thing once (an SDK or a declared host, under its company or under none) with its category, its grade as a fact with a count (`ships in 10 of 16 apps`), the apps as links to their findings, and whether it is counted. No score. |
+| What you can do | A checklist with what exposes the most first, one entry per service with the apps it is in, per System Settings pane with the apps that may ask for it, per extension and per Android app. Each entry links to the findings it is about. Entries of low priority are under one line that names them, opened on demand, unless there is nothing else. A block list of more than four hosts names how many there are and lists them under the step, opened on demand. See [What you can do](#what-you-can-do). |
+| How to read it | What each grade shows and does not show, in one word each: declares, ships, contacted, confirmed; and, when the scan found what an app may access, the access grades too (may access). Opened on demand. |
+| Findings by company | Companies with a counted finding first, then the others by name. Under each, the apps, and for each finding its grade; opened on demand, its confidence, how many kinds of evidence agree, whether the company is the app's publisher, what you can do about it, and each record it rests on in words: the marker, the file, the table, an example, a count. Components and unmapped hosts come after the companies, under no company. Findings about what an app may access have a part of their own, by app. A company with no counted finding is tagged as outside the counted categories, as visibly as a counted one. |
+| Coverage | Where the scan looked, and where it deliberately did not. Every app that was read, with what was read of it, also the apps with no finding. Then everything that was skipped or not understood, and why. Both tables are opened on demand, from a line with their count. |
 | Limits | What no scan of a device can see: what is inside encrypted traffic, what companies pass on between their own servers, and what an app sends through its own domain. And that presence is not use, and that only what has a rule is recognised. |
 | Evidence records | Every record of the scan as it is stored. A finding links to its records, and the SHA-256 of a record's text is its id. |
 
@@ -218,6 +223,11 @@ and requires the same elements as the page of two harmless apps.
 
 The HTML report has a **What you can do** checklist near the top, and the
 same steps under every finding. It is advice: the scanner changes nothing.
+Within an entry, and under a finding, the steps that do something come
+first: an app's own setting where its publisher documents one, then the
+hosts to block, and only then what a publisher says cannot be done, and
+that nothing is on record. The summary at the top of the page gives the
+first of them for each entry that needs attention.
 The checklist lists what exposes the most first:
 
 | Priority | What it covers |

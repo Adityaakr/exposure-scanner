@@ -40,6 +40,19 @@ version can change commands, the report format or the evidence format.
 
 ### Changed
 
+- **The HTML report leads with what needs your attention**: how much was
+  found, then the first entries of "What you can do" of high and medium
+  priority, each in one sentence with its first step and a link to every
+  step. The first step is one you can take: an app's own setting, then a
+  block list, and only then what a publisher says cannot be done. The
+  headline counts and the list of everything found are under it, opened on
+  demand, as are the facts, steps and records of each finding, the
+  lower-priority entries of the checklist, long block lists, the glossary and
+  the coverage tables. They are `details` elements: no script, the content
+  is in the file whether open or not, and printing opens them. No link leads
+  into one that is closed. "What you can do" stands out as a panel of its
+  own. The terminal summary of `exposure scan` prints the same entries
+  before the headline counts. The JSON report is unchanged.
 - **Electron's default usage descriptions rank low** in the "What you can do"
   checklist. A System Settings entry that rests only on "This app needs access
   to the camera" and Electron's other default wording is `Low`, and an entry

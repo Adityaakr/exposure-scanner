@@ -22,9 +22,6 @@ const BUILT_IN_SIGNATURE: &str = include_str!("../../../rules/dist/core.pack.jso
 /// A FILE that stands for standard output.
 const STDOUT: &str = "-";
 
-/// How many entries of the checklist a scan prints. The report has them all.
-const PRINTED_TODOS: usize = 5;
-
 /// Largest saved report `exposure report` reads.
 const MAX_REPORT_BYTES: u64 = 1 << 30;
 
@@ -392,8 +389,9 @@ fn open_in_browser(_page: &Path) -> bool {
 }
 
 /// What a scan that wrote its report to the default place tells the person
-/// who ran it: where the report is, what the headline says, and the first
-/// entries of the checklist.
+/// who ran it: where the report is, what needs attention first, as the
+/// report's summary has it ([`xs_render::first_todos`]), and what the
+/// headline says.
 fn summary(report: &Rendered, scanned: &str, page: &Path, opened: bool) -> String {
     let mut out = String::new();
     let path = page.display().to_string();
@@ -405,9 +403,45 @@ fn summary(report: &Rendered, scanned: &str, page: &Path, opened: bool) -> Strin
     } else {
         out.push_str("Open it in your browser.\n");
     }
+    out.push_str(&format!("\nScanned {scanned}.\n"));
+
+    let todos = &report.todos;
+    let first = xs_render::first_todos(todos);
+    let total = todos.len();
+    match first.first() {
+        None => {
+            out.push('\n');
+            out.push_str(&wrap(
+                "Nothing calls for action: no finding is a service of another company than the \
+                 app's publisher, and no app or extension asks for a permission that can be \
+                 turned off.",
+                "",
+            ));
+        }
+        Some(top) if top.priority.needs_attention() => out.push_str(&format!(
+            "\nWhat needs your attention first ({} of {total} {}):\n",
+            first.len(),
+            if total == 1 { "thing you can do" } else { "things you can do" },
+        )),
+        Some(_) => out.push_str(&format!(
+            "\nNothing needs your attention first. Things you can do, all of low priority ({} of \
+             {total}):\n",
+            first.len(),
+        )),
+    }
+    for (at, todo) in first.iter().enumerate() {
+        out.push_str(&format!("\n{:>3}. [{}] {}\n", at + 1, todo.priority.name(), todo.title));
+        out.push_str(&wrap(&todo.about, INDENT));
+        out.push_str(&wrap(&todo.step, INDENT));
+    }
+    if total > first.len() {
+        let more = total - first.len();
+        let entries = if more == 1 { "entry" } else { "entries" };
+        out.push_str(&format!("\n{more} more {entries} in the report, under What you can do.\n"));
+    }
 
     let headline = report.headline;
-    out.push_str(&format!("\nScanned {scanned}.\n"));
+    out.push_str("\nThe headline counts:\n");
     if headline.companies_contacts > 0 {
         out.push_str(&format!(
             "  {} with a recorded connection\n",
@@ -422,28 +456,6 @@ fn summary(report: &Rendered, scanned: &str, page: &Path, opened: bool) -> Strin
     ));
     if let Some(beside) = beside_the_headline(report) {
         out.push_str(&wrap(&format!("and beside these: {beside}"), "  "));
-    }
-
-    let todos = &report.todos;
-    if todos.is_empty() {
-        out.push_str(
-            "\nNothing calls for action: no finding is a service of another company than the \
-             app's publisher, and no app or extension asks for a permission that can be turned \
-             off.\n",
-        );
-    } else {
-        let shown = todos.len().min(PRINTED_TODOS);
-        out.push_str(&format!("\nWhat you can do first ({shown} of {}):\n", todos.len()));
-        for (at, todo) in todos.iter().take(PRINTED_TODOS).enumerate() {
-            out.push_str(&format!("\n{:>3}. [{}] {}\n", at + 1, todo.priority.name(), todo.title));
-            out.push_str(&wrap(&todo.about, INDENT));
-            out.push_str(&wrap(&todo.step, INDENT));
-        }
-        if todos.len() > shown {
-            let more = todos.len() - shown;
-            let entries = if more == 1 { "entry" } else { "entries" };
-            out.push_str(&format!("\n{more} more {entries} in the report.\n"));
-        }
     }
     out.push('\n');
     out.push_str(&wrap(

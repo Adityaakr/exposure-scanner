@@ -12,7 +12,8 @@
 #          list the report gives. Only for a rule in a counted category, and
 #          only hosts the vendor's own documentation names.
 #
-# Checked against the publishers' pages on 2026-11-18.
+# Checked against the publishers' pages on 2026-11-18, and on 2026-11-22 for
+# Trezor Suite's crash reports and every entry after Claude's.
 
 [[app]]
 id = "vscode"
@@ -127,11 +128,16 @@ says = "Screen Studio sends crash reports automatically. Only a team admin can t
 id = "trezor-suite"
 name = "Trezor Suite"
 apps = [{ platform = "macos", id = "io.trezor.TrezorSuite" }]
-sources = ["https://trezor.io/guides/trezor-suite/trezor-suite-desktop/trezor-suite-settings"]
+sources = [
+    "https://trezor.io/guides/trezor-suite/trezor-suite-desktop/trezor-suite-settings",
+    "https://docs.trezor.io/trezor-suite/analytics/index.html",
+    "https://docs.trezor.io/trezor-suite/analytics/sentry.html",
+]
 
 [[app.setting]]
-covers = ["analytics"]
+covers = ["analytics", "crash_reporting"]
 steps = "Settings > Application, then turn off Anonymous data collection"
+note = "Trezor says this switch also stops its automatic error reports. An error that happens before Suite has loaded your choice is still reported, with less detail."
 
 [[app]]
 id = "proton-vpn"
@@ -225,6 +231,220 @@ sources = [
 [[app.no_setting]]
 covers = ["analytics", "crash_reporting"]
 says = "Anthropic documents switches for the app's crash reports and product analytics only as managed settings for administrators, not as a setting in the app. Its setting Settings > Privacy > Help improve our AI models is about training on your chats, not about this."
+
+[[app]]
+id = "chatgpt"
+name = "ChatGPT"
+apps = [
+    { platform = "macos", id = "com.openai.codex" },
+    { platform = "macos", id = "com.openai.chat" },
+]
+sources = [
+    "https://help.openai.com/en/articles/20001535-managing-chatgpt-desktop-browser-policies-with-mdm",
+    "https://help.openai.com/en/articles/9268871-how-is-data-retained-in-the-macos-app",
+    "https://openai.com/policies/row-privacy-policy/",
+]
+
+[[app.no_setting]]
+covers = ["analytics", "crash_reporting"]
+says = "OpenAI's privacy policy lists usage and log data among what it collects and documents no setting in the app to turn that off. Its setting to stop your chats being used to improve the model is about training, not about this."
+
+[[app]]
+id = "logseq"
+name = "Logseq"
+apps = [{ platform = "macos", id = "com.logseq.logseq" }]
+sources = [
+    "https://github.com/logseq/logseq/blob/533ac4382a7b69baa98de3a973bff90305b212dc/src/main/frontend/components/settings.cljs",
+    "https://github.com/logseq/logseq/blob/533ac4382a7b69baa98de3a973bff90305b212dc/src/main/frontend/modules/instrumentation/core.cljs",
+    "https://github.com/logseq/logseq/blob/533ac4382a7b69baa98de3a973bff90305b212dc/src/resources/dicts/en.edn",
+]
+
+[[app.setting]]
+covers = ["analytics", "crash_reporting"]
+steps = "Settings > Advanced, then turn off Send usage data and diagnostics to Logseq"
+note = "It is on by default. In the app's code the switch stops usage analytics at once, and crash reports from the next time Logseq starts."
+
+[[app]]
+id = "bitwarden-android"
+name = "Bitwarden"
+apps = [{ platform = "android", id = "com.x8bit.bitwarden" }]
+sources = [
+    "https://github.com/bitwarden/android/blob/770d7075cfc8e7fd5d7de6f90410585486b53206/app/src/main/kotlin/com/x8bit/bitwarden/ui/platform/feature/settings/about/AboutScreen.kt",
+    "https://github.com/bitwarden/android/blob/770d7075cfc8e7fd5d7de6f90410585486b53206/app/src/standard/kotlin/com/x8bit/bitwarden/data/platform/manager/LogsManagerImpl.kt",
+    "https://github.com/bitwarden/android/blob/770d7075cfc8e7fd5d7de6f90410585486b53206/ui/src/main/res/values/strings.xml",
+]
+
+[[app.setting]]
+covers = ["crash_reporting"]
+steps = "Settings > About, then turn off Submit crash logs"
+note = "It is on by default. Builds from F-Droid do not show the switch."
+
+[[app]]
+id = "warp"
+name = "Warp"
+apps = [{ platform = "macos", id = "dev.warp.Warp-Stable" }]
+sources = ["https://docs.warp.dev/support-and-community/privacy-and-security/privacy"]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "Settings > Privacy, then turn off Help improve Warp"
+note = "Warp says this stops its product analytics and the content it collects to improve the service, unless your organization's settings enforce them."
+
+[[app.setting]]
+covers = ["crash_reporting"]
+steps = "Settings > Privacy, then turn off Send crash reports, a switch of its own"
+
+[[app]]
+id = "zed"
+name = "Zed"
+apps = [{ platform = "macos", id = "dev.zed.Zed" }]
+sources = ["https://zed.dev/docs/telemetry"]
+
+[[app.setting]]
+covers = ["analytics", "crash_reporting"]
+steps = "open Settings (⌘,) and search for telemetry, then turn off diagnostics (crash reports) and metrics (usage data); in the settings file that is \"telemetry\": { \"diagnostics\": false, \"metrics\": false }"
+note = "What Zed's servers record for its hosted AI and collaboration features is needed for those features, and no setting covers it."
+
+[[app]]
+id = "docker-desktop"
+name = "Docker Desktop"
+apps = [{ platform = "macos", id = "com.docker.docker" }]
+sources = [
+    "https://docs.docker.com/desktop/enterprise/hardened-desktop/settings-management/settings-reference/",
+    "https://docs.docker.com/desktop/settings-and-maintenance/settings/",
+]
+
+[[app.setting]]
+covers = ["analytics", "crash_reporting", "telemetry"]
+steps = "Settings > General, then turn off Send usage statistics"
+note = "Docker describes this one switch as covering diagnostics, crash reports and usage data. It is on by default, and an administrator can lock it."
+
+[[app]]
+id = "github-desktop"
+name = "GitHub Desktop"
+apps = [{ platform = "macos", id = "com.github.GitHubClient" }]
+sources = [
+    "https://docs.github.com/en/desktop/configuring-and-customizing-github-desktop/configuring-basic-settings-in-github-desktop",
+    "https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/preferences/advanced.tsx",
+    "https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/docs/process/usage-data.md",
+]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "GitHub Desktop > Settings > Advanced, then under Usage turn off Help GitHub Desktop improve by submitting usage stats"
+
+[[app]]
+id = "chrome"
+name = "Google Chrome"
+apps = [{ platform = "macos", id = "com.google.Chrome" }]
+sources = ["https://support.google.com/chrome/answer/96817?hl=en&co=GENIE.Platform%3DDesktop"]
+
+[[app.setting]]
+covers = ["crash_reporting", "telemetry"]
+steps = "More > Settings > You and Google > Google services, then turn off Help improve Chrome's features and performance"
+note = "Google says these reports can include personal information, and that a crash report can hold memory from the crash, such as page contents, payment information and passwords."
+
+[[app]]
+id = "chrome-android"
+name = "Google Chrome"
+apps = [{ platform = "android", id = "com.android.chrome" }]
+sources = ["https://support.google.com/chrome/answer/96817?hl=en&co=GENIE.Platform%3DAndroid"]
+
+[[app.setting]]
+covers = ["crash_reporting", "telemetry"]
+steps = "More > Settings > Google Services, then turn off Help improve Chrome's features and performance"
+
+[[app]]
+id = "edge"
+name = "Microsoft Edge"
+apps = [{ platform = "macos", id = "com.microsoft.edgemac" }]
+sources = ["https://support.microsoft.com/en-us/edge/microsoft-edge-browsing-data-and-privacy"]
+
+[[app.setting]]
+covers = ["telemetry"]
+steps = "Settings and more > Settings > Privacy, search, and services > Privacy, then turn off Send optional diagnostic data to improve Microsoft products"
+note = "Edge always sends its required diagnostic data: this switch is for the optional data. Your organization can manage it."
+
+[[app]]
+id = "brave"
+name = "Brave"
+apps = [{ platform = "macos", id = "com.brave.Browser" }]
+sources = [
+    "https://brave.com/privacy/browser/",
+    "https://support.brave.app/hc/en-us/articles/360017905872-How-do-I-enable-or-disable-automatic-crash-reporting-",
+    "https://support.brave.app/hc/en-us/articles/360017989132-How-do-I-change-my-Privacy-Settings",
+]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "Settings > Privacy and Security, then turn off Automatically send completely private product analytics to Brave and Automatically send daily usage ping to Brave"
+
+[[app.setting]]
+covers = ["crash_reporting"]
+steps = "Settings > Privacy and Security > Data Collection, then turn off Automatically send diagnostic reports to Brave"
+note = "An older Brave page calls this switch Help improve Brave's features and performance."
+
+[[app]]
+id = "firefox"
+name = "Firefox"
+apps = [{ platform = "macos", id = "org.mozilla.firefox" }]
+sources = [
+    "https://github.com/mozilla-firefox/firefox/blob/58fed86b1b6864ad71b83c910a879d6f1a6b678b/browser/locales/en-US/browser/preferences/preferences.ftl",
+    "https://www.mozilla.org/en-US/privacy/firefox/",
+]
+
+[[app.setting]]
+covers = ["analytics", "telemetry"]
+steps = "Settings > Privacy and security > Firefox data collection and use, then turn off Send technical and interaction data to Mozilla and Send daily usage ping to Mozilla"
+note = "These settings apply to every Firefox profile on this device."
+
+[[app.setting]]
+covers = ["crash_reporting"]
+steps = "Settings > Privacy and security > Firefox data collection and use, then turn off Automatically send crash reports"
+
+[[app]]
+id = "postman"
+name = "Postman"
+apps = [{ platform = "macos", id = "com.postmanlabs.mac" }]
+sources = [
+    "https://learning.postman.com/docs/getting-started/installation/settings/general-settings/",
+    "https://learning.postman.com/docs/getting-started/installation/settings/settings-overview/",
+]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "Settings > App settings > General, then under Application turn off Send anonymous usage data to Postman"
+
+[[app]]
+id = "1password"
+name = "1Password"
+apps = [{ platform = "macos", id = "com.1password.1password" }]
+sources = [
+    "https://1password.com/legal/privacy",
+    "https://support.1password.com/telemetry/",
+]
+
+[[app.setting]]
+covers = ["analytics"]
+steps = "select your account at the top of the sidebar, then Manage Accounts, the account, Usage data, and deselect Share information about your usage"
+note = "It is off unless you chose to share, and it is set for each account."
+
+[[app.no_setting]]
+covers = ["crash_reporting"]
+says = "1Password's privacy policy lists software errors and crash data among what it collects, and documents no setting to turn that off."
+
+[[app]]
+id = "raycast"
+name = "Raycast"
+apps = [{ platform = "macos", id = "com.raycast.macos" }]
+sources = [
+    "https://manual.raycast.com/settings",
+    "https://www.raycast.com/faq",
+]
+
+[[app.no_setting]]
+covers = ["analytics", "crash_reporting"]
+says = "Raycast says it saves usage statistics and error reports to fix bugs and improve the app, and documents no setting to turn that off."
 
 # Datadog's browser SDK sends to one intake host per Datadog site.
 [[sdk]]

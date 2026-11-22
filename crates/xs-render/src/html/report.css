@@ -82,8 +82,33 @@ section { margin-top: 2.5rem; }
 .count .n { font-size: 2.4rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .count .label { font-weight: 600; margin-top: 0.25rem; }
 .count .sub { color: var(--soft-ink); font-size: 0.85rem; margin-top: 0.35rem; }
-#summary h3 { margin-top: 1.5rem; margin-bottom: 0.5rem; }
+#summary h3 { margin-top: 1rem; margin-bottom: 0.5rem; }
 .lead { font-size: 1.25rem; font-weight: 600; }
+.status { font-size: 1rem; }
+.first { list-style: none; margin-top: 0.9rem; padding: 0; }
+.first > li {
+  border: 1px solid var(--rule);
+  border-left: 0.3rem solid var(--rule);
+  border-radius: 0.5rem;
+  padding: 0.7rem 1rem 0.8rem;
+}
+.first > li.first-high { border-left-color: var(--high-ink); }
+.first > li.first-medium { border-left-color: var(--medium-ink); }
+.first > li + li { margin-top: 0.5rem; }
+.first p + p { margin-top: 0.3rem; }
+.do { font-size: 0.95rem; }
+.do-label { font-weight: 600; }
+details.more { margin-top: 0.9rem; }
+details.more > summary, details.hosts > summary {
+  color: var(--link);
+  cursor: pointer;
+  font-weight: 600;
+}
+details.more > summary:hover, details.hosts > summary:hover { text-decoration: underline; }
+details.more[open] > summary { margin-bottom: 0.6rem; }
+details.hosts { margin-top: 0.3rem; }
+details.hosts > summary { font-size: 0.9rem; font-weight: 500; }
+details.hosts p { margin-top: 0.3rem; }
 .found { list-style: none; margin-top: 0.75rem; padding: 0; }
 .found li { border: 1px solid var(--rule); border-radius: 0.5rem; padding: 0.7rem 1rem 0.8rem; }
 .found li + li { margin-top: 0.5rem; }
@@ -179,6 +204,16 @@ th { color: var(--soft-ink); font-size: 0.8rem; font-weight: 600; white-space: n
   text-transform: uppercase;
   vertical-align: 0.1em;
 }
+#actions {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 0.75rem;
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+#actions > h2 { padding-top: 0; }
+#actions .checklist > li, #actions .none { background: var(--page); }
+#actions code { background: var(--panel); }
+#actions .checklist > li:target { background: var(--mark); }
 .p-high { background: var(--high-bg); color: var(--high-ink); }
 .p-medium { background: var(--medium-bg); color: var(--medium-ink); }
 .p-low { background: var(--low-bg); color: var(--low-ink); }
@@ -192,6 +227,9 @@ th { color: var(--soft-ink); font-size: 0.8rem; font-weight: 600; white-space: n
 .todo-head { font-weight: 600; }
 .todo-head strong { font-size: 1.05rem; }
 .finding .todo-head { font-size: 0.9rem; margin-top: 0.9rem; }
+.finding details.more { margin-top: 0.5rem; }
+.finding details.more > summary { font-size: 0.9rem; }
+.finding details.more[open] > summary { margin-bottom: 0; }
 .steps { margin-top: 0.4rem; padding-left: 1.3rem; font-size: 0.925rem; }
 .steps li { list-style: "☐  "; }
 .steps li + li { margin-top: 0.3rem; }
@@ -209,6 +247,8 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
 @media (max-width: 34rem) {
   body { padding: 1.25rem 0.9rem 3rem; }
   h1 { font-size: 1.7rem; }
+  #actions { border-radius: 0.5rem; margin-left: -0.4rem; margin-right: -0.4rem; padding: 0.9rem 0.75rem 1rem; }
+  .checklist > li, .first > li { padding: 0.65rem 0.8rem 0.75rem; }
   .facts { grid-template-columns: 1fr; gap: 0; }
   .facts dt { margin-top: 0.4rem; }
 }
@@ -232,7 +272,13 @@ pre { margin-top: 0.4rem; white-space: pre-wrap; }
   a { text-decoration: none; }
   section { margin-top: 1.6rem; }
   h2, h3, h4, h5 { break-after: avoid; }
-  .count, .finding, .record, .evidence li, .found li, .checklist > li, tr { break-inside: avoid; }
+  .count, .finding, .record, .evidence li, .found li, .checklist > li, .first > li, tr { break-inside: avoid; }
   .scroll { overflow: visible; }
   .grade, .tag, .prio { border: 1px solid #888888; }
+  #actions { border: none; padding: 0; }
+}
+/* On paper nothing can be opened, so what is closed prints open. A browser
+   that does not know the pseudo-element drops this rule and no other. */
+@media print {
+  details::details-content { content-visibility: visible; display: block; }
 }

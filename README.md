@@ -209,25 +209,29 @@ $ exposure scan
 That is all. On macOS it reads the apps in `/Applications` and
 `~/Applications` and the extensions in your browser profiles, writes the
 report to `~/Library/Application Support/exposure/report.html`, opens it in
-your browser, and prints what to do first. The output looks like this (the
-apps and counts here are made up):
+your browser, and prints what needs your attention first. The output looks
+like this (the apps and counts here are made up):
 
 ```text
 Your report: /Users/you/Library/Application Support/exposure/report.html
 It is open in your browser.
 
 Scanned 16 apps and 4 browser extensions.
-  3 companies whose code the scanned apps ship, in advertising, analytics and the like
-  7 apps with code or an endpoint of a company other than their publisher
 
-What you can do first (5 of 14):
+What needs your attention first (5 of 14 things you can do):
 
   1. [High] PostHog
-       Analytics, by PostHog Inc., in 2 apps: Logseq and Example
+       Analytics by PostHog Inc., in Logseq and Example.
        Block app.posthog.com, eu.i.posthog.com, i.posthog.com and
        us.i.posthog.com with an outbound firewall such as LuLu (free) or Little
        Snitch.
   ...
+
+9 more entries in the report, under What you can do.
+
+The headline counts:
+  3 companies whose code the scanned apps ship, in advertising, analytics and the like
+  7 apps with code or an endpoint of a company other than their publisher
 ```
 
 Nothing is sent anywhere, and nothing on your Mac is changed: the report says
@@ -381,8 +385,10 @@ be recounted from the claims. A host under no domain the rule pack lists is
 **unmapped**: it is shown as itself, nobody is named as its owner, and it is
 counted nowhere.
 
-The HTML report has a **What you can do** checklist near the top, and steps
-under every finding: an app's own opt-out where its publisher documents one;
+The HTML report opens with **What needs your attention**: the few entries of
+its **What you can do** checklist that matter most, each in one sentence with
+its first step. The whole checklist follows, and every finding has its steps
+too: an app's own opt-out where its publisher documents one;
 hosts to block with an outbound firewall such as LuLu or Little Snitch, given
 only for the counted categories and declared tracking domains; the
 **System Settings > Privacy & Security** pane, or the Android
