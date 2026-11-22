@@ -89,7 +89,17 @@ $ cargo deny check
 $ cargo xtask pack check
 $ cargo xtask guardrails
 $ cargo xtask no-network
+$ cargo xtask difftest
 ```
+
+`cargo xtask difftest` builds `origin/main` and your working tree, scans the
+committed fixtures and a corpus it makes from the rule pack with both, and
+fails unless every report of your build is the same as main's, byte for
+byte: without the cache, on one thread, and with the cache empty and full.
+Add paths to scan more, such as `/Applications` or a folder of real apps. A
+change that is meant to change what is reported passes `--expect-changes`,
+which lists the differences and succeeds; CI does that when a change touches
+the rules or the committed fixture reports.
 
 If a change alters a report, the committed fixture reports under
 `tests/fixtures/` must change with it. Regenerate them with
