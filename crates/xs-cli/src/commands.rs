@@ -84,8 +84,8 @@ pub(crate) fn print(text: &str) -> Result<()> {
 /// writing the report truncates whatever file of the user's it leads to.
 /// So:
 ///
-/// - A `path` that is a symbolic link to a file, a folder or nothing is
-///   refused. A link to a device or a stream, such as `/dev/stdout` or the
+/// - A `path` that is a symbolic link to a file, a folder, nothing or what
+///   cannot be looked at is refused. A link to a device or a stream, such as `/dev/stdout` or the
 ///   `/dev/fd/N` of a shell's process substitution, is written to as that
 ///   device is, below.
 /// - A report is written to a new file next to `path`, created for this
@@ -111,8 +111,9 @@ fn deliver(report: &str, path: Option<&Path>) -> Result<()> {
                     .map_err(fail)
             }
             _ => Err(format!(
-                "cannot write {}: it is a symbolic link to a file, and a report is never \
-                 written through one; remove the link or choose another file",
+                "cannot write {}: it is a symbolic link that does not lead to a device or \
+                 stream, and a report is never written through such a link; use {STDOUT} for \
+                 standard output, or choose another file",
                 path.display()
             )),
         },
