@@ -53,8 +53,8 @@ impl NotChecked {
 
 /// The subjects of `evidence` the scan could not look at at all: those with
 /// a coverage record about the whole of them, for want of a privilege or
-/// because the read was refused, and no artifact record, which a subject
-/// the scan did read has. A browser some of whose extensions were read says
+/// because the read was refused, and no artifact record of files read, which
+/// a subject the scan did read has. A browser some of whose extensions were read says
 /// so. In the order of the subjects.
 #[must_use]
 pub fn not_checked(evidence: &EvidenceSet) -> Vec<NotChecked> {
@@ -80,7 +80,9 @@ pub fn not_checked(evidence: &EvidenceSet) -> Vec<NotChecked> {
             }
             Record::Artifact(artifact) => {
                 let subject = &artifact.subject;
-                artifacts.insert((subject.kind, subject.platform, subject.id.as_str()));
+                if artifact.facts.files_scanned > 0 {
+                    artifacts.insert((subject.kind, subject.platform, subject.id.as_str()));
+                }
                 if let Some(browser) = artifact.facts.browser {
                     read.insert(browser);
                 }
@@ -258,11 +260,39 @@ mod tests {
                 v: V1,
                 collector: Collector::MacosBundle,
                 subject: app.clone(),
-                facts: Facts { name: Some("Example".into()), ..Facts::default() },
+                facts: Facts {
+                    name: Some("Example".into()),
+                    files_scanned: 41,
+                    ..Facts::default()
+                },
             }),
             refused(app, Collector::MacosBundle),
         ]));
         assert_eq!(found, []);
+    }
+
+    #[test]
+    fn an_app_whose_top_folder_could_not_be_listed_is_named() {
+        let app = subject(
+            SubjectKind::App,
+            Platform::Macos,
+            "Locked.app",
+            SubjectDigest::Bundle(Sha256Digest::of(b"")),
+        );
+        let found = not_checked(&set([
+            Record::Artifact(ArtifactRecord {
+                v: V1,
+                collector: Collector::MacosBundle,
+                subject: app.clone(),
+                facts: Facts::default(),
+            }),
+            refused(app, Collector::MacosBundle),
+        ]));
+        assert_eq!(
+            found.iter().map(NotChecked::sentence).collect::<Vec<_>>(),
+            vec!["Locked.app. The system refused the read, or the file changed while it was read."]
+        );
+        assert_eq!(found[0].kind, SubjectKind::App);
     }
 
     #[test]
