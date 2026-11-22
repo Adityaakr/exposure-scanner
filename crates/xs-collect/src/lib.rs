@@ -269,12 +269,12 @@ fn collect<'c>(
     cache: Option<&'c Cache>,
 ) -> Result<(EvidenceSet, ScanStats), EvidenceError> {
     // Listing is stat-bound and independent per artifact.
-    let bundles: Vec<Listed<'c, macos::Plan>> = pool.map(&found.bundles, |root| {
+    let bundles: Vec<Listed<'c, macos::Plan>> = pool.map_io(&found.bundles, |root| {
         let plan = macos::plan(root);
         let slot = cache.map(|cache| cache.slot(Kind::Bundle, root, plan.state()));
         Listed::new(plan, slot)
     });
-    let packages: Vec<Listed<'c, u64>> = pool.map(&found.packages, |path| {
+    let packages: Vec<Listed<'c, u64>> = pool.map_io(&found.packages, |path| {
         // A package that cannot even be measured is found out when it is
         // read; where it stands in the queue until then does not matter.
         let metadata = fs::metadata(path).ok();
@@ -364,7 +364,9 @@ fn collect<'c>(
     }
     if cache.is_some() {
         // One small file per artifact that was read, each on its own.
-        pool.map(&artifacts, |(result, slot)| slot.as_ref().is_some_and(|slot| slot.store(result)));
+        pool.map_io(&artifacts, |(result, slot)| {
+            slot.as_ref().is_some_and(|slot| slot.store(result))
+        });
     }
 
     let mut evidence = EvidenceSet::new();
